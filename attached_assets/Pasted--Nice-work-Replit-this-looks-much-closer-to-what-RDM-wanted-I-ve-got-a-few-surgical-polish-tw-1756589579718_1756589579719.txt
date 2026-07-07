@@ -1,0 +1,82 @@
+👏 Nice work, Replit — this looks much closer to what @RDM wanted. I’ve got a few surgical polish tweaks you can drop in to finish it off, plus a couple of perf/UX guardrails.
+
+Micro-polish (safe + low risk)
+
+Bottom safe-area padding inside the sheet
+Prevents content from sitting under the home bar.
+
+// DrawerContent wrapper (keep your existing classes)
+<DrawerContent
+  className="... pb-[calc(env(safe-area-inset-bottom)+12px)] ..."
+>
+
+
+Map drag lock when sheet is high
+Disable map pan when the sheet is ≥50% open; re-enable when collapsed.
+
+// IncidentSheet.tsx
+type Props = { open: boolean; onOpenChange: (v:boolean)=>void; onHeightChange?: (p:number)=>void };
+// Vaul has onOpenChange; if you expose snap progress (or boolean like isExpanded):
+useEffect(() => {
+  const map = window.__NN_LEAFLET__ as L.Map | undefined; // or pass via context/prop
+  if (!map) return;
+  const disable = /* isExpanded >= 0.5 */ open; // replace with your real flag
+  map.dragging[disable ? "disable" : "enable"]();
+  map.scrollWheelZoom[disable ? "disable" : "enable"]();
+}, [open]);
+
+
+Subtle top shadow to signal scroll
+Keeps the header readable and hints that the list scrolls (no gradient wash).
+
+// Inside DrawerContent (last child so it sits above content)
+<div className="pointer-events-none absolute inset-x-0 top-0 h-6 rounded-t-3xl
+                shadow-[0_8px_12px_-8px_rgba(0,0,0,0.35)] dark:shadow-[0_8px_12px_-8px_rgba(0,0,0,0.8)]" />
+
+
+Light-mode cards: nudge contrast
+You’re at bg-white/98; give cards a hair more separation:
+
+<Card className="bg-white shadow-[0_4px_14px_rgba(0,0,0,0.06)] border border-border/60 rounded-2xl dark:backdrop-blur-md dark:bg-white/5 dark:border dark:border-white/10" />
+
+
+Chip tokens (AA contrast)
+
+Selected: bg-foreground text-white (dark: bg-white text-black)
+
+Unselected: bg-black/5 text-foreground/85 (dark: bg-white/10 text-white/85)
+
+Performance guardrails
+
+You don’t need backdrop-blur in light now that the surface is solid — drop it to save GPU:
+
+- bg-white/98 border ... backdrop-blur-md
++ bg-white/98 border ...
+
+
+On the scroll container holding incidents, add:
+
+<div className="content-visibility-auto contain-intrinsic-size-[600px]" />
+
+
+This defers painting off-screen lists on low-end phones.
+
+Overlay behavior (optional)
+If you want the top of the map clickable when the sheet is at the 20% “peek” snap, make the overlay conditional:
+
+<DrawerOverlay className={cn(
+  "fixed inset-0 z-[54] transition-opacity",
+  isExpanded ? "bg-black/10 dark:bg-black/40" : "pointer-events-none bg-transparent"
+)} />
+
+Quick QA
+
+Light mode: header & list remain crisp over the dimmed map; chips/buttons pass AA (≈4.5:1).
+
+Dark mode: unchanged from your “good” screenshot.
+
+iPhone/Pixel/Samsung: no content clipped by the home bar (thanks to the pb-[env(...)]).
+
+Map can’t pan when sheet is expanded; can pan normally when collapsed.
+
+If you want me to write the tiny isExpanded plumbing for Vaul (snap points + overlay toggle), say the word and I’ll drop in a minimal, copy-paste snippet tailored to your IncidentSheet component.

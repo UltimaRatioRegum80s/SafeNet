@@ -1,0 +1,83 @@
+Phase 3C — Item 6: Long-press (3s) express report (high sensitivity)
+
+Please implement a 3-second long-press on the existing Map FAB (+) that triggers an express report submission with no text/context required.
+
+Intent:
+
+Allow rapid reporting when user cannot type
+
+Must remain legally conservative and resist accidental submissions
+
+Scope (strict):
+
+Gesture UX
+
+Long-press duration: 3.0 seconds
+
+Show a visible progress ring while holding
+
+If user releases early → cancel (no submission)
+
+If user drags/moves finger beyond a small threshold → cancel
+
+Provide haptic/vibration where supported (optional, graceful fallback)
+
+Submission behavior
+
+On successful hold completion, submit an incident using the existing reporting pipeline (same validation + server enforcement).
+
+No note text (empty/omitted).
+
+Must use a single pre-defined, existing incident type (do NOT invent a new type).
+
+Choose the lowest-risk, most neutral existing type (e.g., “General / Other / Observation” if available).
+
+If uncertain, pause and ask me which existing type to use.
+
+Undo / safety brake (required)
+
+After submit, show an UNDO affordance (toast/banner) for 10 seconds.
+
+If user taps UNDO within window: issue a delete/cancel if supported, or otherwise mark/withdraw via the safest existing mechanism.
+
+If no safe undo is technically possible without backend changes, pause and report that constraint before proceeding.
+
+Rate limiting / cooldown
+
+Add a client-side cooldown (e.g., 30 seconds) for long-press submissions to reduce spam/accidents.
+
+Server-side rules must remain as-is (do not weaken any limits).
+
+Kill-switch / gating
+
+This feature must be gated so it can be disabled instantly.
+
+Respect existing INCIDENT_CREATION_ENABLED / relevant kill-switch checks.
+
+If you add a new flag, it must be default OFF until I enable it (e.g., EXPRESS_REPORT_ENABLED=false).
+
+Out of scope (do NOT change):
+
+No new report types or categories
+
+No backend/schema changes unless I explicitly approve (pause first)
+
+No changes to normal report flow steps (this is additive)
+
+No map camera/viewport logic changes (Prime Directive: user owns viewport)
+
+Acceptance tests (required):
+
+Short tap on FAB still goes to /community/report (existing behavior unchanged)
+
+Long-press shows progress ring; releasing early cancels reliably
+
+Long-press completion submits exactly one report, no duplicates on jittery input
+
+Undo works within 10s (or you pause if undo cannot be made safe without backend work)
+
+Kill switch disables express submission
+
+No map snap-back / viewport regressions
+
+Note: I’m short on weekday time — build today, and I’ll field-test later this week and report evidence back.

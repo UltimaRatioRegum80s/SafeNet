@@ -1,0 +1,52 @@
+@Replit — make MarkerCluster visible on mobile (CSS-only, Progress-safe)
+1) Add explicit CSS links (global)
+
+File: client/index.html → inside <head>…</head> add these three lines:
+
+<!-- NN: force-load Leaflet + MarkerCluster CSS globally (PWA safe) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css?v=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css?v=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css?v=1">
+
+
+Keep the existing import lines in main.tsx; these <link>s just guarantee styles load even if code-splitting/PWA caching skips the module CSS. The ?v=1 query helps bust old SW caches.
+
+2) (Optional) Bust stale SW cache in dev
+
+In Chrome DevTools → Application → Service Workers → check Bypass for network and hard-reload once.
+Or run in Console:
+
+caches?.keys?.().then(keys => keys.forEach(k => caches.delete(k)));
+location.reload();
+
+3) Verify (Console, on the map route)
+
+With the page open (preferably in a separate tab, not the iframe):
+
+({
+  clusterLayers: window._cluster?.getLayers().length,
+  clusterEls: document.querySelectorAll('.marker-cluster').length,
+  size: (() => {
+    const el = document.querySelector('.marker-cluster');
+    if (!el) return 'n/a';
+    const s = getComputedStyle(el);
+    return `${s.width} × ${s.height} / ${s.display}`;
+  })()
+})
+
+
+Expected: clusterLayers: 50, clusterEls: >0, size: not 0px × 0px (e.g., 40px × 40px / block).
+You should also see blue cluster bubbles at low zoom, and markers at higher zoom.
+
+4) Commit
+chore(css): force-load Leaflet + MarkerCluster CSS via index.html to fix PWA/mobile visibility
+
+Why this works
+
+MarkerCluster renders clusters as .marker-cluster elements. Without its CSS those elements have no width/height, so they’re invisible even though layers exist. Adding the <link>s ensures the CSS is present in all builds/paths, independent of Vite’s chunking or the PWA SW.
+
+Rollback
+
+Remove the three <link> tags if needed. Desktop is unaffected by this change (it already had the styles); this only fixes mobile where the CSS wasn’t being applied.
+
+If clusters still don’t show after this, paste the verification object result back (especially the size value). If size is non-zero and you still can’t see bubbles, I’ll give a one-liner to route marker/cluster icons to a top pane (z-index 999999) under the mobile flag—but 9/10 times, loading these CSS files fixes it immediately.

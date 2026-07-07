@@ -1,0 +1,129 @@
+Subject: Phase 3D — Tier 1 kickoff (Landing page + Domain migration prep)
+
+Hi Replit — we’re starting Phase 3D Tier 1 only. This is Distribution & Trust Surface (Phase 3D-B) and must not touch core app behavior.
+
+Governance / Scope Guard
+
+IN SCOPE: landing page + trust pages + install cues + domain migration prep
+
+OUT OF SCOPE: any auth changes, any incident/feed/map behavior changes, any schema changes, any “growth” mechanics, any analytics, any new features
+
+Preserve Phase 2/v1.0 baseline behaviors exactly.
+
+1) Landing Page (public “front door”)
+Goal
+
+A stranger should understand NaborNet in <60 seconds:
+
+what it is
+
+what it is not
+
+no emergency / no authority claims
+
+safe, calm tone
+
+Implement
+
+Create a small public marketing shell (static-ish pages) with simple routing:
+
+Routes (suggested):
+
+/ → Landing page
+
+/about → About
+
+/how-it-works → How it works
+
+/safety → Safety & limitations
+
+Landing page sections (minimum):
+
+Hero: “NaborNet — community safety & situational awareness”
+
+“What this is” (bullets)
+
+“What this is not” (bullets) — explicitly NOT emergency/police/verification
+
+“How it works” (3–5 steps)
+
+“Install as an app” (Add to Home Screen guidance)
+
+CTA buttons:
+
+“Open the app” → existing app entry route (keep gating)
+
+“How it works” → /how-it-works
+
+Content source (canonical)
+
+Use the already-approved plain-language explanation content we’ve stored (do not invent stronger claims).
+
+Acceptance criteria
+
+Understandable in <60 seconds
+
+No implication of emergency response or authority
+
+No broken routes
+
+Mobile-first layout
+
+2) PWA Install Cues (light, non-annoying)
+Goal
+
+Help legit users install without dark patterns.
+
+Implement
+
+On landing page only:
+
+Small “Install” section with:
+
+Android Chrome: “⋮ → Add to Home screen”
+
+iOS Safari: “Share → Add to Home screen”
+
+If you already have a PWA install prompt capability, keep it subtle and dismissible. No repeated nagging.
+
+Acceptance criteria
+
+Doesn’t spam prompts
+
+Doesn’t block navigation
+
+Works on mobile
+
+3) Domain Migration Prep (NaborNet.io)
+Goal
+
+Prepare the app to serve from nabornet.io cleanly.
+
+Tasks
+
+Identify all places where absolute URLs / callback URLs are assumed.
+
+Ensure cookie/session config will work on the new domain (no breaking SameSite issues).
+
+Prepare a short checklist for DNS + deploy steps.
+
+Do NOT execute DNS changes in code.
+Just prepare for clean migration.
+
+Acceptance criteria
+
+Written checklist for the owner to execute domain migration
+
+App routes still work the same on current domain
+
+No auth regressions
+
+Deliverables
+
+Landing + 3 subpages live in app
+
+Install guidance section included
+
+Domain migration prep checklist (short, practical)
+
+Confirm: no schema, auth, feed/map changes

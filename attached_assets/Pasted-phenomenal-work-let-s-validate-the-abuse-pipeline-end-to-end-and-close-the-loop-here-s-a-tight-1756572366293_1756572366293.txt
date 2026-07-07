@@ -1,0 +1,103 @@
+phenomenal work 👏 — let’s validate the abuse pipeline end-to-end and close the loop. here’s a tight test script you can run now, plus a couple of “watch fors” and toggles.
+
+🔎 E2E test script (8–10 min)
+1) Basic abuse report (user)
+
+Open an incident card → click Report → choose Spam → submit.
+
+Expect: 201 toast, cooldown enforced (try spamming 6×/min → blocked).
+
+DB: abuse_reports has row with reason='spam', reporter_user_id (or NULL for anon).
+
+2) Auto-shadow by velocity (creation-time)
+
+Quickly post 4 incidents in <120s from same account/IP.
+
+Expect: last one has is_shadow_hidden=true.
+
+Public feed: hidden. Reporter & staff views: visible and labeled (if you surface a tag).
+
+Socket: incident:flagged emitted to moderators and nh:{city}:{neighbourhood}:staff.
+
+3) Text similarity / near-duplicate
+
+Post an incident, then another within 5 min with same/similar text and ~same location.
+
+Expect: second is shadowed; appears in mod queue with report_count >= 0.
+
+4) Moderator queue actions
+
+As moderator, open /admin/moderation.
+
+Approve one item → it becomes public; socket incident:moderated {action:'approve'} fires.
+
+Reject another → remains hidden; public feed does not show it.
+
+5) Anonymous flows
+
+Log out → report abuse on a public incident.
+
+Expect: row with reporter_user_id = NULL, still rate-limited, mod queue updates.
+
+6) Neighborhood-scoped staff rooms
+
+Moderator A (Academia) & Moderator B (Khomasdal) both online.
+
+Shadow an Academia incident → only A gets incident:flagged in nh:Academia:*:staff; both get global moderators if you wired both (confirm intended scope).
+
+7) Push integration sanity
+
+Create a shadowed incident → no public push sent.
+
+Approve it → (optional policy) push now? confirm your current setting (likely no retro push).
+
+🧪 Quick API & SQL spot checks (optional)
+
+Create abuse report
+
+curl -s -X POST http://localhost:5000/api/incidents/<ID>/abuse-report \
+  -H 'Content-Type: application/json' -b cookie.txt \
+  -d '{"reason":"spam","note":"test"}' | jq
+
+
+Queue
+
+curl -s -X GET http://localhost:5000/api/moderation/queue -b mod_cookie.txt | jq '.items | length'
+
+
+Visibility
+
+-- public query should exclude shadow unless reporter or staff
+SELECT COUNT(*) FROM incidents WHERE is_shadow_hidden = true; -- confirm hidden set
+
+👀 Watch fors / logs
+
+pg_trgm: confirm extension present; similarity queries fast (index exists).
+
+Rate limiter keys: ensure you use userId OR IP (anon) consistently.
+
+Socket joins: verify staff sockets join moderators and nh:*:staff on connect (one log line helps).
+
+toApiIncident: still hides userId for public while admins see it.
+
+Error copy: abuse report rate-limit → friendly message, not generic 429.
+
+🧰 Feature toggles (fast switches)
+
+AUTO_SHADOW_ENABLED (env): quickly disable heuristics if needed.
+
+ABUSE_THRESHOLD: count of reports to auto-surface in queue (currently 2).
+
+SIMILARITY_MIN: default 0.5; tweak if false positives.
+
+📊 Metrics to watch (aligns with @RDM goals)
+
+abuse_reported {reason}
+
+incident_shadowed {rule}
+
+moderation_action {action, tta_ms}
+
+Funnel: incidents created → % shadowed → % approved → median TTA.
+
+if you hit anything odd in the checks above (e.g., public feed still shows a shadowed item), tell me the exact case and I’ll drop a pinpoint patch. otherwise, once this passes, we can choose the next milestone: Notification Center (in-app inbox & mutes), Offline incident queue, or Performance pass (thumb variants + srcset).

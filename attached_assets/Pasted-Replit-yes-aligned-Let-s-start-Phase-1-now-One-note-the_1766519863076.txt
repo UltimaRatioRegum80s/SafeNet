@@ -1,0 +1,60 @@
+Replit — yes, aligned. Let’s start Phase 1 now.
+
+One note: the (lat-lat0)^2 + (lng-lng0)^2 approach treats degrees like km and longitude like constant distance, so radius accuracy will be off. For beta, can we do bounding-box prefilter + haversine (or Postgres earthdistance if available)? Still simple, much more correct.
+
+PHASE 1: Radius/time-based feed query (no room dependency)
+
+A) Define feed parameters
+- Inputs:
+  - center_lat, center_lng (device location or user home pin fallback)
+  - radius_km (default 5km; allow 1/3/5/10)
+  - time_window_hours (default 72h; allow 24h/72h/7d)
+  - optional: severity, category
+- Output: incidents sorted by created_at desc (or distance asc then created_at desc)
+
+B) Backend endpoint
+Create:
+GET /api/incidents/nearby?lat=...&lng=...&radiusKm=...&hours=...&severity=...&category=...
+
+C) Query logic (beta-safe + accurate)
+1) Time filter:
+- created_at >= now() - interval '{hours} hours'
+
+2) Bounding box prefilter (fast)
+Compute:
+- lat_delta = radius_km / 111.32
+- lng_delta = radius_km / (111.32 * cos(radians(center_lat)))
+
+SQL prefilter:
+- latitude BETWEEN center_lat - lat_delta AND center_lat + lat_delta
+- longitude BETWEEN center_lng - lng_delta AND center_lng + lng_delta
+
+3) Distance filter (haversine)
+- Filter using haversine in SQL or in code after prefilter.
+- Return only incidents with distance <= radius_km.
+
+D) Remove room dependency
+- Update feed logic so it no longer checks membership/room_id.
+- Leave room tables intact; just stop using them for feed visibility.
+
+E) Frontend changes
+- Feed page calls /api/incidents/nearby with device location (fallback home pin).
+- Add radius selector + time filter.
+- Keep “Show on map” working (map reflects same incidents set).
+
+F) Basic tests
+- Create two incidents: one inside radius, one outside.
+- Verify feed returns correct.
+- Verify time window excludes older incidents.
+- Verify auth policy is correct (whatever we currently use).
+
+If you’re good with this plan, please start with:
+1) endpoint + query + bounding box/haversine
+2) update feed page to use it
+3) confirm feed works without rooms
+
+Then we’ll move to Phase 2 (structured responses).
+
+Two quick confirmations needed:
+1) Are lat/lng stored as decimal degrees currently?
+2) What is the current API route the feed is using, so we can swap it cleanly?

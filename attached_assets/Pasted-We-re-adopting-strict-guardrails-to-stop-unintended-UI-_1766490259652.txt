@@ -1,0 +1,70 @@
+We’re adopting strict guardrails to stop unintended UI/UX + architecture drift.
+
+## TASK (Phase 1: Repo guardrails first, NO refactors)
+Create the following files at repo root:
+
+1) CONTRIBUTING.md
+Include:
+- “No refactors unless explicitly requested.”
+- “No while-I’m-here edits.”
+- “Do not introduce new abstractions without approval.”
+- “No file moves/renames without approval.”
+- 🔴 DO-NOT-TOUCH files unless explicitly authorized:
+  - server/routes.ts (auth/session logic)
+  - client/src/lib/auth.ts
+  - client/src/lib/syncEngine.ts
+  - client/src/lib/offlineDb.ts
+  - client/public/sw.js
+  - shared/schema.ts
+  - client/src/components/LegalGate.tsx
+- For any change >10 lines: list files changed + what changed + why + risks.
+- Checkpoint discipline: commit/checkpoint after each small step.
+
+2) SPEC_TEMPLATE.md
+Use this exact template:
+## Task
+## Acceptance Criteria
+- [ ]
+## Must NOT Change
+- 
+## Test Cases
+- 
+## Rollback
+-
+
+3) TEST_PLAN.md
+One page:
+- Priority-1 E2E tests (Playwright): LegalGate blocks until accepted; verified user can create incident; unverified user cannot; kill switch blocks incident creation (if flag exists); offline indicator appears.
+- Minimum unit tests (later): syncEngine retry logic; offlineDb CRUD; idempotency key generation.
+- Manual smoke checklist: kill switches, auth flow, consent gate, mobile 375px layout.
+
+### ACCEPTANCE CRITERIA (Phase 1)
+- [ ] Only these 3 markdown files are added/changed.
+- [ ] No other code changes at all.
+
+When Phase 1 is committed/checkpointed, proceed to Phase 2.
+
+---
+
+## TASK (Phase 2: Add Playwright E2E with surgical scope)
+Add Playwright and make it runnable via a single command (e.g. `npm run test:e2e`).
+
+### HARD CONSTRAINTS (Phase 2)
+- NO refactors.
+- No changes to app behavior.
+- Do NOT modify 🔴 files unless you ask AND I explicitly approve in writing.
+- If you need test hooks (seed users etc.), add the smallest possible mechanism behind `E2E_TEST_MODE=true` so production behavior is unchanged.
+
+### IMPLEMENT THESE E2E TESTS (one-by-one, checkpoint after each)
+1) LegalGate blocks until accepted.
+2) Verified user can create incident (form → API → success).
+3) Unverified user cannot create incident.
+4) Kill switch blocks incident creation (only if the flag exists; otherwise skip).
+5) Offline indicator appears (basic).
+
+### DONE CRITERIA (Phase 2)
+- [ ] `npm run test:e2e` passes locally in Replit.
+- [ ] Provide a short report: files changed, how to run, what each test covers.
+
+### CLARIFYING QUESTION RULE
+Only ask a question if ambiguity would require touching 🔴 files or changing user-facing flows. Otherwise choose the safest minimal path and continue.

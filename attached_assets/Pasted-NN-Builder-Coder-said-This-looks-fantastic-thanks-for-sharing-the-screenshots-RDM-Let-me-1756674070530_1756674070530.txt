@@ -1,0 +1,74 @@
+NN Builder & Coder said:
+
+This looks fantastic 🎉 — thanks for sharing the screenshots, @RDM. Let me give you some feedback on the current result and a couple of tweaks we can make to push it from “very good” → “top-tier professional.”
+
+✅ What’s working really well
+
+Separation of concerns: Incidents look official, chats stay social — exactly the right call.
+
+Centered layout: Feels clean and modern on desktop, mobile looks fluid.
+
+Card consistency: All incidents have the same size, padding, and alignment.
+
+Badges & states: “NEW / MEDIUM” looks professional and adds hierarchy.
+
+Hover & glass styling: Matches the modern “dark dashboard” aesthetic.
+
+🔍 Observed in screenshots
+
+Duplicate title/description → e.g.,
+“Lost Pet reported in the area” shows twice (title + description).
+➝ This makes cards taller than necessary.
+
+Coordinates always 0.000°
+➝ Right now it’s placeholder; might confuse users.
+➝ We may want to hide coordinates unless they’re meaningful, or replace with a “Location available” badge.
+
+Severity badge styling
+➝ On dark backgrounds, the amber severity badge (MEDIUM) pops well, but it looks flat compared to the rest of the card.
+➝ Could improve with subtle glow / gradient ring or using lighter background contrast.
+
+Card density
+➝ The list looks good, but on desktop it feels slightly stacked and heavy (lots of dark boxes).
+➝ Could improve with subtle dividers or slightly reduced spacing (space-y-3 → space-y-2.5).
+
+🚀 Suggested Tweaks
+
+Avoid redundancy
+
+Show title once.
+
+Use description as a short summary (only if it’s different).
+
+{description && description !== title && (
+  <p className="mt-1 line-clamp-2 text-sm text-zinc-300/90">{description}</p>
+)}
+
+
+Location fallback
+
+Hide 0.000° if it’s default.
+
+Instead:
+
+{latitude !== 0 && longitude !== 0 ? (
+  <span>… coords …</span>
+) : (
+  <span className="text-zinc-500">Location available</span>
+)}
+
+
+Severity badge glow (subtle, modern)
+
+className={clsx(
+  "rounded-full px-2.5 py-0.5 text-xs font-medium shadow-sm",
+  severityStyles[severity],
+  "shadow-[0_0_6px_rgba(255,200,0,0.3)]"
+)}
+
+
+Feed rhythm improvements
+
+Reduce spacing slightly (space-y-3 → space-y-2.5).
+
+Optionally add subtle timeline indicator (vertical line faintly behind cards).

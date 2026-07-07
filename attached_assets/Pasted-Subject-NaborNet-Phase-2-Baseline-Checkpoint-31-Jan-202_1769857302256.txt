@@ -1,0 +1,82 @@
+Subject: NaborNet – Phase 2 Baseline Checkpoint (31 Jan 2026)
+
+Hi Replit team 👋
+
+I’d like us to pause briefly and do a Phase 2 Baseline Checkpoint for NaborNet.
+
+The goal here is not new features, but to:
+
+confirm shared understanding of what is currently deployed and true
+
+formally lock the Phase 2 baseline
+
+prevent accidental drift as we move forward
+
+This is a governance + engineering alignment check.
+
+🔒 Phase 2 Baseline Checkpoint – Agenda
+
+Purpose:
+Confirm current system behavior, explicitly freeze Phase 2, and define what is allowed to change going forward.
+
+1️⃣ Confirm Current Deployed Reality
+
+Please confirm:
+
+The code currently running in production matches what we believe is deployed
+
+Whether any experimental flags, debug paths, diagnostics panels, banners, or partial features are still active
+
+Which diagnostics (if any) are intended to remain, and which should be gated or removed
+
+This is about deployment truth and shared clarity.
+
+2️⃣ Contact Form – Intent Lock
+
+We need to explicitly lock and document the current behavior of the contact form:
+
+Are submissions stored internally?
+
+Are emails being sent externally, or not yet?
+
+Who can access submissions?
+
+What is explicitly not happening yet?
+
+No changes requested here — just confirmation so we can freeze intent.
+
+3️⃣ Map & Feed Guardrails (Re-acknowledgement)
+
+Please confirm alignment with the following already-agreed guardrails:
+
+User interaction always wins over passive system behavior
+
+No refresh-driven viewport movement
+
+Snap-back acceptance tests act as release gates
+
+Again, no changes requested — just re-acknowledgement.
+
+4️⃣ Phase 2 Closure Declaration
+
+Confirm that:
+
+Phase 2 core objectives are met
+
+Remaining work is polish / hardening only
+
+No new surface area or features are added without an explicit Phase 3 discussion
+
+5️⃣ Define “Allowed Changes” Going Forward
+
+Please confirm agreement that:
+
+Refactors are allowed only if they introduce:
+
+no schema changes
+
+no UX changes
+
+no behavioral changes
+
+Any deviation from this requires owner approval first

@@ -1,0 +1,87 @@
+Thought for 20s
+
+Absolutely yes — we can “just use what the Feed already fetched” and render it on the Map page.
+That’s the simplest, least-risk fix: read the React Query cache from the Feed’s /api/incidents query and show those items in the Map panel (no UI/style changes, no extra fetch).
+
+Minimal patch (copy-paste)
+1) Share a tiny normalizer
+// src/lib/incidentsShape.ts
+export type Incident = {
+  id: string; title: string; createdAt: string; lat: number; lng: number;
+  // …other fields you display
+};
+
+export function itemsFromFeedPayload(payload: any): Incident[] {
+  if (Array.isArray(payload)) return payload as Incident[];
+  if (payload && Array.isArray(payload.items)) return payload.items as Incident[];
+  return [];
+}
+
+2) Map panel: read Feed data from React Query cache
+// src/features/map/RecentIncidentsPanel.tsx
+import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { itemsFromFeedPayload, type Incident } from "@/lib/incidentsShape";
+
+const FEED_INCIDENTS_KEY = ["/api/incidents"]; // must match Feed page
+
+export default function RecentIncidentsPanel() {
+  const qc = useQueryClient();
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+
+  // 1) Pull whatever the Feed has already fetched
+  useEffect(() => {
+    const data = qc.getQueryData(FEED_INCIDENTS_KEY);
+    const items = itemsFromFeedPayload(data);
+    setIncidents(items);
+  }, [qc]);
+
+  // 2) Subscribe to future cache updates from the Feed
+  useEffect(() => {
+    const unsub = qc.getQueryCache().subscribe((event) => {
+      if (event?.query?.queryKey?.toString() === FEED_INCIDENTS_KEY.toString()) {
+        const next = itemsFromFeedPayload(event.query.state.data);
+        setIncidents(next);
+      }
+    });
+    return () => { unsub?.(); };
+  }, [qc]);
+
+  if (!incidents.length) {
+    return (
+      <section className="card">
+        <div className="card-body">No incidents.</div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="card">
+      <div className="card-body space-y-2">
+        {incidents.slice(0, 20).map(i => (
+          <div key={i.id} className="rounded-xl bg-neutral-800 p-3">
+            <div className="font-medium">{i.title}</div>
+            <div className="text-xs opacity-70">
+              {new Date(i.createdAt).toLocaleTimeString()}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+
+This does not change any styles/layout. It simply mirrors whatever the Feed already has.
+
+Replit ⇄ GPT handshake
+
+Replit, please confirm:
+
+The Feed page uses React Query with queryKey: ["/api/incidents"] and puts the server payload (paginated object) into the cache.
+
+The Map page will render <RecentIncidentsPanel /> inside the right panel (no props needed now).
+
+If your Feed’s key is different (e.g., it includes params), tell us the exact key so we can match it.
+
+If (1) is true, the panel will immediately populate with the same incidents as the Feed — zero extra network and no UI churn. If the Feed doesn’t use React Query, we can do the same thing with a small Zustand store that the Feed writes to and the Map reads from (2–3 lines change on each side).

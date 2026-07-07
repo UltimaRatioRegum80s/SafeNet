@@ -1,0 +1,277 @@
+love this—thanks for the detailed dump. given your stack is already tight, here’s a surgical set of “sanity probes” + guardrails you can drop in without changing UX or core flows. goal: make “report → marker on map” verifiable, observable, and self-healing in prod.
+
+1) Probes (zero-UX, safe in prod)
+1.1 Socket canary (no DB write)
+
+Emit a synthetic incident to the live channel to verify WS delivery end-to-end without touching storage or clusters.
+
+Server (Express/Socket.IO) — admin-gated:
+
+// server/routes/probe.ts
+import { Router } from "express";
+import { io } from "../socket"; // your initialized io
+import { ensureAdmin } from "../auth"; // whatever you already use
+
+export const probe = Router();
+
+probe.post("/socket-canary", ensureAdmin, (req, res) => {
+  const probeId = `probe-${Date.now()}`;
+  const payload = {
+    id: probeId,
+    type: "__probe__",
+    category: "__probe__",
+    title: "probe",
+    description: "socket canary",
+    latitude: -33.9249,
+    longitude: 18.4241,
+    severity: "low",
+    photos: [],
+    createdAt: new Date().toISOString(),
+    meta: { probe: true },
+  };
+  io.emit("incident:created", payload);
+  res.json({ ok: true, probeId });
+});
+
+
+Client (map layer, optional) — ignore probes:
+
+// createIncidentMarker.ts
+export const isProbe = (i: Incident) =>
+  i.type === "__probe__" || i.category === "__probe__" || i?.meta?.probe;
+
+export function upsertIncidentMarker(i: Incident) {
+  if (isProbe(i)) return; // no marker for probes
+  // ... existing upsert into MarkerCluster
+}
+
+
+Now an admin can call /api/probe/socket-canary and watch a status light flip green (see §2.2) without polluting the DB/UI.
+
+1.2 Canary write (DB + WS + map), auto-revert
+
+Create a short-lived incident near the map center that auto-resolves. Runs on cron or via a button that only admins see.
+
+Server:
+
+// server/routes/probe.ts (add)
+probe.post("/write-canary", ensureAdmin, async (req, res) => {
+  const now = new Date();
+  const inc = await createIncident({
+    title: "canary",
+    description: "write-probe",
+    category: "__probe__",
+    type: "__probe__",
+    latitude: -33.9245, longitude: 18.4241,
+    severity: "low",
+    state: "validated",
+    metadata: { probe: true, expiresAt: new Date(now.getTime() + 60_000) } // 1 min
+  });
+  io.emit("incident:created", toClientPayload(inc));
+  res.json({ ok: true, id: inc.id });
+});
+
+
+Expiry job (piggyback on your existing jobs):
+
+// jobs/expireProbes.ts
+await db.delete(incidents).where(
+  and(
+    eq(incidents.category, "__probe__"),
+    lt(incidents.createdAt, sql`now() - interval '5 minutes'`)
+  )
+);
+// emit 'incident:removed' if you support it
+
+1.3 BBox echo diagnostic
+
+Return only the server’s computed bbox + count to confirm client → API query params → server parsing → DB filter agree, without transferring heavy payloads.
+
+// server/routes/probe.ts (add)
+probe.get("/bbox-echo", ensureAdmin, async (req, res) => {
+  const { bbox, sinceHours = 72 } = req.query as any;
+  const [minLng, minLat, maxLng, maxLat] = (bbox || "").split(",").map(Number);
+  const { count } = await getIncidentsCountInBounds(minLat, minLng, maxLat, maxLng, Number(sinceHours));
+  res.json({ ok: true, bbox: { minLng, minLat, maxLng, maxLat }, sinceHours, count });
+});
+
+
+Use it when “markers look sparse”: you’ll instantly learn if it’s data, query, or render.
+
+2) Self-healing & visibility (client-only, tiny)
+2.1 Socket watchdog (no polling UX change)
+
+You already have solid sockets; this fires a one-off fetch only if no socket traffic lands for a while.
+
+// client/src/lib/socketWatchdog.ts
+import { fetchIncidentsForBbox } from "../api/incidents"; // your existing API
+import { getCurrentBbox } from "../features/map/bbox";
+import { syncMarkers } from "../features/map/clusterSync";
+
+let lastEventAt = Date.now();
+export function hookSocketWatchdog(socket: Socket) {
+  socket.onAny(() => (lastEventAt = Date.now())); // any event counts
+  const t = setInterval(async () => {
+    if (Date.now() - lastEventAt > 15000) {
+      const bbox = getCurrentBbox();
+      const fc = await fetchIncidentsForBbox(bbox, { sinceHours: 72 });
+      syncMarkers(fc); // your “source of truth” reconcile
+      lastEventAt = Date.now();
+    }
+  }, 5000);
+  return () => clearInterval(t);
+}
+
+
+Call once when you init sockets on the map page.
+
+2.2 Tiny status badge (dev-only)
+
+Feature-flag a badge so @RDM can see socket/HTTP health in staging.
+
+// client/src/components/NetBadge.tsx
+export function NetBadge({ socket }: { socket: Socket }) {
+  const [ws, setWs] = useState("⏳");
+  const [http, setHttp] = useState("⏳");
+  useEffect(() => {
+    const onState = () => setWs(socket.connected ? "🟢" : "🟠");
+    socket.on("connect", onState); socket.on("disconnect", onState);
+    onState();
+    const tick = setInterval(async () => {
+      try {
+        const r = await fetch("/api/healthz");
+        setHttp(r.ok ? "🟢" : "🔴");
+      } catch { setHttp("🔴"); }
+    }, 8000);
+    return () => { clearInterval(tick); socket.off("connect", onState); socket.off("disconnect", onState); };
+  }, []);
+  if (!import.meta.env.VITE_FLAG_NETBADGE) return null;
+  return (
+    <div className="fixed bottom-3 right-3 px-2 py-1 rounded bg-black/70 text-white text-xs">
+      WS {ws} · HTTP {http}
+    </div>
+  );
+}
+
+3) Observability (low-risk, high signal)
+3.1 Structured logs with correlation
+
+Propagate a requestId/corrId from POST /incidents → DB write → io.emit. Include it in the socket payload so the client can match optimistic → confirmed.
+
+Server (create route):
+
+const corrId = req.get("x-idempotency-key") || `corr_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+logger.info({ corrId, phase: "validate", userId: req.user?.id });
+
+const inc = await createIncidentValidated(...);
+logger.info({ corrId, phase: "db:insert", incidentId: inc.id });
+
+io.emit("incident:created", { ...toClientPayload(inc), corrId });
+logger.info({ corrId, phase: "socket:emit", event: "incident:created" });
+
+res.setHeader("x-correlation-id", corrId).json({ ok: true, id: inc.id, corrId });
+
+
+Client (optimistic → confirm):
+
+// when posting, include an idempotency key & store corrId
+const idem = crypto.randomUUID();
+await fetch("/api/incidents", { headers: { "x-idempotency-key": idem }, ... });
+
+socket.on("incident:created", (i) => {
+  if (i.corrId === localCorrId) replaceOptimistic(i.id);
+  upsert(i);
+});
+
+
+Now you can grep one token and see the whole pipeline.
+
+3.2 Health endpoints
+
+Lightweight readiness & liveness checks (used by the badge and any uptime monitor).
+
+app.get("/api/healthz", (_req, res) => res.json({ ok: true, ts: Date.now() }));
+app.get("/api/readyz", async (_req, res) => {
+  try {
+    await db.execute(sql`select 1`);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(503).json({ ok: false });
+  }
+});
+
+4) Data & schema guardrails (no big migrations)
+
+DB constraints (fast adds if not already there):
+
+alter table incidents
+  add constraint chk_lat check (latitude between -90 and 90),
+  add constraint chk_lng check (longitude between -180 and 180);
+
+
+Idempotency: unique partial index on a request key if you store it:
+
+create unique index if not exists incidents_idem_key_unique
+on incidents (idempotency_key)
+where idempotency_key is not null;
+
+
+Geo performance (optional later): you’re on decimals; keep it for now. If you ever move to PostGIS, add geom geography(Point,4326) + gist(geom) and compute from lat/lng on write. Not required today.
+
+5) Map layer hardening (Leaflet + MarkerCluster)
+5.1 Single source of truth reconciliation
+
+You already have seenIds. Add a periodic reconcile to remove ghosts (e.g., if a moderation event was missed).
+
+// clusterSync.ts
+export async function reconcileWithServer(bbox: Bbox) {
+  const fc = await fetchIncidentsForBbox(bbox, { sinceHours: 72 });
+  const serverIds = new Set(fc.features.map(f => f.properties.id));
+  // remove markers not present server-side
+  for (const id of localIds()) if (!serverIds.has(id)) removeMarker(id);
+  // add/update present ones
+  for (const f of fc.features) upsert(f.properties);
+}
+
+
+Call this from the watchdog or on tab visibility regain.
+
+5.2 Invisible double-emit guard
+
+If you sometimes receive both incident:new and incident:created:
+
+socket.on("incident:new", (i) => upsertOnce(i));
+socket.on("incident:created", (i) => upsertOnce(i));
+
+const seen = new Set<string>();
+function upsertOnce(i: Incident) {
+  if (seen.has(i.id)) return;
+  seen.add(i.id);
+  upsertIncidentMarker(i);
+}
+
+6) Minimal test flows (keep)
+
+Playwright e2e: “report → marker appears” with a local Socket.IO spy (intercept incident:created and assert it arrives within 2s).
+
+API bbox test: unit test getIncidentsInBounds with 4 points on the bbox edges to avoid off-by-one/precision drift.
+
+What to wire next (quick wins)
+
+Add /api/probe/socket-canary, /api/probe/bbox-echo, /api/healthz, /api/readyz.
+
+Add client watchdog and optional NetBadge behind VITE_FLAG_NETBADGE=1.
+
+Add logging corrId propagation on POST /api/incidents and socket emit.
+
+(Optional) schedule expireProbes job or run it when ensureAdmin triggers canary write.
+
+If you paste:
+
+your toClientPayload shape,
+
+the exact fetchIncidentsForBbox signature,
+
+and where you init sockets on the map page,
+
+…I’ll tailor the snippets to your filenames and types so you can drop them in with zero friction.

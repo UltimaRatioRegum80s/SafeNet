@@ -1,0 +1,73 @@
+Task: Keep the Low / Medium / High categorisation and the existing color tints on each card, but switch the layout back to a 4-per-row grid (4 × 3). Keep everything else in the app exactly the same.
+
+Keep exactly the same
+
+Route, header, nav, anonymous toggle, modal/report flow, Firestore writes, toasts.
+
+Card images/icons and labels (use existing assets).
+
+Priority tints already applied: Low (sky), Medium (amber), High (rose).
+
+“Report something else” link and all click handlers.
+
+Layout changes
+
+Use a single grid container with 4 columns per row:
+
+Tailwind example for the grid wrapper:
+class="grid gap-4 sm:grid-cols-2 md:grid-cols-4"
+
+Ensure three rows (total 12 items).
+
+Preserve the priority grouping by row (top → bottom):
+
+Row 1 – Low / Community: Lost Pet, Lost & Found, [leave 2 items empty or keep spacing consistent if only 2] → Instead, place both low items first and then repeat them as centered with two empty spacers hidden via responsive utilities OR append two low-priority placeholders that are invisible to users.
+
+Row 2 – Medium / Risk: Accident, Break In, Suspicious Persons, Traffic, Construction (pick 4 for this row, put the 5th first in the next row).
+
+Row 3 – High / Emergency: Alarm, Fire, Help (SOS), Violence, Theft (again, pick 4 for this row, place the 5th in Row 2 overflow or Row 3 as a wrap).
+
+Simpler directive: Order the 12 cards so that the first 4 are Low, next 4 are Medium, last 4 are High—this guarantees a clean 4×3 grid while keeping the priority bands intact.
+
+Exact order to render:
+
+Low: Lost Pet, Lost & Found, (two low placeholders removed) → replace with two additional Low-type shortcuts if available; if not, leave low at 2 then fill with the first two Medium items so the first row still has 4.
+
+Recommended fixed order (clean 4×3):
+Row 1 (Low): Lost Pet, Lost & Found, Traffic, Construction
+Row 2 (Medium): Accident, Break In, Suspicious Persons, Theft
+Row 3 (High): Alarm, Fire, Help (SOS), Violence
+
+Note: Traffic & Construction are low-impact in many communities; Theft is operationally higher, so we place it with Medium to keep four per row. Keep the tints mapped to their true priority, regardless of row.
+
+Section labels (optional but preferred): add small headers before each 4-card block:
+
+“Community (low)”, “Risk (medium)”, “Emergency (high)”
+
+Style: text-xs font-semibold text-slate-600 uppercase tracking-wide mb-2
+
+Classes for priority tints (unchanged)
+
+Low: bg-sky-50 border border-sky-200 hover:bg-sky-100 focus:ring-sky-300
+
+Medium: bg-amber-50 border border-amber-200 hover:bg-amber-100 focus:ring-amber-300
+
+High: bg-rose-50 border border-rose-200 hover:bg-rose-100 focus:ring-rose-300
+
+Accessibility
+
+Keep aria-label including priority (e.g., "Alarm, Emergency (High)").
+
+Maintain keyboard focus styles (focus:ring-* by priority).
+
+Acceptance criteria
+
+The Quick Report section renders as a 4×3 grid across desktop (2×n on small screens).
+
+Low, Medium, High items remain visibly tinted as before.
+
+Icons/images and labels are unchanged; reporting behavior is unchanged.
+
+Optional section headers appear above each 4-card block (if implemented).
+
+Submitting still posts to Feed and Map without any regressions.

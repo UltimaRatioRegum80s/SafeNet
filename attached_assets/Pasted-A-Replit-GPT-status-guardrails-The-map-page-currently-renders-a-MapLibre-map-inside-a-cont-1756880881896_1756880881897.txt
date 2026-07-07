@@ -1,0 +1,180 @@
+A) “Replit → GPT” (status + guardrails)
+
+The map page currently renders a MapLibre map inside a container that also shows default MapLibre controls. We must not change desktop.
+
+We’ll add a new overlay component and a tiny tweak where the map is initialized (disable default controls on small screens).
+
+Risk: none to data/state; purely presentational. If anything looks off, remove one import line to revert.
+
+B) “GPT → Replit” (what to add)
+1) Add the floating mobile chrome (new file)
+
+/src/components/map/MobileMapChrome.tsx
+
+import React from "react";
+import { Home, FilePlus2, Newspaper, Minus, Plus, Sun, Moon } from "lucide-react";
+import clsx from "clsx";
+
+type Props = {
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  mode: "light" | "dark";
+  onToggleMode: () => void;
+  // Optional: simple nav actions (replace with your router/link handlers)
+  onNav?: (dest: "home" | "report" | "feed") => void;
+};
+
+export default function MobileMapChrome({
+  onZoomIn,
+  onZoomOut,
+  mode,
+  onToggleMode,
+  onNav,
+}: Props) {
+  // Hide on md+ screens to preserve desktop
+  return (
+    <div className="md:hidden">
+      {/* Top Nav Bar */}
+      <div
+        className={clsx(
+          "fixed left-3 right-3 z-[60]",
+          "rounded-2xl shadow-md",
+          "backdrop-blur bg-background/70 border",
+          "flex items-center justify-between px-2 py-1",
+          // Respect iOS notch
+          "mt-[max(env(safe-area-inset-top),0.5rem)]"
+        )}
+      >
+        <button
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm hover:bg-muted/60 active:scale-[.98] transition"
+          onClick={() => onNav?.("home")}
+        >
+          <Home size={18} /> Home
+        </button>
+        <button
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm hover:bg-muted/60 active:scale-[.98] transition"
+          onClick={() => onNav?.("report")}
+        >
+          <FilePlus2 size={18} /> Report
+        </button>
+        <button
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm hover:bg-muted/60 active:scale-[.98] transition"
+          onClick={() => onNav?.("feed")}
+        >
+          <Newspaper size={18} /> Feed
+        </button>
+      </div>
+
+      {/* Right Stack: Zoom + Theme */}
+      <div className="fixed right-3 bottom-28 z-[60] flex flex-col gap-2">
+        <button
+          aria-label="Zoom in"
+          className="h-12 w-12 grid place-items-center rounded-2xl bg-background/90 border shadow-md active:scale-95 transition"
+          onClick={onZoomIn}
+        >
+          <Plus size={20} />
+        </button>
+        <button
+          aria-label="Zoom out"
+          className="h-12 w-12 grid place-items-center rounded-2xl bg-background/90 border shadow-md active:scale-95 transition"
+          onClick={onZoomOut}
+        >
+          <Minus size={20} />
+        </button>
+        <button
+          aria-label="Toggle map theme"
+          className="h-12 w-12 grid place-items-center rounded-2xl bg-background/90 border shadow-md active:scale-95 transition"
+          onClick={onToggleMode}
+        >
+          {mode === "light" ? <Moon size={20} /> : <Sun size={20} />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+2) Use the chrome in your map page
+
+Assuming your page is something like /src/pages/MapPage.tsx with MapLibre. We’ll:
+
+keep your current map/markers intact,
+
+switch base style between Carto Positron (light) and Dark Matter (dark),
+
+disable default MapLibre controls only on mobile.
+
+import React, { useEffect, useRef, useState } from "react";
+import maplibregl, { Map } from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
+import MobileMapChrome from "@/components/map/MobileMapChrome";
+
+const LIGHT = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
+const DARK  = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+
+const isMobile = () => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+
+export default function MapPage() {
+  const mapRef = useRef<Map | null>(null);
+  const mapEl = useRef<HTMLDivElement | null>(null);
+  const [mode, setMode] = useState<"light" | "dark">("light");
+
+  useEffect(() => {
+    if (!mapEl.current) return;
+
+    // init
+    const map = new maplibregl.Map({
+      container: mapEl.current,
+      style: mode === "light" ? LIGHT : DARK,
+      center: [23.73, 37.98], // keep your existing center if you have one
+      zoom: 7,
+      attributionControl: !isMobile(),   // hide attribution on mobile to reduce clutter
+      pitchWithRotate: false,
+      dragRotate: false,
+    });
+
+    // Remove default controls on mobile only
+    if (!isMobile()) {
+      map.addControl(new maplibregl.NavigationControl({ showCompass: false }));
+      map.addControl(new maplibregl.AttributionControl({ compact: true }));
+    }
+
+    mapRef.current = map;
+
+    // If you already add markers elsewhere, keep that code as-is.
+    // Example placeholder:
+    // new maplibregl.Marker({ color: "red" }).setLngLat([22.93, 39.36]).addTo(map);
+
+    return () => map.remove();
+  }, [mode]);
+
+  return (
+    <div className="relative h-[calc(100vh)] w-full">
+      {/* MAP CANVAS */}
+      <div ref={mapEl} className="absolute inset-0" />
+
+      {/* FLOATING CHROME (mobile only) */}
+      <MobileMapChrome
+        mode={mode}
+        onToggleMode={() => setMode((m) => (m === "light" ? "dark" : "light"))}
+        onZoomIn={() => mapRef.current?.zoomIn()}
+        onZoomOut={() => mapRef.current?.zoomOut()}
+        onNav={(dest) => {
+          // Wire these to your router; temporary anchors for MVP
+          if (dest === "home") location.href = "/"; 
+          if (dest === "report") location.href = "/report";
+          if (dest === "feed") location.href = "/feed";
+        }}
+      />
+    </div>
+  );
+}
+
+3) (Optional) Keep desktop untouched
+
+If your existing map page already uses NavigationControl, leave it; our code only hides it on mobile. If you need stricter control, guard with media-query checks where you add controls.
+
+4) Tailwind/shadcn compatibility
+
+Uses your Tailwind theme tokens (bg-background, border, muted) so it blends with NN’s design system (light/dark).
+
+Uses Lucide icons (already part of your stack). If not installed: npm i lucide-react clsx.

@@ -1,0 +1,129 @@
+Yes—let’s land the refinements. Here’s a tight, copy-paste set of patches that finishes the job without touching your working layout.
+
+1) Text token cleanup (light/dark correct contrast)
+One-time find/replace (safe codemod)
+
+Run these in your editor search (regex on):
+
+Replace titles/headings
+
+Find: className="([^"]*)text-white/90([^"]*)"
+
+Replace: className="$1dark:text-white$2 text-foreground"
+
+Replace general white text on light surfaces
+
+Find: text-white(?:\/\d+)?
+
+Replace (manual review where needed): text-foreground dark:text-white
+
+Replace “muted” white text
+
+Find: text-slate-200|text-zinc-200|text-white/60
+
+Replace: text-muted-foreground dark:text-white/60
+
+Concrete examples (drop into components)
+
+Section header
+
+- <h2 className="text-white/90 font-semibold">Recent Incidents</h2>
++ <h2 className="text-foreground dark:text-white font-semibold">Recent Incidents</h2>
+
+
+Card title
+
+- <h3 className="text-white/90 text-base">{incident.title}</h3>
++ <h3 className="text-foreground dark:text-white text-base">{incident.title}</h3>
+
+
+Meta row (time, tags)
+
+- <span className="text-white/60">{ago}</span>
++ <span className="text-muted-foreground dark:text-white/60">{ago}</span>
+
+
+Buttons/links in sheet header
+
+- <Button variant="ghost" className="text-white/80 hover:text-white">
++ <Button variant="ghost" className="text-foreground/90 hover:text-foreground dark:text-white/90 dark:hover:text-white">
+
+2) Card styling (refined shadow, same dark look)
+// IncidentList.tsx (where Card renders)
+<Card
+  className="
+    rounded-2xl
+    bg-white border border-border/60 shadow-[0_4px_14px_rgba(0,0,0,0.06)]
+    dark:backdrop-blur-md dark:bg-white/5 dark:border dark:border-white/10
+  "
+>
+  {/* content */}
+</Card>
+
+
+If you use a custom IncidentCard component, put the class there once.
+
+3) Chips (AA-compliant contrast)
+
+Selected chip
+
+<button
+  className="
+    h-7 px-3 rounded-full
+    bg-foreground text-white
+    dark:bg-white dark:text-black
+    shadow-sm
+  "
+>
+  All
+</button>
+
+
+Unselected chip
+
+<button
+  className="
+    h-7 px-3 rounded-full
+    bg-black/5 text-foreground/85
+    dark:bg-white/10 dark:text-white/85
+    border border-border/50 dark:border-white/10
+  "
+>
+  6h
+</button>
+
+
+Chip group container
+
+<div className="flex flex-wrap gap-2 items-center text-sm">
+  {/* chips */}
+</div>
+
+4) Small header polish (keeps dark intact, boosts light)
+- <div className="px-4 pt-3 pb-2">
++ <div className="px-4 pt-3 pb-2">
+    <div className="flex items-center justify-between">
+-     <h2 className="text-white/90 font-semibold">Recent Incidents</h2>
++     <h2 className="text-foreground dark:text-white font-semibold">Recent Incidents</h2>
+      <label className="flex items-center gap-2 text-sm
+-                        text-white/70">
++                        text-foreground/80 dark:text-white/70">
+        <Checkbox checked={inView} onCheckedChange={setInView} />
+        In view
+      </label>
+    </div>
+  </div>
+
+5) QA checklist (quick)
+
+Light: sheet + cards readable; no text-white/* on light surfaces.
+
+Dark: looks identical to your “good” dark screenshot.
+
+Chips: selected vs unselected are clearly distinct in both themes.
+
+Card shadow present only in light (dark keeps blur/glass).
+
+No class conflicts with shadcn (we only extend className).
+
+If you run the regex passes and apply the snippets above in IncidentSheet.tsx, IncidentList.tsx (or IncidentCard), and your chip component, you’ll have the complete, consistent treatment across both themes.

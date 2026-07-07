@@ -1,0 +1,163 @@
+Heck yes—let’s roll into Phase 2 (visual polish). You’ve landed Phase 1 perfectly, so here are surgical, drop-in patches that only touch the drawer UI. No Leaflet/data plumbing touched.
+
+1) Upgrade IncidentSheet.tsx (drop-in JSX only)
+A) Props & imports
+// client/src/components/IncidentSheet.tsx
+import React, { useMemo, useState } from "react";
+import { Drawer } from "vaul";
+import { timeAgo } from "@/lib/utils";
+import { Severity, severityColor, severityLabel } from "@/lib/severity";
+import { SeverityChip, SeverityIcon } from "@/components/SeverityUI";
+
+// If you're already receiving incidents via props, keep that.
+// This is just the shape we expect in the sheet:
+export type IncidentRowData = {
+  id: string;
+  title: string;
+  description?: string;
+  severity: Severity;
+  created_at?: string;          // NOTE: using your field name
+  position: { lat: number; lng: number };
+};
+
+type Props = {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  incidents: IncidentRowData[];
+  onSelect: (id: string) => void; // parent centers the map
+};
+
+B) Add severity chips + “peek/half/full” heights (no drag dependency)
+export default function IncidentSheet({ open, onOpenChange, incidents, onSelect }: Props) {
+  const [activeSeverity, setActiveSeverity] = useState<Severity | "all">("all");
+  const [height, setHeight] = useState<"peek"|"half"|"full">("peek");
+
+  const filtered = useMemo(
+    () => incidents.filter(i => (activeSeverity === "all" ? true : i.severity === activeSeverity)),
+    [incidents, activeSeverity]
+  );
+
+  return (
+    <Drawer.Root open={open} onOpenChange={onOpenChange} modal={false} shouldScaleBackground={false}>
+      <Drawer.Trigger className="hidden" />
+      <Drawer.Portal>
+        <Drawer.Overlay className="fixed inset-0 bg-black/20" />
+        <Drawer.Content className="fixed inset-x-0 bottom-0 z-30">
+          <div className={`mx-auto max-w-md transition-[height] duration-200
+            ${height === "full" ? "h-[80vh]" : height === "half" ? "h-[52vh]" : "h-[96px]"}
+          `}>
+            <div className="mx-3 rounded-t-3xl bg-slate-900 border border-slate-800 shadow-2xl h-full flex flex-col">
+              {/* Handle: cycle peek → half → full */}
+              <button
+                onClick={() => setHeight(h => (h === "peek" ? "half" : h === "half" ? "full" : "peek"))}
+                className="flex justify-center pt-2 w-full"
+                aria-label="Toggle incidents"
+              >
+                <div className="h-1.5 w-12 rounded-full bg-white/30" />
+              </button>
+
+              {/* Header */}
+              <div className="px-4 py-3 flex items-center justify-between">
+                <div className="text-base font-semibold">Recent Incidents</div>
+                <div className="text-xs text-white/60">{filtered.length} shown</div>
+              </div>
+
+              {/* Severity chips */}
+              <div className="px-3 pb-2 flex gap-2 overflow-x-auto">
+                {(["all","low","medium","high","emergency"] as const).map(sev => (
+                  <button
+                    key={sev}
+                    onClick={() => setActiveSeverity(sev as any)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium border ${
+                      activeSeverity === sev
+                        ? "bg-white text-slate-900 border-white"
+                        : "bg-transparent text-white/80 border-white/20"
+                    }`}
+                  >
+                    {sev}
+                  </button>
+                ))}
+              </div>
+
+              {/* List */}
+              <div className="px-2 pb-3 overflow-y-auto [@supports(height:100svh)]:max-h-[calc(100svh-220px)]">
+                {filtered.map(i => (
+                  <button
+                    key={i.id}
+                    onClick={() => onSelect(i.id)}
+                    className="w-full text-left mb-2 p-3 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-[0.99] transition"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`mt-1 size-3 rounded-full ${severityColor(i.severity)}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <SeverityIcon sev={i.severity} />
+                          <div className="font-medium truncate">{i.title}</div>
+                        </div>
+                        {i.description && (
+                          <div className="text-sm text-white/70 line-clamp-2">{i.description}</div>
+                        )}
+                        <div className="mt-1 flex items-center gap-2 text-xs text-white/60">
+                          <SeverityChip sev={i.severity} />
+                          <span>{timeAgo(i.created_at)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+
+                {filtered.length === 0 && (
+                  <div className="p-6 text-center text-white/60">No incidents.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        </Drawer.Content>
+      </Drawer.Portal>
+    </Drawer.Root>
+  );
+}
+
+
+This replaces only the drawer UI. All data and map behavior stay the same.
+
+2) Wiring from the page (no map changes)
+
+Where you render the sheet, pass your incidents as-is and implement onSelect to center the map (you already have this):
+
+// e.g. client/src/pages/community/Map.tsx
+import IncidentSheet from "@/components/IncidentSheet";
+
+<IncidentSheet
+  open={openSheet}
+  onOpenChange={setOpenSheet}
+  incidents={incidents}        // your existing array with position + created_at
+  onSelect={(id) => {
+    const i = incidents.find(x => x.id === id);
+    if (!i || !mapRef.current) return;
+    mapRef.current.setView([i.position.lat, i.position.lng], 16, { animate: true });
+  }}
+/>
+
+3) Optional mini-tweaks (fast wins)
+
+Add className="relative" to the map container if FABs ever need absolute positioning context.
+
+If the map feels too dark, add:
+
+/* globals.css */
+.leaflet-container { filter: brightness(1.06) contrast(1.05); }
+
+Next tiny step (nice UX)
+
+If you want list ↔ marker sync without touching marker code:
+
+maintain selectedId in the page
+
+when a marker is clicked, set selectedId and setOpenSheet(true)
+
+in IncidentSheet, add aria-selected styling to the matching row
+
+I can provide those diffs when you’re ready.
+
+If this looks good, ship it. If you want me to tailor the props to your exact IncidentMarker interface, paste its type and I’ll adjust the code to match line-for-line.

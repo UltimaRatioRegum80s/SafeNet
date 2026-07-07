@@ -1,0 +1,137 @@
+🔧 Integration Instructions — High (Red) Icons
+
+We’re adding the red/high-risk set using the already-uploaded assets in /attached_assets/.
+Please map round = Quick Report button and pin = Map marker.
+
+Files (button ↔ map pin)
+
+Fire.png ↔ Fire MM.png
+
+Gun Shots.png ↔ Gun Shots MM.png
+
+Immediate Help Needed.png ↔ Immediate Help Needed MM.png
+
+Medical Emergency.png ↔ Medical Emergency MM.png
+
+Theft.png ↔ Theft MM.png
+
+Violence.png ↔ Violence MM.png
+
+We’re staying in /attached_assets/ for now (no file moves). URL-encode spaces via encodeURIComponent.
+
+1) Update shared/incidentTypes.ts
+
+If not present already:
+
+export interface IncidentType {
+  id: string;
+  label: string;
+  severity: "low" | "medium" | "high" | "critical";
+  category?: string;
+  buttonIcon?: string; // round (Quick Report)
+  mapIcon?: string;    // map pin (Leaflet)
+}
+
+
+Add the red set:
+
+const ASSET = (f: string) => `/attached_assets/${encodeURIComponent(f)}`;
+
+export const HIGH_RED: IncidentType[] = [
+  {
+    id: "fire_emergency",
+    label: "Fire",
+    severity: "high",
+    buttonIcon: ASSET("Fire.png"),
+    mapIcon: ASSET("Fire MM.png"),
+  },
+  {
+    id: "gun_shots",
+    label: "Gun Shots",
+    severity: "high",
+    buttonIcon: ASSET("Gun Shots.png"),
+    mapIcon: ASSET("Gun Shots MM.png"),
+  },
+  {
+    id: "sos",
+    label: "Immediate Help Needed",
+    severity: "high",
+    buttonIcon: ASSET("Immediate Help Needed.png"),
+    mapIcon: ASSET("Immediate Help Needed MM.png"),
+  },
+  {
+    id: "medical",
+    label: "Medical Emergency",
+    severity: "high",
+    buttonIcon: ASSET("Medical Emergency.png"),
+    mapIcon: ASSET("Medical Emergency MM.png"),
+  },
+  {
+    id: "theft",
+    label: "Theft",
+    severity: "high",
+    buttonIcon: ASSET("Theft.png"),
+    mapIcon: ASSET("Theft MM.png"),
+  },
+  {
+    id: "violence",
+    label: "Violence",
+    severity: "high",
+    buttonIcon: ASSET("Violence.png"),
+    mapIcon: ASSET("Violence MM.png"),
+  },
+];
+
+If these IDs already exist (from the blue set)
+
+We should merge/override by id so the new icons replace the old ones without duplicating types. Add this helper once:
+
+function mergeTypes(base: IncidentType[], updates: IncidentType[]): IncidentType[] {
+  const byId = new Map(base.map(t => [t.id, t]));
+  for (const u of updates) byId.set(u.id, { ...byId.get(u.id), ...u });
+  return Array.from(byId.values());
+}
+
+
+Then build the export:
+
+// existing exports: LOW_YELLOW, MED_AMBER (if already added)
+export const INCIDENT_TYPES: IncidentType[] = mergeTypes(
+  [
+    // your existing types here (blue placeholders, amber, etc.)
+    ...LOW_YELLOW,
+    ...MED_AMBER,
+  ],
+  HIGH_RED // overrides matching IDs (e.g., medical, sos, violence) with new icons
+);
+
+// Keep helpers if present
+export const INCIDENT_TYPES_BY_ID = Object.fromEntries(
+  INCIDENT_TYPES.map(t => [t.id, t])
+) as Record<string, IncidentType>;
+
+2) Components (no changes needed)
+
+QuickReportPanel already prefers buttonIcon (falls back to old path).
+
+MapView already prefers mapIcon for Leaflet markers.
+
+3) QA Checklist (quick)
+
+ Quick Report shows red round icons for: Fire, Gun Shots, Immediate Help Needed (SOS), Medical, Theft, Violence.
+
+ Creating those incidents shows red pin markers on the map.
+
+ No duplicate incident types (merge by id worked).
+
+ Alt text = label; mobile tap targets unaffected.
+
+ Yellow + Amber icons still render as expected (fallback safety intact).
+
+Notes
+
+If any filename differs from the list, update the string in ASSET("...").
+
+We can later migrate assets to /public/icons/high/... without touching components—only this mapping.
+
+Once red is confirmed live, we’ll have all three severities (Yellow, Amber, Red) on the new visual system.

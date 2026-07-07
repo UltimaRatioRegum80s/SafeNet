@@ -1,0 +1,153 @@
+/* --- base wrapper (we use a divIcon so Leaflet won't add extra classes) --- */
+.nn-marker {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+}
+
+/* the actual icon (your gradient png/svg) */
+.nn-marker__img {
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+}
+
+/* Severity-based marker styling */
+.nn-marker--low .nn-marker__img {
+  background-color: #10b981; /* emerald-500 - green for low severity */
+  border: 2px solid #059669; /* darker green border */
+}
+
+.nn-marker--medium .nn-marker__img {
+  background-color: #f59e0b; /* amber-500 - orange for medium severity */
+  border: 2px solid #d97706; /* darker amber border */
+}
+
+.nn-marker--high .nn-marker__img {
+  background-color: #f97316; /* orange-500 - dark orange for high severity */
+  border: 2px solid #ea580c; /* darker orange border */
+}
+
+.nn-marker--critical .nn-marker__img {
+  background-color: #dc2626; /* red-600 - red for critical severity */
+  border: 2px solid #b91c1c; /* darker red border */
+}
+
+/* small corner badge */
+.nn-marker__badge {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 9999px;
+  background: #0ea5e9;     /* default electric blue */
+  color: #000;
+  font-size: 10px;
+  line-height: 16px;
+  font-weight: 700;
+  border: 2px solid #0b1324; /* match dark map bg edge */
+}
+
+/* ---------- optimistic (just submitted) ---------- */
+.nn-marker--optimistic .nn-marker__badge {
+  background: #22d3ee; /* teal */
+  color: #001013;
+}
+
+/* pulsing ring - optimized for performance */
+.nn-marker--optimistic::after {
+  content: "";
+  position: absolute;
+  width: 38px;
+  height: 38px;
+  border-radius: 9999px;
+  border: 2px solid rgba(34, 211, 238, 0.6);
+  animation: nnPulse 2s ease-out infinite;
+  will-change: transform, opacity; /* GPU acceleration */
+}
+
+@keyframes nnPulse {
+  0% { transform: scale3d(0.7, 0.7, 1); opacity: 0.9; }
+  70% { transform: scale3d(1.15, 1.15, 1); opacity: 0.25; }
+  100% { transform: scale3d(1.25, 1.25, 1); opacity: 0; }
+}
+
+/* ---------- offline (queued) ---------- */
+.nn-marker--offline .nn-marker__badge {
+  background: #fbbf24; /* amber */
+  color: #1a1200;
+}
+
+/* dashed halo for offline - optimized */
+.nn-marker--offline::after {
+  content: "";
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  border: 2px dashed rgba(251, 191, 36, 0.7);
+  animation: nnDash 3s linear infinite;
+  will-change: transform; /* GPU acceleration */
+}
+
+@keyframes nnDash {
+  to { transform: rotate3d(0, 0, 1, 360deg); }
+}
+
+/* Mobile divIcon wrapper - ensures fallback markers are visible */
+.nn-divicon-wrapper {
+  display: block !important;
+  position: relative !important;
+  z-index: 1 !important;
+}
+
+/* Flag-gated CSS override for mobile markers z-index fix */
+body[data-mobile-markers="1"] .leaflet-marker-pane {
+  z-index: 650 !important;
+  display: block !important;
+  opacity: 1 !important;
+}
+
+body[data-mobile-markers="1"] .leaflet-popup-pane {
+  z-index: 700 !important;
+}
+
+/* ========== PHASE E: MARKER FADE-IN ANIMATION ========== */
+/* Subtle fade-in for new markers on first render only (~150ms) */
+/* Applied via JavaScript when marker is first created */
+
+@keyframes nnMarkerFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.nn-marker-fadein {
+  animation: nnMarkerFadeIn 150ms ease-out forwards;
+}
+
+/* Optimistic marker visual styling (subtle ring indicator) */
+.nn-marker-optimistic::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border: 2px solid rgba(34, 211, 238, 0.7);
+  border-radius: 50%;
+  animation: nnOptimisticPulse 1.5s ease-out infinite;
+}
+
+@keyframes nnOptimisticPulse {
+  0% { opacity: 0.8; transform: scale(0.95); }
+  50% { opacity: 0.4; transform: scale(1.1); }
+  100% { opacity: 0.8; transform: scale(0.95); }
+}

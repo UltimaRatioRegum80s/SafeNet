@@ -1,0 +1,123 @@
+Nn Feed Page Responsive (react+ts)
+· typescript
+import React from "react";
+      <div className="mx-auto flex h-10 max-w-screen-xl items-center gap-4 px-3 md:h-11 md:px-6">
+        <Link to="/" className={itemClass(pathname === "/")}> <Home className="h-4 w-4"/> Home </Link>
+        <Link to="/report" className={itemClass(pathname.startsWith("/report"))}> <Camera className="h-4 w-4"/> Report </Link>
+        <Link to="/map" className={itemClass(pathname.startsWith("/map"))}> <MapPinned className="h-4 w-4"/> Map </Link>
+        <Link to="/feed" className={itemClass(pathname.startsWith("/feed"))}> <MessageSquareText className="h-4 w-4"/> Feed </Link>
+      </div>
+    </nav>
+  );
+}
+
+
+export function AppChrome({ title, rightActions, hideSubnav, children }: AppChromeProps) {
+  const topRef = React.useRef<HTMLDivElement>(null);
+  const subRef = React.useRef<HTMLDivElement>(null);
+  const topH = useMeasured(topRef);
+  const subH = useMeasured(subRef);
+
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      {/* Fixed Top */}
+      <div ref={topRef} className="fixed inset-x-0 top-0 z-50" style={{ paddingTop: "env(safe-area-inset-top)" }}>
+        <TopBar title={title} right={rightActions} />
+        {!hideSubnav && <div ref={subRef as any}><PrimaryNav /></div>}
+      </div>
+
+
+      {/* Content with dynamic padding */}
+      <main
+        className="relative"
+        style={{ paddingTop: topH + (hideSubnav ? 0 : subH), minHeight: "100dvh" }}
+      >
+        {children}
+      </main>
+    </div>
+  );
+}
+
+
+// ================== MapChrome.tsx (map-special layout) ==================
+// Full-bleed map: keeps only TopBar, hides subnav for more real estate.
+
+
+export function MapChrome({ title = "Map", children }: { title?: string; children: React.ReactNode }) {
+  return (
+    <AppChrome title={title} hideSubnav>
+      <div className="fixed inset-0 top-[--top-offset]">{children}</div>
+    </AppChrome>
+  );
+}
+
+
+// ================== React Router usage ==================
+// If you use React Router v6, set up nested routes so every page gets the same chrome
+// except the map route which uses MapChrome.
+
+
+/* Example:
+import { createBrowserRouter, Outlet } from 'react-router-dom';
+
+
+function AppLayout() { return (
+  <AppChrome title="Dashboard">
+    <Outlet />
+  </AppChrome>
+); }
+
+
+function MapLayout() { return (
+  <AppChrome title="Map" hideSubnav>
+    <Outlet />
+  </AppChrome>
+); }
+
+
+export const router = createBrowserRouter([
+  { element: <AppLayout />, children: [
+      { path: '/', element: <HomePage/> },
+      { path: '/report', element: <ReportPage/> },
+      { path: '/feed', element: <FeedPageWithChrome/> },
+      // any other non-map pages...
+    ] },
+  { element: <MapLayout />, children: [
+      { path: '/map', element: <MapPage/> },
+    ] },
+]);
+*/
+
+
+// ================== Notes ==================
+// - This implements a **uniform menu** (TopBar + PrimaryNav) across all pages by default.
+// - The Map page uses `hideSubnav` to remove the second row, matching your exception.
+// - Safe areas handled; dynamic padding keeps content from hiding under bars.
+// - PrimaryNav uses React Router's `Link`; if not available, replace with your router link.
+
+
+
+
+
+totally aligned, @RDM — we can (and should) have a uniform menu across all pages with a single exception for Maps.
+
+I just added to the canvas:
+
+AppChrome — a global layout that renders the exact header/subnav shown in your screenshots (title + icons row, then “Home / Report / Map / Feed”). It fixes them to the top, measures heights, and pads content so nothing is hidden.
+
+PrimaryNav — the uniform subnav component with active-state highlighting.
+
+TopBar — the header with Share/Search/Bell/Theme icons.
+
+MapChrome — a map-specific variant that hides the subnav (your one exception) to give max screen space.
+
+There’s also a React Router v6 usage example so every non-map route inherits the same chrome, while /map uses the special layout.
+
+what this gives you
+
+Same look/behavior for Home, Report, Feed, Chat, etc.
+
+Maps keeps only the header (no subnav row), matching your requirement.
+
+Safe-area compatible, responsive, and minimal disruption to your current routing.

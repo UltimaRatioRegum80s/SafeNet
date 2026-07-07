@@ -1,0 +1,80 @@
+Thanks for the dump—this tells us exactly what’s wrong.
+
+What the logs mean
+
+"[Map] useEffect trigger - mapReady: false, mapRef: false, incidents: 50"
+→ We have data, but our map instance isn’t ready, so the marker effect refuses to run.
+
+Leaflet error: Cannot read properties of undefined (reading '_leaflet_pos') during _onZoomTransitionEnd
+→ Leaflet is being asked to do something (position/zoom/move) before the map has fully initialized / attached to the DOM. This usually happens when we call map methods or add layers before the map is “ready”.
+
+So we have a timing/race issue: the map readiness flag is not being set at the correct time, and some Leaflet work is still firing too early.
+
+Replit 🔧 — surgical steps (no architectural changes)
+
+Make whenCreated the single source of truth for readiness
+
+In the <MapContainer />, ensure we set the ref first, then mark ready, inside the same callback:
+
+whenCreated={(m) => {
+  mapRef.current = m;             // set ref first
+  setMapReady(true);              // then flip the flag
+  m.whenReady(() => {
+    // optional safety after first render
+    setTimeout(() => m.invalidateSize(), 0);
+    console.log("[Map] Leaflet whenReady fired");
+  });
+}}
+
+
+Remove any other calls to onMapReady() or setMapReady(true) that might fire before this callback.
+
+Guard every effect that touches Leaflet
+
+Any effect that adds markers, sets view, or adds layers must begin with:
+
+const map = mapRef.current;
+if (!map || !mapReady) return;
+
+
+Do not use mapRef.current?._loaded as a dependency; rely on the state you set in whenCreated.
+
+Ensure the map container is sized before creation
+
+Your map column already has min-h-0; confirm the <MapContainer>’s parent has a fixed height (h-full) and is visible (not in a collapsed/hidden tab).
+
+Call invalidateSize() once in whenReady (as above) to avoid _leaflet_pos glitches if the map mounted while the container was still stabilizing.
+
+Verify with logs
+
+You should see this sequence in console:
+
+[Map] Feed incidents synced: 50
+
+[Map] Leaflet whenReady fired
+
+[Map] drew markers: 50 (or your marker counters: with: 50, skipped: 0)
+
+Double-check: no other place assigns to mapRef.current
+
+If a nested MapView also manages a ref and calls onMapReady earlier, remove the early call so we don’t flip readiness too soon.
+
+Why this fixes your exact errors
+
+mapReady will only be true after the Leaflet instance exists and has reported it’s ready, so our marker effect won’t run early.
+
+invalidateSize() eliminates the _leaflet_pos error from Leaflet’s zoom/move pipeline when the container’s size changes during mount.
+
+We’re not changing any data flow, list rendering, or endpoint usage—only correcting timing.
+
+Quick checklist to report back
+
+☐ Console shows whenReady log before marker counts
+
+☐ Final log shows markers: with: N, skipped: 0
+
+☐ No more _leaflet_pos error
+
+☐ Markers visible on the map
+
+If you confirm the sequence still shows mapReady: false after mount, paste the <MapContainer> JSX (just that tag with props) and the exact whenCreated callback body—we’ll spot the race in-place and keep the patch tiny.

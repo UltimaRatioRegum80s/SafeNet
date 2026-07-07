@@ -1,0 +1,145 @@
+awesome—thanks for the thorough audit. we’re 1 step away from closing Milestone 1. here’s a tight plan + drop-in code to finish the Socket.IO neighborhood broadcasting and (optionally) align the status naming without a migration.
+
+Milestone 1: targeted changes
+0) Status naming (pick one)
+
+Option A (zero-migration, recommended now): keep DB column state = 'new' but expose status='pending' in API responses.
+
+// after creating/fetching an incident row from DB
+function toApiIncident(row: any, isAdmin: boolean) {
+  const base = {
+    ...row,
+    status: row.state === "new" ? "pending" : row.state, // alias
+  };
+  if (!isAdmin && row.isAnonymous) {
+    delete base.userId; // hide from non-admins
+  }
+  return base;
+}
+
+
+Option B (rename later): run a Drizzle migration to rename state→status and map values new→pending. We can do this after the UI ships.
+
+1) Neighborhood rooms: server wiring
+a) Ensure sockets join their neighborhood room on connect
+
+Use session/auth to determine the user’s neighborhoodId and join nh:<id>.
+
+// server/realtime.ts
+import type { Server as HttpServer } from "http";
+import { Server } from "socket.io";
+import type { IncomingMessage } from "http";
+
+export let io: Server;
+
+export function initRealtime(server: HttpServer, getSessionForSocket: (req: IncomingMessage) => Promise<{ userId?: string; neighborhoodId?: string; isAdmin?: boolean }>) {
+  io = new Server(server, {
+    cors: { origin: true, credentials: true },
+  });
+
+  io.on("connection", async (socket) => {
+    try {
+      const session = await getSessionForSocket(socket.request);
+      const nhId = session?.neighborhoodId;
+      if (nhId) {
+        socket.join(`nh:${nhId}`);
+      }
+
+      // Optional manual join (fallback if you want client-initiated):
+      socket.on("join-neighborhood", (payload: { neighborhoodId: string }) => {
+        if (payload?.neighborhoodId) socket.join(`nh:${payload.neighborhoodId}`);
+      });
+    } catch (e) {
+      // no-op; user remains in public room
+    }
+  });
+
+  return io;
+}
+
+
+Hook initRealtime where you boot your Express app (pass a helper that reads your session from the socket request—reuse your existing session middleware logic).
+
+b) Broadcast incident:created to the neighborhood room after successful creation
+
+Find your POST /api/incidents handler and add the emit. Hide userId from non-admin clients when isAnonymous is true.
+
+// server/routes/incidents.ts (or wherever POST is defined)
+import { io } from "../realtime"; // from step 1a
+
+router.post("/api/incidents", requireAuthOptional, async (req, res, next) => {
+  try {
+    const { user, neighborhoodId, isAdmin } = req as any; // your auth attaches these
+    const body = /* validated body: type, description, photos[], isAnonymous, lat, lng */;
+    
+    // existing create logic…
+    const createdRow = await createIncidentInDb({
+      ...body,
+      userId: body.isAnonymous ? user?.id ?? null : user?.id ?? null,
+      state: "new", // existing value
+      neighborhoodId,
+    });
+
+    // respond to API caller with alias status (Option A)
+    const apiIncident = toApiIncident(createdRow, /* isAdmin */ true); // caller is the reporter
+    res.status(201).json({ ok: true, incident: apiIncident });
+
+    // Build payload for broadcast (hide reporter for non-admin listeners)
+    const broadcastIncident = toApiIncident(createdRow, /* isAdmin */ false);
+
+    // Emit to neighborhood room only
+    if (neighborhoodId) {
+      io.to(`nh:${neighborhoodId}`).emit("incident:created", broadcastIncident);
+    } else {
+      // fallback: public channel if no neighborhood (shouldn't happen)
+      io.emit("incident:created", broadcastIncident);
+    }
+  } catch (err) {
+    next(err);
+  }
+});
+
+2) (Optional) keep the general broadcast temporarily
+
+If you have legacy listeners on a general room, dual-emit for one release, then remove:
+
+io.emit("incident:created", broadcastIncident); // TEMP legacy for one version
+io.to(`nh:${neighborhoodId}`).emit("incident:created", broadcastIncident);
+
+3) Client listener stub (for Map/Feed)
+
+No UI change required yet; this just scopes realtime to the user’s neighborhood.
+
+// client/src/lib/realtime.ts
+import { io as socketClient } from "socket.io-client";
+export const socket = socketClient("/", { withCredentials: true });
+
+// If you prefer client-initiated join (fallback):
+export function joinNeighborhood(neighborhoodId: string) {
+  socket.emit("join-neighborhood", { neighborhoodId });
+}
+
+// Somewhere central (Map/Feed boot):
+socket.on("incident:created", (incident) => {
+  // add to store, drop a marker, toast, etc.
+});
+
+4) Quick test plan
+
+Open two browsers with users in the same neighborhood: create → both receive incident:created.
+
+Open a third browser in a different neighborhood: no event received.
+
+Submit as anonymous: event payload must not contain userId.
+
+API response to the reporter should include status: "pending" (alias for state: "new").
+
+5) What I need from you (tiny confirmations)
+
+✅ Proceed with Option A (alias state→status) for now?
+
+✅ Your auth/session exposes neighborhoodId on req and is retrievable in sockets (I used getSessionForSocket)—confirm the helper you’d like me to call.
+
+❓ Keep the legacy general broadcast for one release (dual-emit), or switch exclusively to neighborhood rooms immediately?
+
+Once you confirm those, I’ll tailor the snippets to your exact file paths/names and we can check off Milestone

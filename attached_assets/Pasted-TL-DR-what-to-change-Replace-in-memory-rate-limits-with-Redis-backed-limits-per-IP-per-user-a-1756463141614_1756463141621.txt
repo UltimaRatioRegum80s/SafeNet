@@ -1,0 +1,357 @@
+TL;DR (what to change)
+
+Replace in-memory rate limits with Redis-backed limits (per-IP + per-user) and apply to HTTP + Socket.IO.
+
+Add Idempotency-Key and a short-TTL content hash to short-circuit dupes before DB work.
+
+Switch proximity checks to PostGIS geography + GIST index (ST_DWithin) for fast, index-accelerated queries.
+
+Keep your Haversine as a fallback if PostGIS isn’t available.
+
+Make cooldowns/radii configurable via env.
+
+1) Env config (copy to .env)
+# Redis
+REDIS_URL=redis://default:password@localhost:6379
+
+# Incident rate limits (seconds)
+RATE_LIMITS_INCIDENT_WINDOW_SEC=10
+RATE_LIMITS_INCIDENT_ANON_WINDOW_SEC=20
+
+# Proximity dedupe
+DEDUPE_RADIUS_METERS=100
+DEDUPE_WINDOW_MINUTES=10
+
+# Idempotency
+IDEMPOTENCY_TTL_SEC=900
+
+2) PostGIS migration (Drizzle SQL)
+
+Keeps lat/long for back-compat; adds geog + GIST index. Safe to re-run.
+
+-- migrations/2025_08_29_postgis_proximity.sql
+CREATE EXTENSION IF NOT EXISTS postgis;
+
+ALTER TABLE incidents
+  ADD COLUMN IF NOT EXISTS geog geography(Point,4326);
+
+UPDATE incidents
+  SET geog = ST_SetSRID(ST_MakePoint(
+      (longitude::decimal)::double precision,
+      (latitude::decimal)::double precision
+  ), 4326)::geography
+WHERE geog IS NULL;
+
+CREATE INDEX IF NOT EXISTS incidents_geog_gist ON incidents USING GIST (geog);
+CREATE INDEX IF NOT EXISTS incidents_type_created_idx ON incidents (type, created_at DESC);
+
+
+Run this migration before deploying the code below. If PostGIS can’t be enabled in your DB, skip this file — the code falls back to Haversine.
+
+3) Drizzle schema tweak (add geog)
+// shared/schema.ts
+import * as pg from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+
+const geography = pg.customType<{ data: unknown }>({
+  dataType() { return "geography(Point,4326)"; }
+});
+
+export const incidents = pg.pgTable("incidents", {
+  // ...existing columns...
+  latitude: pg.decimal("latitude", { precision: 10, scale: 8 }).notNull(),
+  longitude: pg.decimal("longitude", { precision: 11, scale: 8 }).notNull(),
+  geog: geography("geog"), // nullable during rollout; fill in at insert
+  createdAt: pg.timestamp("created_at").default(sql`now()`),
+});
+
+4) Redis bootstrap
+// server/redis.ts
+import Redis from "ioredis";
+
+export const redis = new Redis(process.env.REDIS_URL!, {
+  maxRetriesPerRequest: 3,
+  enableOfflineQueue: false,
+});
+
+redis.on("error", (e) => console.error("[redis] error", e));
+
+5) Rate limit middleware (HTTP, Redis-backed)
+// server/middleware/incidentRateLimit.ts
+import type { Request, Response, NextFunction } from "express";
+import { RateLimiterRedis } from "rate-limiter-flexible";
+import { redis } from "../redis";
+
+const AUTH_WINDOW = Number(process.env.RATE_LIMITS_INCIDENT_WINDOW_SEC ?? 10);
+const ANON_WINDOW = Number(process.env.RATE_LIMITS_INCIDENT_ANON_WINDOW_SEC ?? 20);
+
+// 1 event per window (cooldown)
+const userLimiterAuth = new RateLimiterRedis({ storeClient: redis, keyPrefix: "rl:u:auth", points: 1, duration: AUTH_WINDOW });
+const userLimiterAnon = new RateLimiterRedis({ storeClient: redis, keyPrefix: "rl:u:anon", points: 1, duration: ANON_WINDOW });
+const ipLimiter        = new RateLimiterRedis({ storeClient: redis, keyPrefix: "rl:ip",      points: 1, duration: ANON_WINDOW });
+
+export async function incidentRateLimit(req: Request, res: Response, next: NextFunction) {
+  const userId = (req.session as any)?.userId || (req.headers["x-user-id"] as string | undefined);
+  const ip = req.ip;
+
+  try {
+    if (userId) await userLimiterAuth.consume(userId);
+    else        await userLimiterAnon.consume(ip);
+    await ipLimiter.consume(ip);
+    return next();
+  } catch {
+    return res.status(429).json({ error: "Too many reports. Please slow down." });
+  }
+}
+
+
+Add to Express boot: app.set('trust proxy', 1) so req.ip is correct behind proxies.
+
+6) Content hash + Idempotency helpers
+// server/lib/dedupe.ts
+import crypto from "crypto";
+
+export function sanitizeText(s = "") {
+  return s.replace(/<[^>]*>/g, "").replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+}
+
+export function normalizeText(s = "") {
+  return sanitizeText(s).toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+export function gridCell(lat: number, lon: number, meters = 50) {
+  const latStep = meters / 111_320; // deg per meter
+  const lonStep = meters / (111_320 * Math.cos((lat * Math.PI) / 180));
+  const latCell = Math.floor(lat / latStep);
+  const lonCell = Math.floor(lon / lonStep);
+  return `${latCell}:${lonCell}:${meters}`;
+}
+
+export function incidentContentKey(
+  type: string, title: string, lat: number, lon: number, gridMeters = 50
+) {
+  const t = normalizeText(`${type}|${title}`);
+  const cell = gridCell(lat, lon, gridMeters);
+  return crypto.createHash("sha256").update(`${t}|${cell}`).digest("hex");
+}
+
+// server/lib/idempotency.ts
+import { redis } from "../redis";
+const IDEM_TTL = Number(process.env.IDEMPOTENCY_TTL_SEC ?? 900);
+
+export async function assertIdempotency(key?: string) {
+  if (!key) return true;
+  const ok = await redis.set(`idem:${key}`, "1", "NX", "EX", IDEM_TTL);
+  return ok === "OK";
+}
+
+7) Storage: PostGIS proximity (with Haversine fallback)
+// server/storage.ts (diff: replace duplicate/nearby functions)
+import { db } from "./db";
+import { incidents } from "../shared/schema";
+import { sql, desc, and, eq } from "drizzle-orm";
+
+const RADIUS_M = Number(process.env.DEDUPE_RADIUS_METERS ?? 100);
+const WINDOW_MIN = Number(process.env.DEDUPE_WINDOW_MINUTES ?? 10);
+
+function postgisAvailable() {
+  // Cheap runtime hint – you can cache this after the first successful call.
+  return true; // set false to force Haversine fallback locally
+}
+
+export async function findDuplicateIncident(
+  type: string, latitude: number, longitude: number, withinMinutes = WINDOW_MIN
+) {
+  const since = new Date(Date.now() - withinMinutes * 60_000);
+
+  if (postgisAvailable()) {
+    const [row] = await db.execute(sql`
+      SELECT * FROM incidents
+      WHERE type = ${type}
+        AND created_at >= ${since}
+        AND ST_DWithin(
+          geog,
+          ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography,
+          ${RADIUS_M}
+        )
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+    return row as any || undefined;
+  }
+
+  // Fallback: Haversine (km)
+  const radiusKm = RADIUS_M / 1000;
+  const [row] = await db.select().from(incidents).where(and(
+    eq(incidents.type, type),
+    sql`${incidents.createdAt} >= ${since}`,
+    sql`(
+      6371 * acos(
+        cos(radians(${latitude})) *
+        cos(radians(${incidents.latitude}::decimal)) *
+        cos(radians(${incidents.longitude}::decimal) - radians(${longitude})) +
+        sin(radians(${latitude})) *
+        sin(radians(${incidents.latitude}::decimal))
+      )
+    ) <= ${radiusKm}`
+  )).limit(1);
+  return row || undefined;
+}
+
+export async function getIncidentsNearby(
+  latitude: number, longitude: number, radiusMeters: number, sinceHours = 12
+) {
+  const since = new Date(Date.now() - sinceHours * 3600_000);
+  if (postgisAvailable()) {
+    const rows = await db.execute(sql`
+      SELECT * FROM incidents
+      WHERE is_moderated = false
+        AND created_at >= ${since}
+        AND ST_DWithin(
+          geog,
+          ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography,
+          ${radiusMeters}
+        )
+      ORDER BY created_at DESC
+    `);
+    return rows as any[];
+  }
+
+  const radiusKm = radiusMeters / 1000;
+  return db.select().from(incidents)
+    .where(and(
+      sql`${incidents.createdAt} >= ${since}`,
+      sql`(
+        6371 * acos(
+          cos(radians(${latitude})) *
+          cos(radians(${incidents.latitude}::decimal)) *
+          cos(radians(${incidents.longitude}::decimal) - radians(${longitude})) +
+          sin(radians(${latitude})) *
+          sin(radians(${incidents.latitude}::decimal))
+        )
+      ) <= ${radiusKm}`
+    ))
+    .orderBy(desc(incidents.createdAt));
+}
+
+
+Ensure inserts set geog:
+
+// wherever you insert incidents:
+await db.execute(sql`
+  INSERT INTO incidents (id, user_id, type, title, description, latitude, longitude, severity, category, is_anonymous, state, duplicate_count, report_count, source, is_moderated, created_at, geog)
+  VALUES (${id}, ${userId}, ${type}, ${title}, ${description}, ${lat}, ${lon}, ${severity}, ${category}, ${isAnon}, 'new', 1, 0, ${source}, false, now(),
+    ST_SetSRID(ST_MakePoint(${lon}, ${lat}), 4326)::geography
+  )
+`);
+
+8) HTTP endpoint wiring (rate limit + idempotency + fast dupeshot)
+// server/routes.ts (excerpt)
+import { incidentRateLimit } from "./middleware/incidentRateLimit";
+import { assertIdempotency } from "./lib/idempotency";
+import { incidentContentKey, normalizeText, sanitizeText } from "./lib/dedupe";
+import { redis } from "./redis";
+import { findDuplicateIncident } from "./storage";
+
+app.set("trust proxy", 1);
+
+app.post("/api/incidents", incidentRateLimit, async (req, res) => {
+  const incidentData = req.body ?? {};
+  const sanitizedData = {
+    ...incidentData,
+    title: sanitizeText(incidentData.title),
+    description: sanitizeText(incidentData.description),
+  };
+
+  // Idempotency-Key (optional but recommended)
+  const idem = req.header("Idempotency-Key") ?? undefined;
+  if (idem && !(await assertIdempotency(idem))) {
+    return res.status(409).json({ error: "Duplicate submission (idempotency)" });
+  }
+
+  // Fast content hash short-circuit in Redis (same type+title ~same cell within window)
+  const lat = Number(sanitizedData.latitude);
+  const lon = Number(sanitizedData.longitude);
+  const contentKey = incidentContentKey(
+    sanitizedData.type,
+    sanitizedData.title,
+    lat, lon,
+    50 // grid meters
+  );
+  const dupTTL = Number(process.env.DEDUPE_WINDOW_MINUTES ?? 10) * 60;
+  const first = await redis.set(`content:${contentKey}`, "1", "NX", "EX", dupTTL);
+
+  // DB-level proximity dedupe (authoritative)
+  const duplicateIncident = await findDuplicateIncident(
+    sanitizedData.type, lat, lon, Number(process.env.DEDUPE_WINDOW_MINUTES ?? 10)
+  );
+
+  if (duplicateIncident) {
+    await storage.incrementDuplicateCount(duplicateIncident.id);
+    return res.json({ ...duplicateIncident, isDuplicate: true });
+  }
+
+  // proceed with creation (ensure geog is set on insert)
+  const created = await storage.createIncidentWithGeog(sanitizedData);
+  return res.json(created);
+});
+
+9) Socket.IO rate limiting (per-user/IP)
+// server/socket.ts (excerpt)
+import { RateLimiterRedis } from "rate-limiter-flexible";
+import { redis } from "./redis";
+
+const sockLimiter = new RateLimiterRedis({
+  storeClient: redis,
+  keyPrefix: "rl:socket:incident",
+  points: 1,
+  duration: Number(process.env.RATE_LIMITS_INCIDENT_WINDOW_SEC ?? 10),
+});
+
+io.on("connection", (socket) => {
+  socket.on("incident:new", async (data) => {
+    const reporterId = data?.reporterId || socket.data?.userId || socket.id;
+    const ip = socket.handshake.address;
+
+    try {
+      await sockLimiter.consume(`${reporterId}`);
+      await sockLimiter.consume(`ip:${ip}`);
+    } catch {
+      socket.emit("incident:error", { error: "Rate limit exceeded. Please wait." });
+      return;
+    }
+
+    // ...reuse same sanitize + duplicate logic as HTTP path...
+  });
+});
+
+10) What to delete/retire
+
+Remove the in-memory Map rate limiter + cleanup interval from server/incidentDatabase.ts.
+
+Keep your existing sanitize and RBAC logic — they’re solid.
+
+11) Client UX (tiny add)
+
+Show remaining cooldown seconds (optional):
+
+// After a 429, if server returns retry-after secs:
+if (res.status === 429) {
+  const retryAfter = res.headers.get("retry-after");
+  toast.error(retryAfter ? `Please retry in ${retryAfter}s.` : "Please slow down.");
+}
+
+
+(You can also return a Retry-After header from the middleware if you want to be fancy.)
+
+12) Test ideas (quick list)
+
+HTTP: 2 rapid POSTs → first 201, second 429 (anon & auth).
+
+Proximity: same type, ~80m, <10m → duplicate; 150m or >10m → new.
+
+Idempotency: same Idempotency-Key → 201 then 409.
+
+Socket: burst incident:new → first ok, second emits error.
+
+Fallback: force postgisAvailable=false → Haversine path still passes proximity tests.

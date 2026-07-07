@@ -1,0 +1,79 @@
+Make the 3 filter buttons bar sticky under your headers with consistent layering and blur.
+
+1) Define heights & z-index scale once (if you don’t already)
+
+in src/styles/globals.css
+
+:root {
+  --app-header-height: 64px;     /* desktop */
+  --app-subheader-height: 0px;   /* set if you have a subheader */
+  --app-mobile-header-height: 56px;
+  --app-filterbar-height: 48px;
+  --z-header: 50;
+  --z-filterbar: 40;
+  --z-inputbar: 40;
+}
+@supports ((-webkit-backdrop-filter: none) or (backdrop-filter: none)) {
+  .supports-backdrop\:bg-surface\/60 { background-color: rgb(15 23 42 / 0.6); }
+}
+
+2) Make FilterTabs sticky
+
+in src/components/filters/FilterTabs.tsx
+
+import { cn } from "@/lib/utils";
+
+type Props = { className?: string };
+
+export default function FilterTabs({ className }: Props) {
+  return (
+    <div
+      className={cn(
+        // sticky just below headers (desktop & mobile)
+        "sticky z-[var(--z-filterbar)]",
+        "top-[calc(var(--app-header-height)+var(--app-subheader-height))]",
+        // mobile override via responsive var if you use a mobile shell
+        "md:top-[calc(var(--app-header-height)+var(--app-subheader-height))]",
+        "backdrop-blur supports-backdrop:bg-surface/60 bg-slate-900/90",
+        "border-b border-white/10",
+        "px-3 py-2",
+        className
+      )}
+      role="tablist"
+    >
+      <div className="flex gap-2">
+        {/* your 3 buttons */}
+        {/* Example */}
+        <button className="px-4 py-2 rounded-xl bg-sky-500 text-white">All</button>
+        <button className="px-4 py-2 rounded-xl bg-transparent text-slate-200">Incidents</button>
+        <button className="px-4 py-2 rounded-xl bg-transparent text-slate-200">Chat</button>
+      </div>
+    </div>
+  );
+}
+
+3) Ensure the content scrolls beneath it
+
+Where your scrollable area is defined (e.g., AppShell or a page view), verify:
+
+<div className="relative h-full overflow-y-auto">
+  {/* Header (z-50, sticky at top-0) */}
+  <Header />
+
+  {/* Filter bar (sticky, below header) */}
+  <FilterTabs />
+
+  {/* Content */}
+  <main className="min-h-[120vh]">...</main>
+
+  {/* Bottom input bar (sticky bottom, z-40) */}
+  <InputBar />
+</div>
+
+4) Common gotchas to check
+
+The parent of a position: sticky element must not have overflow: hidden/auto (other than the scrolling container itself) or a transform applied. If your FilterTabs lives inside a transformed or overflow-hidden wrapper, move it up one level or remove the transform.
+
+For iOS Safari, keep backdrop-blur and also add the non-standard -webkit-backdrop-filter via Tailwind plugin if you use one; otherwise the class above still works.
+
+Keep the z-index ladder consistent: header z-50, filter bar z-40, content z-0, input bars z-40.

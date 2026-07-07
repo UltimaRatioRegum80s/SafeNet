@@ -1,0 +1,127 @@
+Filtered markers: 0
+Active filter: all
+Time filter: all
+[Map] useEffect trigger - mapReady: true, mapRef: true, incidents: 0
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://reactjs.org/link/invalid-hook-call for tips about how to debug and fix this problem.
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://reactjs.org/link/invalid-hook-call for tips about how to debug and fix this problem.
+at Object.throwInvalidHookError (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-WERSD76P.js?v=822dfa27:11501:17)
+at useRef (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-3TFVT2CW.js?v=822dfa27:1074:29)
+at setupRealtimeAndWatchdog (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/pages/community/Map.tsx:433:25)
+at https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/pages/community/Map.tsx:310:5
+at commitHookEffectListMount (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-WERSD76P.js?v=822dfa27:16915:34)
+at commitPassiveMountOnFiber (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-WERSD76P.js?v=822dfa27:18156:19)
+at commitPassiveMountEffects_complete (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-WERSD76P.js?v=822dfa27:18129:17)
+at commitPassiveMountEffects_begin (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-WERSD76P.js?v=822dfa27:18119:15)
+at commitPassiveMountEffects (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-WERSD76P.js?v=822dfa27:18109:11)
+at flushPassiveEffectsImpl (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-WERSD76P.js?v=8
+
+The above error occurred in the <CommunityMap> component:
+
+    at CommunityMap (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/pages/community/Map.tsx:143:22)
+    at main
+    at div
+    at AppLayout (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/components/layout/AppLayout.tsx:19:3)
+    at Route (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=822dfa27:265:16)
+    at Switch (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=822dfa27:321:17)
+    at Router (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/App.tsx?v=-yVZ4xlakWHg1Ul2ELGkb:78:22)
+    at ThemeProvider (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/components/ThemeProvider.tsx:25:3)
+    at QueryClientProvider (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@tanstack_react-query.js?v=822dfa27:2805:3)
+    at App (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/App.tsx?v=-yVZ4xlakWHg1Ul2ELGkb:333:3)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+
+at CommunityMap (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/pages/community/Map.tsx:143:22)
+at main
+at div
+at AppLayout (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/components/layout/AppLayout.tsx:19:3)
+at Route (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=822dfa27:265:16)
+at Switch (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=822dfa27:321:17)
+at Router (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/App.tsx?v=-yVZ4xlakWHg1Ul2ELGkb:78:22)
+at ThemeProvider (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/components/ThemeProvider.tsx:25:3)
+at QueryClientProvider (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@tanstack_react-query.js?v=822dfa27:2805:3)
+at App (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/App.tsx?v=-yVZ4xlakWHg1Ul2ELGkb:333:3)
+
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+at t.value (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:17465)
+at new t (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:12630)
+at t.value (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:32766)
+at https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:34400
+
+
+The above error occurred in the <CommunityMap> component:
+
+    at CommunityMap (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/pages/community/Map.tsx:143:22)
+    at main
+    at div
+    at AppLayout (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/components/layout/AppLayout.tsx:19:3)
+    at Route (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=822dfa27:265:16)
+    at Switch (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=822dfa27:321:17)
+    at Router (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/App.tsx?v=-yVZ4xlakWHg1Ul2ELGkb:78:22)
+    at ThemeProvider (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/components/ThemeProvider.tsx:25:3)
+    at QueryClientProvider (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@tanstack_react-query.js?v=822dfa27:2805:3)
+    at App (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/App.tsx?v=-yVZ4xlakWHg1Ul2ELGkb:333:3)
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+
+
+at CommunityMap (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/pages/community/Map.tsx:143:22)
+at main
+at div
+at AppLayout (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/components/layout/AppLayout.tsx:19:3)
+at Route (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=822dfa27:265:16)
+at Switch (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/wouter.js?v=822dfa27:321:17)
+at Router (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/App.tsx?v=-yVZ4xlakWHg1Ul2ELGkb:78:22)
+at ThemeProvider (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/components/ThemeProvider.tsx:25:3)
+at QueryClientProvider (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/@tanstack_react-query.js?v=822dfa27:2805:3)
+at App (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/App.tsx?v=-yVZ4xlakWHg1Ul2ELGkb:333:3)
+
+
+Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://reactjs.org/link/error-boundaries to learn more about error boundaries.
+at t.value (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:17465)
+at new t (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:12630)
+at t.value (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:32766)
+at https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/__replco/static/devtools/eruda/3.2.3/eruda.js:2:34400
+Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for one of the following reasons:
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://reactjs.org/link/invalid-hook-call for tips about how to debug and fix this problem.
+1. You might have mismatching versions of React and the renderer (such as React DOM)
+2. You might be breaking the Rules of Hooks
+3. You might have more than one copy of React in the same app
+See https://reactjs.org/link/invalid-hook-call for tips about how to debug and fix this problem.
+at Object.throwInvalidHookError (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-WERSD76P.js?v=822dfa27:11501:17)
+at useRef (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-3TFVT2CW.js?v=822dfa27:1074:29)
+at setupRealtimeAndWatchdog (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/pages/community/Map.tsx:433:25)
+at https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/src/pages/community/Map.tsx:310:5
+at commitHookEffectListMount (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-WERSD76P.js?v=822dfa27:16915:34)
+at commitPassiveMountOnFiber (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-WERSD76P.js?v=822dfa27:18156:19)
+at commitPassiveMountEffects_complete (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-WERSD76P.js?v=822dfa27:18129:17)
+at commitPassiveMountEffects_begin (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-WERSD76P.js?v=822dfa27:18119:15)
+at commitPassiveMountEffects (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-WERSD76P.js?v=822dfa27:18109:11)
+at flushPassiveEffectsImpl (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/chunk-WERSD76P.js?v=8
+Cannot read properties of undefined (reading '_leaflet_pos')
+at getPosition (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/leaflet.js?v=822dfa27:1570:19)
+at NewClass._getMapPanePos (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/leaflet.js?v=822dfa27:2989:18)
+at NewClass._getNewPixelOrigin (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/leaflet.js?v=822dfa27:3001:76)
+at NewClass._move (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/leaflet.js?v=822dfa27:2806:36)
+at NewClass._onZoomTransitionEnd (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/leaflet.js?v=822dfa27:3152:16)
+Cannot read properties of undefined (reading '_leaflet_pos')
+at getPosition (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/leaflet.js?v=822dfa27:1570:19)
+at NewClass._getMapPanePos (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/leaflet.js?v=822dfa27:2989:18)
+at NewClass._getNewPixelOrigin (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/leaflet.js?v=822dfa27:3001:76)
+at NewClass._move (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/leaflet.js?v=822dfa27:2806:36)
+at NewClass._onZoomTransitionEnd (https://f31e0277-a7fe-48a2-8e8e-2c5be670a984-00-26e39qa07pf29.picard.replit.dev/@fs/home/runner/workspace/node_modules/.vite/deps/leaflet.js?v=822dfa27:3152:16)

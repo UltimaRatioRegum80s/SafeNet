@@ -1,0 +1,138 @@
+perfect—data is flowing from the Feed cache; we just need to wire the UI (panel + markers) to that shared data.
+
+here’s a minimal, no-UI-change patch. pick one of the two ways for the panel (A or B). markers part is the same for both.
+
+1) Markers: use the shared incidents
+
+In client/src/pages/community/Map.tsx (or the map page file), import and use the hook and upsert markers.
+
+// Map.tsx
+import { useRef, useEffect } from "react";
+import { MapContainer } from "react-leaflet";
+import L from "leaflet";
+import { useFeedIncidents } from "@/features/incidents/useFeedIncidents";
+import type { Incident } from "@/lib/incidentsShape";
+
+const markerBag = new Map<string, L.Marker>();
+
+export default function CommunityMap() {
+  const mapRef = useRef<L.Map | null>(null);
+  const { incidents } = useFeedIncidents(); // ✅ same source as Feed
+
+  // add/upsert markers whenever shared incidents change
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || incidents.length === 0) return;
+    upsertMarkers(map, incidents);
+    // optional debug:
+    console.log("[Map] drew markers:", incidents.length);
+  }, [incidents]);
+
+  return (
+    <div className="grid grid-cols-12 gap-4">
+      <div className="col-span-7">
+        <MapContainer whenCreated={(m) => (mapRef.current = m)}>
+          {/* your existing layers/controls */}
+        </MapContainer>
+      </div>
+
+      <div className="col-span-5">
+        {/* Use A or B below for the panel */}
+        {/* <RecentIncidentsPanel />  // if you do option A */}
+        {/* <RecentIncidentsPanel incidents={incidents} /> // if you do option B */}
+      </div>
+    </div>
+  );
+}
+
+function upsertMarkers(map: L.Map, items: Incident[]) {
+  for (const it of items) {
+    if (markerBag.has(it.id)) continue;
+    const marker = L.marker([it.lat, it.lng]); // keep your existing icon/cluster
+    marker.addTo(map);
+    markerBag.set(it.id, marker);
+  }
+}
+
+2) Panel: wire to the same data
+Option A (cleanest): panel reads the hook directly
+
+Update/create client/src/features/map/RecentIncidentsPanel.tsx:
+
+import { useFeedIncidents } from "@/features/incidents/useFeedIncidents";
+
+export default function RecentIncidentsPanel() {
+  const { incidents } = useFeedIncidents(); // ✅ same cache as Feed
+
+  // TEMP debug (remove after): 
+  console.log("[Panel] incidents length:", incidents?.length);
+
+  if (!incidents || incidents.length === 0) {
+    return (
+      <section className="card">
+        <div className="card-body">No incidents.</div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="card">
+      <div className="card-body space-y-2">
+        {incidents.slice(0, 20).map((i) => (
+          <div key={i.id} className="rounded-xl bg-neutral-800 p-3">
+            <div className="font-medium">{i.title}</div>
+            <div className="text-xs opacity-70">
+              {new Date(i.createdAt).toLocaleTimeString()}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+
+Then ensure the Map page renders <RecentIncidentsPanel /> (no props).
+
+Option B (if the panel is inline or already exists with props):
+
+Keep your existing panel component and just pass the shared incidents:
+
+// inside Map.tsx JSX where the panel renders:
+<RecentIncidentsPanel incidents={incidents} />
+
+// and in the panel component:
+export default function RecentIncidentsPanel({ incidents }: { incidents: Incident[] }) {
+  console.log("[Panel] incidents length:", incidents?.length);
+  if (!incidents?.length) return <section className="card"><div className="card-body">No incidents.</div></section>;
+  // ...same render as above
+}
+
+
+Important: remove/disable any internal fetch/store inside the panel; it should purely render what it receives (Option B) or what the hook returns (Option A). If you leave its old fetch, it will keep showing “No incidents.”
+
+3) quick sanity checks
+
+open the Map page, watch console:
+
+you should see [Map] Feed incidents synced: 50 (from your hook logs)
+
+you should see [Panel] incidents length: 50
+
+you should see [Map] drew markers: 50
+
+the right panel should list items (same as Feed), and markers should be on the map.
+
+no UI/styling changes were made—just data wiring.
+
+fallback (only if panel still says “No incidents.”)
+
+That means the panel you’re seeing is not the one you edited. Search the repo for the visible string:
+
+rg -n "Recent Incidents"
+rg -n "No incidents\."
+
+
+Open the file where that exact markup lives and apply Option A or B there.
+
+Replit, once you connect the panel to useFeedIncidents() or pass the prop, this should light up immediately. Let me know which file actually renders the “Recent Incidents” box (path + component name) if it’s different, and I’ll tailor the exact patch lines.

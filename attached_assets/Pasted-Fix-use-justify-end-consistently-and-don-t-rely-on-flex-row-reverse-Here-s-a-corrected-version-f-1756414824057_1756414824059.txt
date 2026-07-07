@@ -1,0 +1,62 @@
+Fix: use justify-end consistently and don’t rely on flex-row-reverse
+
+Here’s a corrected version:
+
+function ChatBubble({ item, currentUser, users }: { item: ChatItem; currentUser: User | null; users: Record<string, User> }) {
+  const mine = item.userId === currentUser?.id;
+  const messageUser = users[item.userId] || { id: item.userId, name: 'User' };
+  const displayName = getUserDisplayName(messageUser);
+
+  return (
+    <div className={`px-2 w-full mb-2 flex ${mine ? "justify-end" : "justify-start"}`}>
+      <div className={`flex items-end gap-2 max-w-[92%] ${mine ? "flex-row" : "flex-row"}`}>
+        {/* Avatar on the correct side */}
+        {!mine && (
+          <Avatar className="h-7 w-7 shrink-0">
+            {messageUser.avatarUrl ? (
+              <AvatarImage src={messageUser.avatarUrl} alt={displayName} />
+            ) : (
+              <AvatarFallback className="bg-zinc-700 text-white text-[10px]">
+                {nameToInitials(displayName)}
+              </AvatarFallback>
+            )}
+          </Avatar>
+        )}
+
+        {/* Message bubble */}
+        <div
+          className={`rounded-2xl px-3 py-2 text-sm leading-snug whitespace-pre-wrap break-words
+            ${mine ? "bg-blue-600 text-white rounded-br-sm" : "bg-zinc-800 text-zinc-100 rounded-bl-sm"}
+          `}
+        >
+          {item.message}
+        </div>
+
+        {/* Avatar for mine (on the right side of bubble group) */}
+        {mine && (
+          <Avatar className="h-7 w-7 shrink-0">
+            {messageUser.avatarUrl ? (
+              <AvatarImage src={messageUser.avatarUrl} alt={displayName} />
+            ) : (
+              <AvatarFallback className="bg-blue-600 text-white text-[10px]">
+                {nameToInitials(displayName)}
+              </AvatarFallback>
+            )}
+          </Avatar>
+        )}
+      </div>
+    </div>
+  );
+}
+
+What this does:
+
+Outer wrapper: justify-start for others, justify-end for you → locks the whole thing left/right.
+
+Inner wrapper: always flex-row. We manually place the avatar before/after the bubble instead of flipping the flex direction.
+
+Result:
+
+Your bubble is on the far right edge with avatar to its right → just like WhatsApp.
+
+Others’ bubble is on the far left edge with avatar to its left.

@@ -1,0 +1,95 @@
+gotcha — that gray vertical “rail” behind the Leaflet buttons is a CSS/stacking bug, not a tiles issue. Something in your styles is giving the Leaflet control containers a background and/or a full-height box, so it looks like the tiles “aren’t there” under the buttons.
+
+🟣 GPT → Replit — fix the “tiles hidden under controls” (copy-paste)
+
+Add these resets to client/src/index.css (or wherever you keep global map styles). They make the Leaflet control containers fully transparent, non-blocking, and the buttons still clickable.
+
+/* ---- Leaflet control rail reset: don't cover tiles ---- */
+.leaflet-control-container,
+.leaflet-top,
+.leaflet-bottom,
+.leaflet-left,
+.leaflet-right {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Some custom themes add pseudo-elements; nuke them */
+.leaflet-control-container::before,
+.leaflet-top::before,
+.leaflet-bottom::before,
+.leaflet-left::before,
+.leaflet-right::before {
+  content: none !important;
+}
+
+/* Prevent a full-height rail capturing clicks */
+.leaflet-left,
+.leaflet-right {
+  pointer-events: none;             /* container ignores events */
+  width: auto !important;
+  height: auto !important;
+}
+
+/* Allow the actual controls to be interactive */
+.leaflet-left .leaflet-control,
+.leaflet-right .leaflet-control,
+.leaflet-top .leaflet-control,
+.leaflet-bottom .leaflet-control {
+  pointer-events: auto;
+  background: transparent;          /* keep buttons’ own backgrounds only */
+  box-shadow: none;
+  margin: 0.25rem 0.25rem;          /* tidy spacing */
+}
+
+/* Keep Leaflet UI layering sane */
+.leaflet-pane,
+.leaflet-top,
+.leaflet-bottom { z-index: 400; }   /* markers/controls */
+.leaflet-popup-pane { z-index: 600; }
+
+Why this works
+
+Somewhere a style (often from a card/utility class or a theme) is applied to .leaflet-left / .leaflet-top that:
+
+stretches it vertically,
+
+gives it a dark background,
+
+sits above the tile pane.
+
+These resets force those containers to be transparent and size to their contents, so you’ll see tiles right under the buttons again.
+
+quick verification for @RDM
+
+Reload the map page.
+
+Look under the + / − buttons (top-left). You should now see the map tiles clearly with no dark strip.
+
+If you still see a strip, open DevTools → Elements, select the dark area, and tell us which selector shows a background there — we’ll zero it out specifically.
+
+side note: your chips are still bottom-left
+
+I can see “Submitting…” / “Saved offline” are still bottom-left. If you want them out of the way now, add this tiny override (no portal required):
+
+/* Force chips to viewport top-right no matter where they render */
+#nn-status-stack,
+.nn-status-stack {
+  position: fixed !important;
+  top: 12px !important;
+  right: 12px !important;
+  left: auto !important;
+  bottom: auto !important;
+  z-index: 2147483000 !important;
+}
+
+
+(Use the correct id/class your chip container uses.)
+
+Replit → GPT, please report back:
+
+After the CSS reset, is the grey rail gone?
+
+Which selector (if any) was adding the background before (so we can prevent regressions)?
+
+Once that’s clear, we’ll finish the network bit (why posts are “Saved offline”) with the status code from /api/incidents.

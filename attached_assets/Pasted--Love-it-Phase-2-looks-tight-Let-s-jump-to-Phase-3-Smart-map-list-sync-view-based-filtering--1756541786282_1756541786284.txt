@@ -1,0 +1,150 @@
+🔥 Love it. Phase 2 looks tight. Let’s jump to Phase 3 = Smart map–list sync + view-based filtering, still Leaflet-safe and non-disruptive. Here are surgical, drop-in patches.
+
+1) Map ↔ List selection sync (highlight row + open sheet)
+A) Add selected state in the page and pass to sheet
+// client/src/pages/community/Map.tsx  (excerpt)
+const [openSheet, setOpenSheet] = useState(false);
+const [selectedId, setSelectedId] = useState<string | null>(null);
+
+// when creating markers, bind click -> setSelectedId + open sheet
+function bindMarkerEvents(marker: L.Marker, id: string) {
+  marker.on("click", () => {
+    setSelectedId(id);
+    setOpenSheet(true);
+    // optional: gentle center
+    const inc = incidents.find(i => i.id === id);
+    if (inc) mapRef.current?.setView([inc.position.lat, inc.position.lng], Math.max(15, mapRef.current.getZoom()), { animate: true });
+  });
+}
+
+// Pass to IncidentSheet
+<IncidentSheet
+  open={openSheet}
+  onOpenChange={setOpenSheet}
+  incidents={incidents}
+  selectedId={selectedId}
+  onSelect={(id) => {
+    setSelectedId(id);
+    const i = incidents.find(x => x.id === id);
+    if (i) mapRef.current?.setView([i.position.lat, i.position.lng], 16, { animate: true });
+  }}
+/>
+
+B) Update the sheet to style the active row + auto-scroll
+// client/src/components/IncidentSheet.tsx  (only additions)
+type Props = {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  incidents: IncidentRowData[];
+  onSelect: (id: string) => void;
+  selectedId?: string | null;             // NEW
+};
+
+// inside the list
+<div className="px-2 pb-3 overflow-y-auto [@supports(height:100svh)]:max-h-[calc(100svh-220px)]" ref={listRef}>
+  {filtered.map(i => {
+    const isActive = i.id === selectedId;
+    return (
+      <button
+        key={i.id}
+        onClick={() => onSelect(i.id)}
+        aria-selected={isActive}
+        className={`w-full text-left mb-2 p-3 rounded-2xl border transition
+          ${isActive ? "bg-white/15 border-white/30" : "bg-white/5 border-white/10 hover:bg-white/10"}
+        `}
+        ref={el => { if (isActive && el) el.scrollIntoView({ block: "nearest", behavior: "smooth" }); }}
+      >
+        {/* …row content unchanged… */}
+      </button>
+    );
+  })}
+</div>
+
+2) “Only show what’s on the map” (BBox view filter)
+A) Hook to track bounds
+// client/src/hooks/useLeafletBounds.ts
+import { useEffect, useState } from "react";
+import type { Map as LeafletMap, LatLngBounds } from "leaflet";
+
+export type BBox = { north: number; south: number; east: number; west: number };
+
+export default function useLeafletBounds(map: LeafletMap | null) {
+  const [bbox, setBbox] = useState<BBox | null>(null);
+
+  useEffect(() => {
+    if (!map) return;
+    const update = () => {
+      const b: LatLngBounds = map.getBounds();
+      setBbox({ north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() });
+    };
+    update();
+    map.on("moveend zoomend", update);
+    return () => { map.off("moveend zoomend", update); };
+  }, [map]);
+
+  return bbox;
+}
+
+B) Use it in the map page and filter client-side (no API change)
+// client/src/pages/community/Map.tsx (excerpt)
+import useLeafletBounds from "@/hooks/useLeafletBounds";
+
+const bbox = useLeafletBounds(mapRef.current);
+
+// derive visibleIncidents without touching your query/socket layers
+const visibleIncidents = useMemo(() => {
+  if (!bbox) return incidents;
+  const { north, south, east, west } = bbox;
+  return incidents.filter(i => {
+    const { lat, lng } = i.position;
+    return lat <= north && lat >= south && lng <= east && lng >= west;
+  });
+}, [incidents, bbox]);
+
+// feed visibleIncidents to the sheet instead of full list
+<IncidentSheet
+  open={openSheet}
+  onOpenChange={setOpenSheet}
+  incidents={visibleIncidents}
+  selectedId={selectedId}
+  onSelect={/* same as above */}
+/>
+
+
+If you prefer server-side filtering later, just append ?bbox=n,s,e,w to your existing React Query call—no UI change needed.
+
+3) Tiny UX win: marker “pulse” when selected (pure CSS)
+/* client/src/styles/globals.css */
+.nn-marker-pulse {
+  box-shadow: 0 0 0 0 rgba(255,255,255,0.5);
+  animation: nn-pulse 1.6s infinite;
+}
+@keyframes nn-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255,255,255,0.5); }
+  70% { box-shadow: 0 0 0 14px rgba(255,255,255,0); }
+  100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+}
+
+
+Apply when rendering the selected marker icon:
+
+// wherever you build the marker icon element
+const el = L.DomUtil.create("div", `your-marker-class ${id === selectedId ? "nn-marker-pulse" : ""}`);
+
+4) Optional: open sheet when new incident arrives in view
+// socket handler (excerpt)
+socket.on("incident:new", (row) => {
+  const inc = adaptIncident(row);        // if you use the adapter
+  setIncidents(prev => [inc, ...prev]);
+  // if new item is within current bbox, surface it
+  if (bbox && inc.position.lat <= bbox.north && inc.position.lat >= bbox.south &&
+      inc.position.lng <= bbox.east  && inc.position.lng >= bbox.west) {
+    setSelectedId(inc.id);
+    setOpenSheet(true);
+  }
+});
+
+
+That’s it—keeps architecture intact, boosts discoverability (list matches the map), and adds selection clarity.
+
+If you want, I can also supply a minimal “Filter” FAB panel (date range + severity) that reuses your existing query params, but the above is clean to ship now.

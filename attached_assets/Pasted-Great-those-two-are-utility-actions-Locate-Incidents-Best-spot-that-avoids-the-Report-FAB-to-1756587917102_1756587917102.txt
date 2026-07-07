@@ -1,0 +1,62 @@
+Great—those two are “utility” actions (Locate & Incidents). Best spot that avoids the Report FAB, top bar, and attribution:
+✅ Recommendation: Bottom-center mini dock (horizontal)
+Why: clear of the Report FAB (bottom-right), easy thumb reach, doesn’t fight the top menu, and stays above the attribution bar.
+
+
+Placement: left:50% + translateX(-50%), bottom: env(safe-area-inset-bottom) + 72px (tweak 64–88px based on your attribution height).
+
+
+Drop-in CSS/TSX
+// FABStack.tsx (new mini dock for the two buttons)
+<div
+  className="
+    pointer-events-auto
+    absolute z-[54] left-1/2 -translate-x-1/2
+    bottom-[calc(env(safe-area-inset-bottom)+72px)]
+    flex items-center gap-3
+  "
+>
+  <button
+    className="h-12 w-12 rounded-full bg-foreground/80 text-white shadow-lg
+               backdrop-blur-md dark:bg-foreground/70"
+    aria-label="Locate me"
+    onClick={onLocate}
+  >
+    <TargetIcon className="h-5 w-5 mx-auto" />
+  </button>
+
+  <button
+    className="h-12 w-12 rounded-full bg-foreground/80 text-white shadow-lg
+               backdrop-blur-md dark:bg-foreground/70"
+    aria-label="Open incidents"
+    onClick={onToggleList}
+  >
+    <ListIcon className="h-5 w-5 mx-auto" />
+  </button>
+</div>
+
+Responsive polish
+On md+, lift slightly so it never overlaps the sheet header:
+
+
+@media (min-width:768px){
+  .nn-bottom-center-dock{ bottom: calc(env(safe-area-inset-bottom) + 88px); }
+}
+
+When the incident sheet >50% open, fade it:
+
+
+<div className={cn("nn-bottom-center-dock transition-opacity",
+  isSheetExpanded ? "opacity-0 pointer-events-none" : "opacity-100")}>
+  {/* buttons */}
+</div>
+
+
+Alternatives (if you prefer)
+Right-center vertical (top:50%, right:16px) — super clean on tablets; slightly less thumb-friendly on tall phones.
+
+
+Bottom-left (mirror of current) — safe from Report FAB, but watch the Leaflet attribution; add bottom: calc(env(safe-area-inset-bottom)+72px).
+
+
+I’d implement the bottom-center dock first; it consistently reads well in your screenshots for iPhone/Pixel/Samsung sizes.

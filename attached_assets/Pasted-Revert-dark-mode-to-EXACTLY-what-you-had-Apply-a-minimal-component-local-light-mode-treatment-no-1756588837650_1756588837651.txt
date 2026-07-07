@@ -1,0 +1,103 @@
+Revert dark mode to EXACTLY what you had.
+
+Apply a minimal, component-local light-mode treatment (no global overrides).
+
+Below is a surgical patch that touches only the sheet component and keeps dark mode identical.
+
+1) DrawerContent: keep dark as-is, strengthen only light
+// IncidentSheet.tsx
+import { Drawer, DrawerContent } from "vaul";
+import { cn } from "@/lib/utils";
+
+export function IncidentSheet({ open, onOpenChange, children }: Props) {
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerContent
+        className={cn(
+          // === DARK MODE: unchanged (your original classes) ===
+          "dark:rounded-t-3xl dark:bg-background/60 dark:backdrop-blur-md dark:border dark:border-white/10",
+
+          // === LIGHT MODE: clear, readable glass ===
+          "rounded-t-3xl border border-border/60 backdrop-blur-md",
+          // base fill (not fully opaque, but strong enough over pale tiles)
+          "bg-white/92 supports-[backdrop-filter]:bg-white/85",
+          // separation from map
+          "shadow-[0_16px_40px_rgba(0,0,0,0.12)]",
+
+          // layout
+          "relative"
+        )}
+      >
+        {/* light-mode header scrim only (no effect in dark) */}
+        <div
+          className="absolute inset-x-0 top-0 h-[26%] rounded-t-3xl
+                     bg-gradient-to-b from-white/92 via-white/78 to-transparent
+                     pointer-events-none dark:hidden"
+        />
+        {children}
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+
+Why this won’t regress dark mode: all light-mode tweaks are not under dark:; the dark path uses your exact original classes.
+
+2) Cards inside the sheet: light pop, dark unchanged
+// IncidentList.tsx (where each card renders)
+import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+
+<Card
+  className={cn(
+    // DARK: unchanged look
+    "dark:backdrop-blur-md dark:bg-white/5 dark:border dark:border-white/10",
+
+    // LIGHT: slightly stronger surface
+    "bg-white/96 border border-border/60 shadow-sm",
+
+    "rounded-2xl"
+  )}
+>
+  {/* content */}
+</Card>
+
+3) Text & controls: ensure light-mode contrast only
+
+Make sure any “muted” text isn’t using text-white/xx:
+
+// header actions / chips
+<Button
+  variant="ghost"
+  className="text-foreground/90 hover:text-foreground dark:text-white/90 dark:hover:text-white"
+>
+  In view
+</Button>
+
+
+Unselected chips in light mode should have a faint fill instead of near-transparent:
+
+// chip classes example
+"className=bg-black/5 dark:bg-white/10 text-foreground/80 dark:text-white/80"
+
+4) Rollback any globals that caused the regression
+
+If you added .nn-sheet / .nn-sheet-card in globals.css, remove them for now so nothing collides with dark mode tokens. We can always re-introduce a global util later once you’re happy with the local look.
+
+5) Quick QA checklist
+
+Theme toggle:
+
+Dark looks exactly like the older screenshot (same opacity, borders, blur).
+
+Light header & cards are readable over very pale tiles.
+
+No extra DOM except a single div for the light-only scrim (hidden in dark).
+
+Vaul handle & rounded corners unaffected.
+
+No z-index issues; scrim is pointer-events-none.
+
+If you want the light surface even stronger, bump bg-white/92 → /95 on the DrawerContent and bg-white/96 → /98 on cards. But try the values above first—they usually keep the glass vibe without wash-out.
+
+Ping me with a fresh screenshot after this patch and I’ll fine-tune the exact opacities to your palette.

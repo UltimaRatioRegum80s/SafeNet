@@ -1,0 +1,139 @@
+High-impact fixes
+
+Moderation & “admin only” actions are unprotected
+
+Any client can moderate an incident by setting x-user-id; there’s no role check. Add RBAC middleware and require a verified role. 
+
+Same for the “Verify user (admin only)” route—there’s a comment, but no enforcement. 
+
+Sensitive fallback session secret
+
+SESSION_SECRET falls back to a dev literal in production—rotate secrets and fail fast if unset. 
+
+Over-logging response bodies (PII leak risk)
+
+Middleware captures and logs entire JSON responses for every /api call. Keep this for dev only, redact, or cap size. 
+
+Error handler re-throws after responding
+
+throw err after res.status(...).json(...) can crash the process. Remove the throw or forward to a top-level handler. 
+
+XSS sanitization is inconsistent
+
+WebSocket incident creation strips tags in description, but HTTP /api/incidents doesn’t sanitize title/description. Add server-side sanitization (or strict escaping in the UI) for both paths. 
+ 
+
+Rate limiting: socket path only
+
+checkRateLimit is applied to Socket.IO events, not the HTTP create route. Apply it (and ideally move to Redis) on /api/incidents. 
+ 
+ 
+
+Correctness & consistency
+
+Field name mismatch (lat/lng vs latitude/longitude)
+
+WebSocket & SQLite use lat/lng, Postgres & HTTP routes use latitude/longitude. Standardize one shape at the API boundary to avoid subtle bugs. 
+ 
+ 
+
+Falsy checks on coordinates
+
+if (!latitude || !longitude) rejects 0 (valid in general). Use explicit == null or Number.isFinite checks. 
+
+Same pattern exists in the SQLite validator: !data.lat || !data.lng. Prefer numeric guards. 
+
+Dual data stores increase risk
+
+You have Postgres (Drizzle) and a local SQLite incidentDB. This duplicates logic and field names. Consolidate on Postgres for one source of truth. 
+ 
+
+Performance & scalability
+
+Geospatial queries without an index
+
+Nearby query uses a Haversine expression in SQL; that’s hard to index. Add a bounding box prefilter and/or move to PostGIS with a GiST index for POINT(longitude, latitude). 
+ 
+
+In-memory rate limit
+
+Current limiter is a Map (per-process). Use Redis or DB table so limits hold under horizontal scaling. 
+
+Socket.IO CORS is open
+
+origin: "*". Lock this to your domains/environments. 
+
+Security & hardening
+
+Session cookie & security headers
+
+Cookie is sameSite: 'lax'. For installed PWAs you may need SameSite=None; Secure (HTTPS only). Also add Helmet/CSP. 
+
+Admin/role gates for follow-up routes
+
+/api/incidents/:id/report, /follow, /unfollow all trust x-user-id. Enforce session + roles where appropriate. 
+ 
+
+Return messages
+
+Several endpoints return raw error.message. Standardize to safe error envelopes and map DB errors to user-friendly messages (you already partly do this in auth). 
+ 
+
+Developer experience & cleanup
+
+Duplicate “locations” endpoints
+
+You expose both singular and plural paths for countries/cities. Consider one canonical path to reduce surface area. 
+ 
+
+Response shape consistency
+
+Auth returns { ok: true, user } while other routes return raw objects. Adopt a single response envelope across the API. 
+ 
+
+Decimal handling
+
+You store decimals as strings (Drizzle), but sometimes pass numbers; you explicitly toString() in updateUserLocation. Be consistent at the boundary. 
+
+Quick code changes (concrete)
+
+RBAC middleware (apply to verify/moderate):
+
+Read roles from session (req.session.userId → storage.getUser → roles) and check required set (e.g., ['police','municipal','security','fire','medical','ngo']). Then block with 403 if missing. 
+
+Sanitize HTTP incident input (mirror WS path):
+
+Strip tags or escape title and description before insert on /api/incidents. 
+
+Apply rate limit to HTTP create:
+
+The same checkRateLimit used in sockets—call it in /api/incidents using (session.userId || ip) as key. 
+
+Strong param guards:
+
+Replace if (!latitude || !longitude) with:
+
+const lat = Number(latitude), lng = Number(longitude);
+if (!Number.isFinite(lat) || !Number.isFinite(lng)) { ... }
+
+
+Unify lat/lng naming:
+
+Standardize API to latitude/longitude (matches Postgres), then convert to lat/lng only where you still use the local SQLite store—or remove the SQLite path entirely. 
+ 
+
+Tighten CORS:
+
+Set Socket.IO origin to your known hosts. 
+
+Stop re-throwing in error handler:
+
+Log and return; avoid throw err after sending. 
+
+Optional but valuable
+
+PostGIS for proximity queries; if not, add a WHERE between prefilter (lat/lng ± Δ) before Haversine to let indexes help. 
+
+Password policy (Zod on signup) beyond min(6). 
+
+Mask PII in logs and add request IDs.

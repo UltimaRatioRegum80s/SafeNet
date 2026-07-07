@@ -1,0 +1,131 @@
+🔎 What Is Actually Happening
+
+You click Sign in with Google
+
+/api/auth/google runs
+
+Passport checks for Google strategy
+
+Strategy is NOT registered (because secrets missing)
+
+Route returns 200 (empty fallback)
+
+Frontend reloads
+
+You loop back to loading screen
+
+That 401 on /api/auth/me is normal — it just means no session exists.
+
+✅ What You Need To Fix (Exactly)
+
+You must ensure the secrets are:
+
+Present
+
+Saved
+
+AND the server is restarted after saving them
+
+🔧 Step-By-Step Fix (Do This Carefully)
+1️⃣ Open Replit → Secrets
+
+Confirm you see:
+
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+
+
+Make sure:
+
+No extra spaces
+
+No quotes
+
+No line breaks
+
+Exact spelling
+
+2️⃣ VERY IMPORTANT: Restart the Server
+
+Secrets do NOT apply until the server restarts.
+
+In Replit:
+
+Stop the server
+
+Start it again
+OR
+
+Click “Run” again
+
+This is critical.
+
+3️⃣ Watch The Logs
+
+When the server boots, you should see something like:
+
+[OAUTH] Google strategy initialized
+
+
+If you still see:
+
+Google OAuth not configured
+
+
+Then the secrets are still not loading.
+
+🚨 ALSO VERY IMPORTANT
+
+You are currently testing on:
+
+https://f31e0277-....picard.replit.dev
+
+
+That means your Google OAuth Client must also include this callback:
+
+https://f31e0277-....picard.replit.dev/api/auth/google/callback
+
+
+If you only added:
+
+https://nabornet.io/api/auth/google/callback
+
+
+Then Google will reject the Replit dev environment.
+
+So in Google Cloud Console → Credentials → OAuth Client → Add BOTH:
+
+Authorized Redirect URIs
+https://nabornet.io/api/auth/google/callback
+https://f31e0277-....picard.replit.dev/api/auth/google/callback
+
+
+(Use your exact Replit URL.)
+
+🧠 Why It Loops Instead of Erroring
+
+Because the route returns 200 and the frontend thinks:
+
+“Auth route exists but no session created.”
+
+So it reloads → tries again → loops.
+
+🎯 Quick Checklist
+
+Before testing again:
+
+ Secrets exist
+
+ No typos
+
+ Server restarted
+
+ Replit callback URL added in Google Console
+
+ Production callback URL added
+
+⚡ After This
+
+The flow should become:
+
+Click Google → Google consent → Redirect back → Session created → /api/auth/me returns user → Access gate runs → Pending or Admin loads

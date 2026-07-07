@@ -1,0 +1,95 @@
+I’d like to pause and realign our shared understanding of NaborNet’s current
+capabilities and safeguards before proceeding further.
+
+Below is *my current understanding* of what is implemented, live, and working.
+Please do the following:
+
+1) Explicitly CONFIRM or CORRECT each item below
+2) Call out ANY functionality, capability, safeguard, limitation, or hidden
+   behavior that I have NOT mentioned
+3) Flag anything that exists in code but is disabled, incomplete, or risky
+4) Flag anything that is planned but NOT yet implemented
+
+Please treat this as a formal alignment check.
+
+––––––––––––––––––––––––
+MY CURRENT UNDERSTANDING
+––––––––––––––––––––––––
+
+A) DEPLOYMENT & ACCESS
+- App is live as a Closed Beta
+- SIGNUP_MODE=whitelist is enforced
+- Only whitelisted emails can register
+- No public signup possible
+- Kill switches exist:
+  - INCIDENT_CREATION_ENABLED
+  - OFFLINE_SYNC_ENABLED
+
+B) AUTH & SECURITY
+- Session-based auth
+- Email verification required to create incidents
+- Password reset flow implemented
+- Login rate limiting active (email + IP)
+- No admin bypass for verification (admins treated as users)
+- Owner account can be manually verified for testing
+
+C) LEGAL & COMPLIANCE
+- Terms of Service v1.0.0 live
+- Privacy Policy v1.0.0 live
+- LegalGate consent modal blocks access until accepted
+- Versioned consent stored in database
+- Disclaimers clearly state:
+  - Not an emergency service
+  - Not affiliated with police/government
+  - Reports may be unverified
+- Anti-doxxing and neutrality language added
+
+D) INCIDENT REPORTING
+- Incidents require verified email
+- Durable DB-backed idempotency implemented
+- Partial unique index on idempotency_key
+- Duplicate incidents mathematically impossible
+- Same protections apply to:
+  - Normal incident creation
+  - Offline sync ingestion
+
+E) OFFLINE / PWA
+- Installable PWA (Android/iOS constraints acknowledged)
+- Service worker registered
+- App shell loads offline
+- Incidents can be drafted offline
+- Offline incidents stored in IndexedDB
+- Auto-sync on reconnect with backoff
+- Offline incidents show “Pending / Synced / Failed”
+- Exact GPS hidden while offline (“Approx. location”)
+- Maps tiles NOT cached
+- Offline data cleared on logout
+- No background sync dependency (foreground only)
+- No push notifications (out of scope)
+
+F) EMAIL
+- Resend integrated
+- Sandbox limitation understood:
+  - Can only send to account owner email until domain verified
+- Verification emails fail for non-sandbox addresses
+- This is expected and accepted for now
+- Domain verification deferred
+
+G) WHAT IS NOT BUILT (INTENTIONALLY)
+- No chat enabled
+- No public moderation UI
+- No push notifications
+- No Sentry / production monitoring
+- No operator dashboard
+- No media uploads while offline
+- No analytics pipeline
+
+––––––––––––––––––––––––
+
+Please respond with:
+1) A corrected version of this list if anything is wrong
+2) A separate section titled “Capabilities Not Mentioned”
+3) A separate section titled “Known Gaps or Risks”
+4) A clear statement of whether we are SAFE to remain in closed beta as-is
+
+Do NOT assume intent — be explicit.

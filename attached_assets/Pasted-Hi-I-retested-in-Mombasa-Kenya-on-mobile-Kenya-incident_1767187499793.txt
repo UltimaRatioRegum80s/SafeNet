@@ -1,0 +1,111 @@
+Hi — I retested in Mombasa, Kenya on mobile. Kenya incident creation now succeeds, but the read + map state behaviour is broken. Can you please investigate deeply through the code + architecture and report back with exact findings (files/functions/queries), so I can understand the system and we can fix it cleanly?
+
+✅ What works
+
+I can submit incidents successfully in Kenya (no “region blocked” error).
+
+So geoPolicy.canCreateIncidentAtLocation() appears to be working for Kenya.
+
+❌ What is broken (reproducible)
+
+Incidents do not appear anywhere after creation
+
+After submit, the incident does not appear on the map
+
+It also does not appear in the feed
+
+This is unexpected because I’m whitelisted and Kenya incidents are visibilityScope: private_whitelist, so I should see them.
+
+Map recenters to Swakopmund after submit
+
+Immediately after submitting (Kenya coords), the app navigates back to the map and centers over Swakopmund / default Southern Africa view
+
+It should instead center on:
+
+the new incident’s coordinates, or
+
+at least my current GPS location in Kenya
+
+What I need from you (deep investigation + report back)
+
+Please trace this end-to-end and report back where the mismatch is:
+
+A) Verify the incident is truly being stored as expected
+
+Confirm DB row exists after submit
+
+Confirm stored fields:
+
+lat/lng values (are they null? rounded? swapped?)
+
+countryCode = 'KE'
+
+visibilityScope = 'private_whitelist'
+
+timestamps
+
+If you can, paste the shape of the stored row (no secrets), or describe exactly what values are present.
+
+B) Trace the “read path” for feed + map
+
+For each:
+
+What API endpoint is used by the client (feed and map)?
+
+What storage/query function powers it?
+
+What are the filters/WHERE clauses?
+
+Specifically check for any of these:
+
+Hardcoded Southern Africa bounding box filters
+
+A visibilityScope = 'public_beta' default that excludes private_whitelist
+
+A country filter that excludes KE
+
+Any “supported region” gate still applied on read operations
+
+A bug where private_whitelist is filtered out unless a flag is set
+
+Please tell me exactly which condition is excluding Kenya incidents.
+
+C) Trace the map viewport/centering logic after submit
+
+After POST success, what does the client do?
+
+does it refetch incidents?
+
+does it add the new incident into local state?
+
+does it call a setView / flyTo / centerMap function?
+
+Where is the “Swakopmund default center” set?
+
+Why is it being applied after a Kenya submit?
+
+What change would make it center on the submitted incident’s coordinates?
+
+D) Provide your hypothesis + fix proposal (with code pointers)
+
+Please report back with:
+
+suspected root cause(s)
+
+the exact file(s) and function(s)
+
+the specific filters/logic that need adjusting
+
+minimal safe patch plan (avoid scope creep)
+
+My working hypothesis (for you to confirm/deny)
+
+Write path is Kenya-aware
+
+Read paths (feed/map queries) and/or map centering are still Southern-Africa-defaulted
+
+Or the incident is stored but its coords/fields are not what the read path expects.
+
+Once you report back with exact code locations and query logic, I’ll review it (with ChatGPT) and we’ll decide the cleanest fix.
+
+Thanks — this is the last blocker to make the Kenya field test usable.

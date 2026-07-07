@@ -1,0 +1,113 @@
+Got it, @RDM — here’s the mobile & tablet–only version of the “map as background; UI floats on top” patches. Desktop (xl+) stays exactly as it is.
+
+What changes where
+
+Mobile & Tablet ( <xl ) → map is the backdrop; header + FABs + sheet float above it.
+
+Desktop ( xl+ ) → keep your existing header/sidebar/map layout untouched.
+
+A) Layout skeleton (apply only on mobile/tablet)
+
+Wrap your map page with two mutually exclusive blocks:
+
+{/* =========== MOBILE & TABLET (map as background) =========== */}
+<div className="relative h-[100dvh] w-full overflow-hidden bg-black xl:hidden">
+  {/* MAP = background */}
+  <div id="leaflet-map" ref={mapEl} className="absolute inset-0 z-0" />
+
+  {/* UI LAYER (floats above map) */}
+  <div className="absolute inset-0 z-20 pointer-events-none">
+    {/* Floating header overlay */}
+    <div className="absolute top-0 inset-x-0">
+      <div className="h-16 bg-gradient-to-b from-black/50 to-transparent" />
+      <div className="px-3 pt-2">
+        <div className="pointer-events-auto mx-auto max-w-md nn-glass px-3 py-2 rounded-2xl text-sm flex items-center justify-between">
+          <span className="font-semibold text-white/90">Incident Map</span>
+          {/* tiny icons if you want */}
+        </div>
+      </div>
+    </div>
+
+    {/* FAB stack (bottom-right) */}
+    <div className="absolute bottom-5 right-4 flex flex-col gap-2 items-end">
+      <div className="pointer-events-auto flex flex-col gap-2">
+        {/* your existing handlers wired in here */}
+        <button onClick={zoomIn}  className="nn-fab">+</button>
+        <button onClick={zoomOut} className="nn-fab">−</button>
+        <button onClick={recenter} className="nn-fab">◎</button>
+        <button onClick={() => setIsIncidentSheetOpen(true)} className="nn-fab">≡</button>
+      </div>
+    </div>
+  </div>
+
+  {/* Bottom sheet (vaul) – unchanged, just ensure it’s translucent */}
+  <IncidentSheet
+    open={isIncidentSheetOpen}
+    onOpenChange={setIsIncidentSheetOpen}
+    items={filteredMarkers}
+    onSelect={handleSelectFromList}
+  />
+</div>
+
+{/* =========== DESKTOP (keep existing) =========== */}
+<div className="hidden xl:block">
+  {/* your current desktop header + map + sidebar layout as-is */}
+  <DesktopMapLayout
+    mapRef={mapRef}
+    filteredMarkers={filteredMarkers}
+    onSelect={handleSelectFromList}
+    /* …other props… */
+  />
+</div>
+
+
+The key is the xl:hidden and hidden xl:block pair. Everything “floating” only renders below xl. Your desktop screen keeps its current layout.
+
+B) Tiny CSS tokens (use in mobile/tablet overlays)
+/* glassy floating action button */
+.nn-fab { @apply rounded-full w-12 h-12 grid place-items-center bg-white/90 text-slate-900 shadow-lg active:scale-95; }
+/* translucent card over map */
+.nn-glass { @apply bg-white/10 border border-white/10 backdrop-blur; }
+
+
+Use nn-glass on the sheet header/container and any small floating cards in mobile/tablet.
+
+C) Make the sheet feel like an overlay (mobile/tablet only)
+
+In your IncidentSheet wrapper, add the glass style:
+
+<div className="mx-3 rounded-t-3xl nn-glass shadow-2xl h-full flex flex-col">
+  {/* handle + header + filters + <IncidentList/> */}
+</div>
+
+
+(Desktop still uses the permanent sidebar, so no change there.)
+
+D) Pointer-events ergonomics (mobile/tablet overlays)
+
+The overlay frame uses pointer-events-none so the map pans freely.
+
+Only buttons/cards get pointer-events-auto (already shown above).
+
+E) Keep desktop filters & header intact
+
+If you still render any header/filters above the map, make them desktop-only:
+
+<div className="hidden xl:block">
+  {/* existing desktop header + filters */}
+</div>
+
+
+Mobile/tablet filters already live inside the sheet (our Step 3).
+
+Sanity checklist (for <xl only)
+
+Map always visible behind overlays ✅
+
+Header looks like a translucent card, not a page section ✅
+
+FABs are stacked bottom-right, compact ✅
+
+Sheet slides over map; glassy background ✅
+
+Desktop experience unchanged ✅

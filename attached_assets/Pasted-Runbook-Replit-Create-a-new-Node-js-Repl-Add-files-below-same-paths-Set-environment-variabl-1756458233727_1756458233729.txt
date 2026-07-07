@@ -1,0 +1,414 @@
+Runbook (Replit)
+
+Create a new Node.js Repl.
+
+Add files below (same paths).
+
+Set environment variables in Secrets:
+
+JWT_ACCESS_SECRET=dev_access_secret_please_change
+
+JWT_REFRESH_SECRET=dev_refresh_secret_please_change
+
+NODE_ENV=development
+
+Click Run (concurrently starts server and Vite dev).
+
+Open the webview, login with: email: demo@nabor.net, password: demo123.
+
+package.json
+{
+  "name": "nn-auth-persistence-repro",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "tsx --env-file=.env server/index.ts",
+    "dev:client": "vite",
+    "build": "vite build",
+    "start": "node dist/server/index.js"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.56.2",
+    "axios": "^1.7.4",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "nanoid": "^5.0.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.7",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^20.14.10",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "concurrently": "^9.0.1",
+    "tailwindcss": "^3.4.10",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2"
+  }
+}
+
+vite.config.ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+    proxy: {
+      "/api": {
+        target: "http://localhost:3000",
+        changeOrigin: true
+      }
+    }
+  }
+});
+
+server/index.ts (Express + JWT, httpOnly refresh cookie)
+import "dotenv/config";
+import express from "express";
+import cors from "cors";
+import cookieParser from "cookie-parser";
+import jwt from "jsonwebtoken";
+import { nanoid } from "nanoid";
+import path from "node:path";
+
+const app = express();
+app.use(express.json());
+app.use(cookieParser());
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
+
+// ---- In-memory refresh session store (swap for Drizzle/Postgres in NN)
+type Session = { rid: string; userId: string; expiresAt: number; revoked?: boolean };
+const sessions = new Map<string, Session>();
+
+const ACCESS_TTL_SEC = 60;         // short-lived access token
+const REFRESH_TTL_SEC = 60 * 60 * 24 * 7; // 7 days
+
+const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET!;
+const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET!;
+
+function signAccessToken(userId: string) {
+  return jwt.sign({ sub: userId }, ACCESS_SECRET, { expiresIn: ACCESS_TTL_SEC });
+}
+function signRefreshToken(userId: string, rid: string) {
+  return jwt.sign({ sub: userId, rid }, REFRESH_SECRET, { expiresIn: REFRESH_TTL_SEC });
+}
+
+function setRefreshCookie(res: express.Response, token: string) {
+  const isProd = process.env.NODE_ENV === "production";
+  res.cookie("nn_refresh", token, {
+    httpOnly: true,
+    secure: isProd,           // set true on HTTPS (Replit webview is HTTPS)
+    sameSite: "lax",
+    path: "/api/auth"
+  });
+}
+
+function clearRefreshCookie(res: express.Response) {
+  res.clearCookie("nn_refresh", { path: "/api/auth" });
+}
+
+// ---- Demo user
+const DEMO_USER = { id: "u_demo", email: "demo@nabor.net", name: "Demo Neighbor" };
+
+// ---- Auth routes
+app.post("/api/auth/login", async (req, res) => {
+  const { email, password } = req.body ?? {};
+  if (email !== "demo@nabor.net" || password !== "demo123") {
+    return res.status(401).json({ error: "Invalid credentials" });
+  }
+  const rid = nanoid();
+  const refresh = signRefreshToken(DEMO_USER.id, rid);
+  const access = signAccessToken(DEMO_USER.id);
+
+  sessions.set(rid, { rid, userId: DEMO_USER.id, expiresAt: Date.now() + REFRESH_TTL_SEC * 1000 });
+
+  setRefreshCookie(res, refresh);
+  return res.json({ accessToken: access, user: { id: DEMO_USER.id, email: DEMO_USER.email, name: DEMO_USER.name } });
+});
+
+app.post("/api/auth/refresh", async (req, res) => {
+  const token = req.cookies["nn_refresh"];
+  if (!token) return res.status(401).json({ error: "No refresh cookie" });
+  try {
+    const payload = jwt.verify(token, REFRESH_SECRET) as { sub: string; rid: string; exp: number };
+    const s = sessions.get(payload.rid);
+    if (!s || s.revoked) return res.status(401).json({ error: "Session invalid" });
+
+    // rotate
+    s.revoked = true;
+    const newRid = nanoid();
+    const newRefresh = signRefreshToken(payload.sub, newRid);
+    sessions.set(newRid, { rid: newRid, userId: payload.sub, expiresAt: Date.now() + REFRESH_TTL_SEC * 1000 });
+
+    setRefreshCookie(res, newRefresh);
+    const newAccess = signAccessToken(payload.sub);
+    return res.json({ accessToken: newAccess, user: { id: DEMO_USER.id, email: DEMO_USER.email, name: DEMO_USER.name } });
+  } catch {
+    clearRefreshCookie(res);
+    return res.status(401).json({ error: "Invalid refresh" });
+  }
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  const token = req.cookies["nn_refresh"];
+  if (token) {
+    try {
+      const payload = jwt.verify(token, REFRESH_SECRET) as any;
+      const s = sessions.get(payload.rid);
+      if (s) s.revoked = true;
+    } catch {}
+  }
+  clearRefreshCookie(res);
+  return res.json({ ok: true });
+});
+
+// Example protected resource
+function authMiddleware(req: any, res: any, next: any) {
+  const header = req.headers.authorization || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : null;
+  if (!token) return res.status(401).json({ error: "No token" });
+  try {
+    const payload = jwt.verify(token, ACCESS_SECRET) as any;
+    req.userId = payload.sub;
+    next();
+  } catch {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+}
+
+app.get("/api/me", authMiddleware, (req, res) => {
+  return res.json({ user: DEMO_USER });
+});
+
+const PORT = 3000;
+app.listen(PORT, () => {
+  console.log(`API on http://localhost:${PORT}`);
+});
+
+src/main.tsx
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import App from "./App";
+
+const qc = new QueryClient();
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <QueryClientProvider client={qc}>
+      <App />
+    </QueryClientProvider>
+  </React.StrictMode>
+);
+
+src/auth/store.ts (Zustand, persisted but no tokens saved)
+import { create } from "zustand";
+
+type User = { id: string; email: string; name: string } | null;
+
+type AuthState = {
+  user: User;
+  accessToken: string | null; // kept in memory only
+  setAuth: (u: User, t: string) => void;
+  clear: () => void;
+  hydrated: boolean;
+  setHydrated: () => void;
+};
+
+export const useAuth = create<AuthState>((set) => ({
+  user: null,
+  accessToken: null,
+  setAuth: (user, token) => set({ user, accessToken: token }),
+  clear: () => set({ user: null, accessToken: null }),
+  hydrated: false,
+  setHydrated: () => set({ hydrated: true })
+}));
+
+// Cross-tab sync
+const ch = new BroadcastChannel("nn-auth");
+export function broadcastAuth(event: "login" | "logout", payload?: any) {
+  ch.postMessage({ event, payload });
+}
+ch.onmessage = (e) => {
+  const { event, payload } = e.data || {};
+  if (event === "login") {
+    useAuth.getState().setAuth(payload.user, payload.accessToken);
+  }
+  if (event === "logout") {
+    useAuth.getState().clear();
+  }
+};
+
+src/api/axios.ts (axios client with 401 refresh & silent boot refresh)
+import axios from "axios";
+import { useAuth, broadcastAuth } from "../auth/store";
+
+export const api = axios.create({
+  baseURL: "/api",
+  withCredentials: true // needed for httpOnly refresh cookie
+});
+
+// attach access token
+api.interceptors.request.use((config) => {
+  const token = useAuth.getState().accessToken;
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+let refreshing: Promise<void> | null = null;
+
+async function doRefresh() {
+  const res = await api.post("/auth/refresh");
+  const { accessToken, user } = res.data;
+  useAuth.getState().setAuth(user, accessToken);
+}
+
+// on 401, try refresh once
+api.interceptors.response.use(
+  (r) => r,
+  async (error) => {
+    const original = error.config;
+    if (error?.response?.status === 401 && !original._retry) {
+      original._retry = true;
+      if (!refreshing) refreshing = doRefresh().finally(() => (refreshing = null));
+      await refreshing;
+      return api(original);
+    }
+    return Promise.reject(error);
+  }
+);
+
+// Silent refresh on app boot
+export async function silentBootRefresh() {
+  try {
+    await doRefresh();
+    broadcastAuth("login", { user: useAuth.getState().user, accessToken: useAuth.getState().accessToken });
+  } catch {
+    // no active session, ignore
+  } finally {
+    useAuth.getState().setHydrated();
+  }
+}
+
+src/App.tsx (UI + flows)
+import { useEffect, useState } from "react";
+import { useAuth, broadcastAuth } from "./auth/store";
+import { api, silentBootRefresh } from "./api/axios";
+
+export default function App() {
+  const { user, accessToken, setAuth, clear, hydrated } = useAuth();
+  const [email, setEmail] = useState("demo@nabor.net");
+  const [password, setPassword] = useState("demo123");
+  const [me, setMe] = useState<any>(null);
+  const [status, setStatus] = useState<string>("");
+
+  useEffect(() => {
+    // do not logout on beforeunload — requirement: session persists naturally
+    silentBootRefresh();
+  }, []);
+
+  async function login() {
+    setStatus("Logging in…");
+    const res = await api.post("/auth/login", { email, password });
+    setAuth(res.data.user, res.data.accessToken);
+    broadcastAuth("login", { user: res.data.user, accessToken: res.data.accessToken });
+    setStatus("Logged in");
+  }
+
+  async function logout() {
+    await api.post("/auth/logout");
+    clear();
+    broadcastAuth("logout");
+    setMe(null);
+    setStatus("Logged out");
+  }
+
+  async function fetchMe() {
+    try {
+      const res = await api.get("/me");
+      setMe(res.data.user);
+      setStatus("Fetched /me");
+    } catch (e: any) {
+      setStatus(`Error: ${e?.response?.status || "?"}`);
+    }
+  }
+
+  return (
+    <div style={{ fontFamily: "Inter, system-ui", padding: 24, maxWidth: 720, margin: "0 auto" }}>
+      <h1>NaborNet Auth Persistence Repro</h1>
+      <p>HTTP-only refresh cookie · short-lived access token · silent refresh · cross-tab sync</p>
+
+      <section style={{ marginTop: 16, padding: 16, border: "1px solid #eee", borderRadius: 12 }}>
+        <h2>Auth</h2>
+        {user ? (
+          <>
+            <p>Logged in as <b>{user.email}</b></p>
+            <button onClick={logout}>Logout</button>
+          </>
+        ) : (
+          <>
+            <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email" />
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="password" />
+            <button onClick={login}>Login</button>
+          </>
+        )}
+      </section>
+
+      <section style={{ marginTop: 16, padding: 16, border: "1px solid #eee", borderRadius: 12 }}>
+        <h2>Protected Request</h2>
+        <button onClick={fetchMe} disabled={!accessToken && !hydrated}>GET /api/me</button>
+        <pre>{me ? JSON.stringify(me, null, 2) : "No data yet"}</pre>
+      </section>
+
+      <section style={{ marginTop: 16 }}>
+        <small>Status: {status} | Hydrated: {String(hydrated)} | Has access: {String(!!accessToken)}</small>
+      </section>
+    </div>
+  );
+}
+
+index.html
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>NN Auth Repro</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
+tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2023", "DOM"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true
+  },
+  "include": ["server", "src", "vite.config.ts"]
+}

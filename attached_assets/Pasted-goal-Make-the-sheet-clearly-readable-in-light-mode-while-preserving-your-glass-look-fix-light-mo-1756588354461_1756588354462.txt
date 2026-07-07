@@ -1,0 +1,124 @@
+goal
+
+Make the sheet clearly readable in light mode while preserving your glass look.
+
+fix (light-mode only)
+
+Higher base opacity for the sheet surface
+
+Subtle border + shadow for edge separation
+
+Top scrim gradient so the header stays readable over bright tiles
+
+Card rows get a slightly more opaque fill than the sheet
+
+A) create a reusable class
+
+add to globals.css (or wherever your tokens live)
+
+/* Drawer panel surface */
+.nn-sheet {
+  /* dark mode stays as-is via your existing classes */
+}
+:root .nn-sheet {
+  /* light mode: stronger surface */
+  background: color-mix(in oklab, white 92%, transparent);
+  /* when backdrop filter exists, we can drop opacity a touch */
+  /* Tailwind utility below will apply the supports variant */
+  border: 1px solid hsl(var(--border) / 0.6);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.12);
+  backdrop-filter: blur(10px) saturate(120%);
+}
+
+/* soft top scrim to keep header/chips readable on bright tiles */
+.nn-sheet::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 28%;
+  border-radius: inherit;
+  background: linear-gradient(
+    to bottom,
+    rgba(255,255,255,0.9),
+    rgba(255,255,255,0.7),
+    transparent
+  );
+  pointer-events: none;
+}
+
+/* list item/card surface inside the sheet (light mode) */
+:root .nn-sheet .nn-sheet-card {
+  background: rgba(255,255,255,0.96);
+  border: 1px solid hsl(var(--border) / 0.6);
+}
+
+B) apply to your Vaul drawer
+
+in client/src/components/IncidentList.tsx (DrawerContent container)
+
+import { Drawer, DrawerContent } from "vaul";
+// ...
+
+<Drawer open={open} onOpenChange={onOpenChange}>
+  <DrawerContent
+    className={`
+      nn-sheet relative rounded-t-3xl
+      /* keep dark mode as-is */
+      dark:bg-background/60 dark:backdrop-blur-md dark:border dark:border-white/10
+      /* progressive enhancement for light mode */
+      supports-[backdrop-filter]:bg-white/85
+    `}
+  >
+    {/* header, filters, etc. */}
+    <div className="px-4 pt-3 pb-2">
+      {/* your chips/toggles */}
+    </div>
+
+    {/* list */}
+    <div className="space-y-3 px-3 pb-6">
+      {incidents.map(i => (
+        <div key={i.id}
+             className="nn-sheet-card rounded-2xl p-3 shadow-sm">
+          {/* card content */}
+        </div>
+      ))}
+    </div>
+  </DrawerContent>
+</Drawer>
+
+C) small contrast tweaks (light mode)
+
+header text/buttons: text-foreground (not text-white/80)
+
+chips: bg-white/90 for selected; bg-black/5 for unselected
+
+dividers: border-border/60
+
+Example:
+
+<Button
+  variant="ghost"
+  className="text-foreground/90 hover:text-foreground"
+>
+  In view
+</Button>
+
+why this works
+
+Light mode gets a 90–92% white surface + blur, so content pops without losing the glass aesthetic.
+
+Dark mode path remains your existing dark:bg-... styles.
+
+The top scrim prevents the header from blending into bright map tiles.
+
+Cards are slightly more opaque than the base sheet, so lists are readable even over white map areas.
+
+quick QA
+
+toggle themes: sheet stays readable in both.
+
+scroll the list: header/chips remain legible thanks to the scrim.
+
+check iPhone/Pixel/Samsung simulators: no collision with home bar; corners remain 3xl.
+
+if you prefer to keep everything purely in Tailwind classes (no global CSS), I can translate the above into utility-only variants—this version keeps it tidy and easy to reuse across sheets.

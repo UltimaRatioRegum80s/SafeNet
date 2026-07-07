@@ -1,0 +1,165 @@
+Prompt for Replit — SafeLy/NaborNet Auth (Replit-only storage & resources)
+
+Goal: Implement signup/login using Replit’s server + Postgres + sessions (no Firebase). Store users, roles, country, and city in Replit Postgres. Keep the existing SafeLy/NaborNet UI palette and layout.
+
+Tech constraints (important)
+
+Use existing deps already in the project: Express, express-session, connect-pg-simple, passport, passport-local, drizzle-orm, @neondatabase/serverless (or pg).
+
+Persist to Replit Postgres (Neon) via Drizzle. Read DATABASE_URL from env.
+
+Use server-side sessions (cookie) with express-session + connect-pg-simple. No JWTs, no Firebase.
+
+Passwords must be hashed with bcrypt (or argon2 if already installed).
+
+Keep color palette and styling exactly as in the current Login/Signup page (bg-gradient-to-b from-slate-900 to-slate-800, slate cards, cyan accents). Do not change global CSS or theme tokens.
+
+Server work
+
+Drizzle schema & migration
+
+Create tables:
+
+users:
+
+id (uuid, pk, default gen_random_uuid())
+
+email (text, unique, nullable for anonymous users)
+
+password_hash (text, nullable for anonymous users)
+
+username (text, indexed)
+
+roles (text[]; store ['resident'] or ['security_org'])
+
+country (text)
+
+city (text)
+
+created_at (timestamptz default now())
+
+updated_at (timestamptz default now())
+
+user_handles (optional, for future uniqueness checks): username unique → user_id.
+
+Create session store table via connect-pg-simple (session).
+
+Passport local strategy
+
+POST /api/auth/signup (email/password):
+
+Validate inputs: email, password (≥6 chars), optional username, required role ("private" or "security_org"), required country, required city.
+
+Hash password, create user, map role:
+
+"private" → roles = ['resident']
+
+"security_org" → roles = ['security_org']
+
+Log the user in (establish session) and return { ok: true, user: { id, username, roles, country, city } }.
+
+POST /api/auth/login (email/password):
+
+Verify via Passport Local, then establish session, return user profile.
+
+POST /api/auth/anon-join (Quick Join):
+
+Body: { username, role: 'private'|'security_org', country, city }
+
+Create user without email/password (anonymous), store the fields above, establish session, return user.
+
+POST /api/auth/logout ends the session.
+
+GET /api/auth/me returns current session user (or 401).
+
+Session config
+
+express-session with connect-pg-simple store (use DATABASE_URL).
+
+Secure cookie settings; cookie.sameSite='lax'; cookie.secure true in production.
+
+Add CSRF protection middleware or at minimum check Content-Type: application/json and origin in dev.
+
+Client work (keep palette)
+
+Login/Signup page (keep current layout and header)
+
+Tabs: Quick Join and Email remain.
+
+Add Role radio (two options):
+
+“Private citizen” → store 'resident'
+
+“Security organisation” → store 'security_org'
+
+Add Country dropdown (default Namibia).
+
+Add City/Town dropdown that depends on selected country (populate common Namibian towns; structure so we can expand later).
+
+Quick Join submit → POST /api/auth/anon-join.
+
+Email → Create account → POST /api/auth/signup.
+
+Email → Sign in → POST /api/auth/login.
+
+On success: show toast and navigate('/community/dashboard').
+
+Form validation
+
+Username: 3–20 chars, letters/numbers/underscore.
+
+Password: ≥6 chars (signup and login).
+
+Country and City required.
+
+Show inline errors under fields (use existing shadcn components).
+
+Location data
+
+Add client/src/lib/locationData.ts with:
+
+countries = ["Namibia","South Africa","Botswana"]
+
+citiesByCountry.Namibia = ["Windhoek","Swakopmund","Walvis Bay","Rehoboth","Okahandja","Otjiwarongo","Tsumeb","Rundu","Oshakati","Ongwediva","Katima Mulilo","Keetmanshoop","Lüderitz","Gobabis","Mariental","Outapi","Eenhana","Okakarara","Omuthiya"]
+
+Seed minimal lists for SA and Botswana; make it easy to extend later.
+
+State on the client
+
+On successful auth endpoints, store the returned user in the existing auth store (Zustand) and proceed to dashboard.
+
+GET /api/auth/me should hydrate session on reload.
+
+Styling constraints (do not change)
+
+Keep the gradient from-slate-900 to-slate-800, slate card backgrounds/borders, and cyan accents (text-cyan-400/300, existing Tailwind tokens).
+
+Maintain current spacing, rounded corners, and iconography (lucide-react).
+
+Keep “Continue as guest” link intact.
+
+Acceptance criteria
+
+I can choose Private citizen or Security organisation during signup.
+
+I can pick Country and then City/Town (city list updates with country).
+
+Quick Join creates an anonymous user (no email/password) in Replit Postgres and logs me in via session.
+
+Email Sign Up creates a user with hashed password in Postgres and logs me in via session.
+
+Email Sign In establishes a session for existing users.
+
+After any success path I see a success toast and land on /community/dashboard.
+
+All data is stored in Replit Postgres, sessions use connect-pg-simple, and no Firebase is used in this flow.
+
+The page still matches the existing SafeLy/NaborNet dark blue + cyan palette and overall look.
+
+Nice-to-have (optional if time)
+
+Add /api/auth/logout.
+
+Prepare a user_handles table for future username uniqueness.
+
+Rate-limit /api/auth/* endpoints (basic in-memory limiter) to deter abuse.

@@ -1,0 +1,104 @@
+@Replit — thanks for the screenshots. I agree: light mode is still getting washed out, and dark mode shouldn’t have changed at all.
+
+Here’s a tighter, architecture-friendly fix based on modal surface patterns instead of trying to force light “glass” over a pale map:
+
+What’s going wrong
+
+In light mode the map is bright, so a translucent sheet + blur won’t create enough contrast.
+
+We also don’t dim the map under the sheet, so content competes with the tiles.
+
+Dark mode regressed because our earlier globals touched shared tokens.
+
+Plan (low risk)
+
+Add a Drawer overlay to slightly dim the map while the sheet is open.
+
+Make the sheet a solid/elevated surface in light mode (not glass), keep dark mode exactly as you had.
+
+Keep everything component-local (no global CSS changes).
+
+Patch (component-local)
+IncidentSheet.tsx
+import { Drawer, DrawerContent, DrawerOverlay } from "vaul";
+import { cn } from "@/lib/utils";
+
+export function IncidentSheet({ open, onOpenChange, children }: Props) {
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      {/* NEW: overlay to dim the map under the sheet */}
+      <DrawerOverlay
+        className={cn(
+          "fixed inset-0 z-[54]",
+          // Light: subtle dim; Dark: keep your original feel
+          "bg-black/10 dark:bg-black/40 transition-opacity"
+        )}
+      />
+
+      <DrawerContent
+        className={cn(
+          "relative z-[55] rounded-t-3xl border",
+
+          // DARK MODE — leave exactly as before
+          "dark:bg-background/60 dark:backdrop-blur-md dark:border-white/10",
+
+          // LIGHT MODE — solid, readable surface (no glass)
+          "bg-white/98 border-border/60 shadow-[0_16px_40px_rgba(0,0,0,0.12)]",
+
+          // Size/position feel
+          "will-change-transform"
+        )}
+      >
+        {/* header, filters, list */}
+        {children}
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+IncidentList cards (keep dark as-is, solid in light)
+<Card
+  className={cn(
+    // Dark unchanged
+    "dark:backdrop-blur-md dark:bg-white/5 dark:border dark:border-white/10",
+    // Light solid
+    "bg-white border border-border/60 shadow-sm",
+    "rounded-2xl"
+  )}
+>
+  {/* content */}
+</Card>
+
+Light-mode text/controls (ensure contrast)
+
+Replace any text-white/* with text-foreground for light mode:
+
+<span className="text-foreground/90 dark:text-white/90">Recent Incidents</span>
+
+
+Chips:
+
+// Selected
+"className=bg-foreground text-white dark:bg-white dark:text-black"
+// Unselected
+"className=bg-black/5 text-foreground/80 dark:bg-white/10 dark:text-white/80"
+
+Why this will work
+
+The overlay (bg-black/10) gives you instant separation without heavy styling; it won’t affect dark mode’s look (dark overlay is already common).
+
+A solid white sheet (98%) in light mode ensures text and cards pop, while dark mode stays exactly on your original classes.
+
+All changes are local to IncidentSheet/IncidentList—no globals, no side effects.
+
+QA checklist (for you to verify)
+
+Light mode: header + cards are clearly legible over any OSM tile; map is gently dimmed.
+
+Dark mode: looks identical to your previous “good” dark screenshot.
+
+iPhone/Pixel/Samsung: corners, handle, z-index, and snap points behave.
+
+Toggling theme doesn’t flicker (no layout shifts).
+
+If this matches your expectations, please apply this patch. If you still want a touch of “glass” in light mode, we can nudge bg-white/98 → /95 and add backdrop-saturate—but I’d first land this solid-surface baseline so @RDM gets reliable readability.

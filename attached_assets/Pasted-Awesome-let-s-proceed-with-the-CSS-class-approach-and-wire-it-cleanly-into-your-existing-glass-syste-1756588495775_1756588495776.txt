@@ -1,0 +1,125 @@
+Awesome—let’s proceed with the CSS-class approach and wire it cleanly into your existing glass system.
+
+Answers to your architecture questions
+
+Where to apply nn-sheet?
+Put it on <DrawerContent> (the wrapper). IncidentList stays unchanged except for card styling. That’s the element that needs stronger light-mode separation and the top scrim.
+
+How to coexist with existing glass utilities?
+Augment, don’t replace. Compose nn-sheet on top of your glass-surface so dark mode remains identical, while light mode gets the stronger surface + scrim. Same idea for nn-sheet-card composing your glass-card.
+
+shadcn <Card> usage?
+Apply nn-sheet-card alongside Card’s classes via className. It will only add light-mode tweaks (opacity/border) and leave dark-mode as-is.
+
+1) CSS: compose with your existing utilities
+/* === base glass (you already have) ===
+.glass-surface { @apply backdrop-blur-md bg-slate-900/60 border border-slate-700/60; }
+.glass-card    { @apply backdrop-blur-md bg-slate-900/50 border border-slate-700/50; }
+*/
+
+/* === Sheet surface (wrapper) === */
+.nn-sheet {
+  /* keep dark mode identical by reusing your glass */
+  @apply glass-surface rounded-t-3xl;
+  position: relative;
+}
+
+/* Light mode only: strengthen readability */
+:root .nn-sheet {
+  /* higher-opacity white glass */
+  background: rgba(255,255,255,0.90);
+  /* if backdrop supported, we can reduce base fill a touch */
+  /* tailwind supports- variant used on the element too */
+  border-color: hsl(var(--border) / 0.60);
+  box-shadow: 0 16px 40px rgba(0,0,0,0.12);
+  backdrop-filter: blur(10px) saturate(120%);
+}
+
+/* Header scrim to keep chips/labels readable over bright tiles */
+:root .nn-sheet::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 28%;
+  border-top-left-radius: inherit;
+  border-top-right-radius: inherit;
+  background: linear-gradient(
+    to bottom,
+    rgba(255,255,255,0.92),
+    rgba(255,255,255,0.78),
+    transparent
+  );
+  pointer-events: none;
+}
+
+/* Reduce transparency for users who prefer less glass */
+@media (prefers-reduced-transparency: reduce) {
+  :root .nn-sheet { background: #fff; backdrop-filter: none; }
+  :root .nn-sheet::before { display: none; }
+}
+
+/* === Cards inside the sheet === */
+.nn-sheet-card {
+  @apply glass-card rounded-2xl;
+}
+:root .nn-sheet-card {
+  background: rgba(255,255,255,0.96);
+  border-color: hsl(var(--border) / 0.60);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.06);
+}
+
+
+Dark mode path untouched (inherits your glass-… tokens). Light mode gets the lift.
+
+2) Apply to the Vaul drawer (IncidentSheet.tsx)
+// IncidentSheet.tsx
+import { Drawer, DrawerContent } from "vaul";
+import { cn } from "@/lib/utils";
+
+export function IncidentSheet({ open, onOpenChange, children }: Props) {
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerContent
+        className={cn(
+          "nn-sheet border",                    // ← new class
+          "supports-[backdrop-filter]:bg-white/85", // PE for light mode
+          "dark:bg-background/60 dark:border-white/10" // keep dark as-is
+        )}
+      >
+        {/* handle, header, filters */}
+        {children}
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+3) Apply to incident cards (inside IncidentList.tsx)
+// where you render each card (shadcn Card)
+<Card className={cn("nn-sheet-card", "p-3")}>
+  {/* content */}
+</Card>
+
+
+Also ensure light-mode text isn’t using text-white/*:
+
+<Button variant="ghost" className="text-foreground/90 hover:text-foreground">
+  In view
+</Button>
+
+4) Optional tiny Tailwind-only alternative (if you prefer no globals)
+
+You can mirror the above with utilities, but the scrim pseudo-element is cleaner in CSS. Given your system, globals.css is the right home.
+
+5) QA checklist
+
+Light mode: header chips & list items are readable over pale tiles.
+
+Dark mode: unchanged appearance.
+
+iOS/Android: no z-index conflicts with the handle; corners remain 3xl.
+
+prefers-reduced-transparency: falls back to solid white.
+
+Sheet at 20%/50%/90% snap points remains legible.
+
+If this matches, go ahead and add nn-sheet + nn-sheet-card, apply them as above, and you’re done.

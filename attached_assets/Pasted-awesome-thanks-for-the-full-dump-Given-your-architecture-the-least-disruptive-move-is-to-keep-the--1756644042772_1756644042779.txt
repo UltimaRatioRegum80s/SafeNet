@@ -1,0 +1,191 @@
+awesome—thanks for the full dump. Given your architecture, the least-disruptive move is to keep the existing flow (Severity ➜ Type Drawer ➜ ReportPanel) and simply replace the 3 mobile/tablet FABs with the vertical 4-button stack you mocked (adds “Critical”). Desktop stays as-is.
+
+Below is a tight, copy-paste plan that fits your current store, analytics, and sheet flow.
+
+Plan (minimal disruption)
+
+What changes
+
+Mobile & tablet (lg:hidden): swap the three FABs for a vertical stack of large, rounded buttons: Low / Medium / High / Critical.
+
+Pressing a button will:
+
+setSeverity(severity) on useIncidentStore (your existing filter slice)
+
+track("severity_sheet_open", { severity })
+
+haptic vibrate(8)
+
+openSheet(severity) (your existing drawer/sheet that shows the incident grid)
+
+Drawer grid already filters by store severity; if it doesn’t in one place, we’ll wire it (1-liner).
+
+Tablet: same buttons, left-aligned instead of centered.
+
+A11y: proper focus rings + keyboardable buttons.
+
+No draft store, no route changes.
+
+Why this way
+
+Zero changes to ReportPanel, URL semantics, or type-driven severity.
+
+Only replaces UI for the “entry” interaction; everything else continues to work.
+
+1) New component: SeveritySelect (vertical buttons)
+
+src/components/SeveritySelect.tsx
+
+import clsx from "clsx";
+
+export type Severity = "low" | "medium" | "high" | "critical";
+
+type Props = {
+  onSelect: (v: Severity) => void;   // you’ll pass openSheet+store here
+  className?: string;
+};
+
+const baseBtn =
+  "h-14 w-full rounded-full font-semibold text-base transition-colors shadow-sm " +
+  "bg-slate-200/90 text-slate-900 " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950";
+
+export function SeveritySelect({ onSelect, className }: Props) {
+  const click = (v: Severity) => {
+    try { (window as any).track?.("severity_sheet_open", { severity: v }); } catch {}
+    if (navigator.vibrate) navigator.vibrate(8);
+    onSelect(v);
+  };
+
+  return (
+    <div
+      className={clsx("w-full max-w-sm space-y-4", className)}
+      role="group"
+      aria-label="Choose incident severity"
+    >
+      <button className={clsx(baseBtn, "ring-2 ring-yellow-400")} onClick={() => click("low")}>
+        Low
+      </button>
+
+      <button className={clsx(baseBtn, "ring-2 ring-amber-600")} onClick={() => click("medium")}>
+        Medium
+      </button>
+
+      <button className={clsx(baseBtn, "ring-2 ring-red-500")} onClick={() => click("high")}>
+        High
+      </button>
+
+      <button
+        className={clsx(
+          "h-14 w-full rounded-full font-semibold text-base transition-colors shadow-md",
+          "bg-red-800 text-white",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+        )}
+        onClick={() => click("critical")}
+      >
+        Critical
+      </button>
+    </div>
+  );
+}
+
+export default SeveritySelect;
+
+
+Matches your mock: neutral fill + colored ring; Critical is solid.
+
+Strong, WCAG-friendly focus rings on dark backgrounds.
+
+2) Wire it on the page (mobile/tablet only)
+
+In src/pages/ReportIncident.tsx (or wherever the current FABs render):
+
+import SeveritySelect, { Severity } from "../components/SeveritySelect"; // adjust path
+import { useIncidentStore } from "../stores/useIncidentStore";           // existing slice
+// import { useCategorySheet } from "../components/CategorySheet";       // if you get openSheet from a hook
+
+export default function ReportIncident() {
+  const setSeverity = useIncidentStore((s) => s.setSeverity);
+
+  // Reuse the *same* openSheet you currently call from the FABs:
+  // If it’s from a hook, get it; otherwise import the function you already use.
+  // const openSheet = useCategorySheet((s) => s.openSheet);
+  const openSheet = /* existing openSheet from your current FAB implementation */ null as any;
+
+  const onSelect = (sev: Severity) => {
+    setSeverity(sev);
+    openSheet(sev); // unchanged behavior: opens drawer with filtered incident grid
+  };
+
+  return (
+    <div className="min-h-[100dvh] bg-slate-950 text-slate-100">
+      {/* header / breadcrumbs unchanged */}
+
+      {/* MOBILE + TABLET */}
+      <section className="lg:hidden px-4 sm:px-6 pt-10 pb-[calc(env(safe-area-inset-bottom)+24px)] grid place-items-center md:place-items-start">
+        <div className="w-full">
+          <h1 className="text-xl md:text-2xl font-bold text-center md:text-left">
+            Report Incident
+          </h1>
+          <p className="mt-2 text-sm text-slate-400 text-center md:text-left">
+            Pick a severity to see matching incident types.
+          </p>
+
+          <div className="mt-8">
+            <SeveritySelect onSelect={onSelect} />
+          </div>
+        </div>
+      </section>
+
+      {/* DESKTOP (unchanged): the 12 incident cards grid */}
+      {/* <DesktopIncidentGrid className="hidden lg:block" /> */}
+    </div>
+  );
+}
+
+
+If your project already has a .safe-bottom helper, you can swap the inline pb-[calc(...)] with it.
+
+3) Ensure the drawer grid filters by the store (1-liner)
+
+Where the incident-type drawer (CategorySheet) fetches or maps types, filter by useIncidentStore().severity:
+
+const severity = useIncidentStore((s) => s.severity);
+// If "all" means no filter, guard it:
+const visibleTypes = severity === "all"
+  ? types
+  : types.filter(t => t.severity === severity);
+
+
+If there are currently no incident types with "critical", show an empty-state with “No critical incident types yet” and a “Show all” link that sets severity to "all".
+
+4) Analytics & haptics (already present)
+
+You’re calling track("severity_sheet_open", { severity }) + vibrate(8) in the component.
+No change to report_start / report_submit paths.
+
+5) A11y polish
+
+The buttons are keyboard accessible and have visible focus rings.
+
+If you want a radiogroup instead (selected state), we can keep the last-clicked severity in local state to reflect selection—but since you immediately open the sheet, the current button semantics are fine.
+
+6) Tablet layout
+
+Buttons block is left-aligned from md: up (md:place-items-start + text-left), matching your ask.
+
+Drawer: consider switching to a side sheet on md: if you already support that pattern. If not, keep the bottom drawer—the buttons already reduce vertical travel.
+
+7) QA checklist
+
+Low/Medium/High/Critical open the sheet and filter correctly.
+
+Focus rings visible on Tab + Shift-Tab (mobile keyboards + desktop).
+
+Haptics fire on supported devices.
+
+“Critical” empty-state handled gracefully (if applicable).
+
+Deep link ?type=<id> still applied when selecting a type from the sheet.
+
+Desktop grid unaffected.

@@ -1,0 +1,137 @@
+Love it — let’s do Option A: Extract & Relocate.
+
+What moves where
+
+Right stack (bottom-right): keep Report as the solo primary CTA (max prominence).
+
+Bottom-center mini dock: place Recenter (Target) and Incidents List (List) side-by-side.
+
+Fade/disable the dock when the Incident sheet is open >50% (you already expose isIncidentSheetOpen).
+
+Styling choice
+
+Use your existing nn-fab system for visual consistency (radius, blur, shadow). We’ll only tweak layout & sizing.
+
+1) New bottom-center dock component
+// client/src/components/BottomCenterDock.tsx
+import { cn } from "@/lib/utils";
+import { Target, List } from "lucide-react";
+
+type Props = {
+  onLocate: () => void;
+  onToggleList: () => void;
+  hidden?: boolean;      // pass isIncidentSheetOpen || false
+  className?: string;
+};
+
+export default function BottomCenterDock({
+  onLocate,
+  onToggleList,
+  hidden = false,
+  className,
+}: Props) {
+  return (
+    <div
+      className={cn(
+        "pointer-events-auto absolute left-1/2 -translate-x-1/2 z-[54]",
+        // keep clear of attribution & home bar
+        "bottom-[calc(env(safe-area-inset-bottom)+72px)] md:bottom-[calc(env(safe-area-inset-bottom)+80px)]",
+        "transition-opacity duration-150",
+        hidden ? "opacity-0 pointer-events-none" : "opacity-100",
+        className
+      )}
+      role="group"
+      aria-label="Map utilities"
+    >
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={onLocate}
+          aria-label="Recenter on my location"
+          className="nn-fab h-12 w-12 focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Target className="h-5 w-5" />
+        </button>
+        <button
+          type="button"
+          onClick={onToggleList}
+          aria-label="Open incidents list"
+          className="nn-fab h-12 w-12 focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <List className="h-5 w-5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+If nn-fab isn’t a class yet, use your existing FAB classes; otherwise define once as your glassy round fab.
+
+2) Use it on the map page & keep Report solo on the right
+// client/src/pages/community/Map.tsx (or wherever you compose the page)
+import BottomCenterDock from "@/components/BottomCenterDock";
+// ...
+
+export default function Map() {
+  // you already have these handlers:
+  // const onLocate = () => {...}
+  // const onToggleList = () => setIsIncidentSheetOpen(v => !v)
+  // const isIncidentSheetOpen = useIncidentSheetOpen() // or local state
+
+  return (
+    <div className="map-shell relative h-[100dvh]">
+      <MobileFloatingTopMenu />
+      <MapView />
+
+      {/* Primary CTA stays solo on the right */}
+      <div className="absolute inset-x-0 bottom-3 flex justify-end px-3 pointer-events-none">
+        <div className="pointer-events-auto safe-bottom">
+          <button
+            type="button"
+            className="nn-fab px-3 h-12 min-w-[64px] rounded-xl font-medium shadow-lg"
+            aria-label="Create report"
+            onClick={openReport}
+          >
+            Report
+          </button>
+        </div>
+      </div>
+
+      {/* New bottom-center dock */}
+      <BottomCenterDock
+        onLocate={onLocate}
+        onToggleList={onToggleList}
+        hidden={isIncidentSheetOpen}
+      />
+    </div>
+  );
+}
+
+3) (Optional) Tablet tweak
+
+If you want more air on tablets, nudge the dock up a bit more or switch to a vertical right-center layout:
+
+// simple switch at md+
+<BottomCenterDock
+  className="md:hidden"
+  /* ... */
+/>
+
+{/* tablet/desktop: right-center vertical (optional) */}
+<div className="hidden md:flex pointer-events-auto absolute right-4 top-1/2 -translate-y-1/2 z-[54] flex-col gap-3">
+  <button className="nn-fab h-12 w-12" onClick={onLocate} aria-label="Recenter"><Target className="h-5 w-5" /></button>
+  <button className="nn-fab h-12 w-12" onClick={onToggleList} aria-label="Open incidents"><List className="h-5 w-5" /></button>
+</div>
+
+QA checklist
+
+iPhone SE/XR/16, Pixel 9/Pro XL, Galaxy S25*: dock clears the attribution bar; Report stays solo on right.
+
+Incident sheet open (>50%): dock fades and is non-interactive.
+
+Safe-area respected (home bar): no overlap.
+
+Buttons still 44×44+ and have focus rings.
+
+If that looks good, go ahead and extract the two buttons into BottomCenterDock and leave Report solo on the right.

@@ -1,0 +1,259 @@
+1) Reusable chat bubble (old look, right-align user)
+
+client/src/components/chat/ChatBubble.tsx
+
+import React from "react";
+import clsx from "clsx";
+
+type Props = {
+  text: string;
+  isUser?: boolean;
+  timestamp?: string | Date;
+};
+
+export default function ChatBubble({ text, isUser, timestamp }: Props) {
+  const time =
+    typeof timestamp === "string"
+      ? timestamp
+      : timestamp
+      ? new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : undefined;
+
+  return (
+    <div className={clsx("flex w-full mb-2", isUser ? "justify-end" : "justify-start")}>
+      <div
+        className={clsx(
+          "max-w-[75%] rounded-2xl px-4 py-2 text-sm shadow-md",
+          "whitespace-pre-wrap break-words transition-colors",
+          // Old style: comfy padding + distinct colors
+          isUser
+            ? "bg-primary text-primary-foreground rounded-br-none"
+            : "bg-zinc-800 text-zinc-100 rounded-bl-none"
+        )}
+      >
+        <p>{text}</p>
+        {time && (
+          <p className="text-[10px] opacity-70 mt-1 text-right">
+            {time}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+Uses your Tailwind CSS vars (primary, primary-foreground) for the user bubble; others use zinc-800/zinc-100 like your old screenshots. Padding/spacing/timestamp included.
+
+2) Message item + list
+
+client/src/components/chat/MessageItem.tsx
+
+import ChatBubble from "./ChatBubble";
+
+export type UIMessage = {
+  id: string;
+  text: string;
+  userId: string;
+  createdAt?: string | Date;
+};
+
+export default function MessageItem({ m, meId }: { m: UIMessage; meId: string | null }) {
+  const isUser = !!meId && m.userId === meId;
+  return (
+    <ChatBubble text={m.text} isUser={isUser} timestamp={m.createdAt} />
+  );
+}
+
+
+client/src/components/chat/MessageList.tsx
+
+import { useEffect, useRef } from "react";
+import MessageItem, { UIMessage } from "./MessageItem";
+
+export default function MessageList({
+  messages,
+  meId,
+}: {
+  messages: UIMessage[];
+  meId: string | null;
+}) {
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages.length]);
+
+  return (
+    <div className="flex-1 overflow-y-auto px-3 py-2">
+      {messages.map((m) => (
+        <MessageItem key={m.id} m={m} meId={meId} />
+      ))}
+      <div ref={bottomRef} />
+    </div>
+  );
+}
+
+
+Brings back the comfy spacing and auto-scroll like a proper chat.
+
+3) Safer Socket service (no duplicate listeners)
+
+Replace your service with this version that returns an unsubscribe and avoids event leak:
+
+client/src/lib/socketService.ts
+
+import { io, Socket } from "socket.io-client";
+
+class SocketService {
+  private socket: Socket | null = null;
+
+  connect() {
+    if (this.socket?.connected) return this.socket;
+    this.socket = io(
+      // Allow override for dev/prod; fallback to same origin
+      (import.meta as any)?.env?.VITE_SOCKET_URL || window.location.origin,
+      {
+        path: "/socket.io",
+        transports: ["websocket", "polling"],
+        withCredentials: true,
+        reconnection: true,
+        reconnectionDelay: 500,
+        reconnectionDelayMax: 5000,
+        reconnectionAttempts: Infinity,
+        timeout: 8000,
+        // keep mobile alive
+        pingInterval: 25000,
+        pingTimeout: 20000,
+      }
+    );
+    return this.socket;
+  }
+
+  ensureConnected() {
+    return this.socket?.connected ? this.socket : this.connect();
+  }
+
+  joinChat(room: string) {
+    this.ensureConnected()?.emit("join:chat", room);
+  }
+
+  leaveChat(room: string) {
+    this.socket?.emit("leave:chat", room);
+  }
+
+  /** Subscribe to an event; returns an unsubscribe to prevent double binding */
+  on<T = any>(event: string, cb: (data: T) => void) {
+    const s = this.ensureConnected();
+    s?.on(event, cb);
+    return () => s?.off(event, cb);
+  }
+
+  onMessage(cb: (msg: any) => void) { return this.on("message", cb); }
+
+  emit(event: string, data?: any) {
+    this.ensureConnected()?.emit(event, data);
+  }
+
+  isConnected(): boolean {
+    return this.socket?.connected || false;
+  }
+
+  disconnect() {
+    this.socket?.disconnect();
+    this.socket = null;
+  }
+}
+
+export const socketService = new SocketService();
+
+
+In your components, call const off = socketService.onMessage(cb); return off; in useEffect cleanup.
+
+4) Use it in your Feed/MobileFeed (replace inline bubbles)
+
+Wherever you render messages (both Desktop/Mobile):
+
+import MessageList from "@/components/chat/MessageList";
+import type { UIMessage } from "@/components/chat/MessageItem";
+import { socketService } from "@/lib/socketService";
+import { useEffect, useState } from "react";
+
+export default function CommunityChat({ roomId, meId }: { roomId: string; meId: string }) {
+  const [messages, setMessages] = useState<UIMessage[]>([]);
+
+  useEffect(() => {
+    socketService.joinChat(roomId);
+    const offMsg = socketService.onMessage((msg: UIMessage) => {
+      setMessages((prev) => [...prev, msg]);
+    });
+    return () => {
+      offMsg?.();
+      socketService.leaveChat(roomId);
+    };
+  }, [roomId]);
+
+  return (
+    <div className="flex flex-col h-full">
+      <MessageList messages={messages} meId={meId} />
+      {/* input bar */}
+      <form
+        className="p-3 flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const form = e.currentTarget as HTMLFormElement;
+          const input = form.elements.namedItem("text") as HTMLInputElement;
+          const text = input.value.trim();
+          if (!text) return;
+          const optimistic: UIMessage = {
+            id: crypto.randomUUID(),
+            text,
+            userId: meId,
+            createdAt: new Date().toISOString(),
+          };
+          setMessages((prev) => [...prev, optimistic]);
+          socketService.emit("message", { roomId, text });
+          input.value = "";
+        }}
+      >
+        <input
+          name="text"
+          placeholder="Type a message…"
+          className="flex-1 rounded-xl bg-muted/50 text-foreground px-4 py-2 outline-none"
+        />
+        <button className="rounded-xl px-4 py-2 bg-primary text-primary-foreground shadow">
+          Send
+        </button>
+      </form>
+    </div>
+  );
+}
+
+5) Tiny style touch (optional but nice)
+
+Add a subtler scroll bar and ensure the dark theme looks like your old screenshots:
+
+client/src/index.css (or globals)
+
+/***** Chat scrollbars *****/
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 999px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+
+If you want the non-user bubble to use theme vars instead of zinc-800, swap it in ChatBubble.tsx:
+
+// replace "bg-zinc-800 text-zinc-100"
+"bg-muted text-foreground/90"
+
+6) Why this fixes the issues
+
+Design/padding/colors: Matches the old UI by using rounded bubbles (rounded-2xl), generous internal padding (px-4 py-2), and card-like shadow (shadow-md).
+
+Right-aligned user messages: justify-end + asymmetric radius (rounded-br-none) gives the WhatsApp-like tail.
+
+Timestamps: Rendered bottom-right in subtle 10px text; omitted automatically when not provided.
+
+No duplicate listeners: socketService.on() returns an unsubscriber and we call it in useEffect cleanup.
+
+Mobile reliability: pingInterval/pingTimeout added; reconnection backoff capped.

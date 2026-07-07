@@ -1,0 +1,242 @@
+here are copy-paste refinements for the FABs + sheets so it feels premium, readable, and accessible on small screens. This fits your current stack (shadcn <Drawer>, Tailwind, useReportPanel(openWith(fullType)), INCIDENT_TYPES).
+
+1) Replace CategorySheets.tsx with this polished version
+// client/src/features/report/CategorySheets.tsx
+import { useMemo, useState, useEffect } from "react";
+import { INCIDENT_TYPES, INCIDENT_TYPES_BY_ID } from "@/shared/incidentTypes";
+import { useReportPanel } from "@/features/report/useReportPanel";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerDescription,
+  DrawerClose,
+} from "@/components/ui/drawer";
+import { AlertTriangle, Circle, Flame, X } from "lucide-react";
+import clsx from "clsx";
+
+type Severity = "low" | "medium" | "high";
+
+const FAB_STYLE = "pointer-events-auto rounded-full shadow-xl ring-1 ring-white/20 px-4 py-[10px] flex items-center gap-2 active:scale-[0.97] transition-transform duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40";
+
+const COLORS = {
+  low:    "text-slate-900 bg-yellow-400 hover:bg-yellow-300",
+  medium: "text-slate-900 bg-amber-500 hover:bg-amber-400",
+  high:   "text-white bg-red-600 hover:bg-red-500",
+} as const;
+
+function SeverityFab({
+  severity,
+  label,
+  style,
+  onClick,
+}: {
+  severity: Severity;
+  label: string;
+  style: React.CSSProperties;
+  onClick: () => void;
+}) {
+  const icon =
+    severity === "low" ? <Circle className="h-5 w-5" /> :
+    severity === "medium" ? <AlertTriangle className="h-5 w-5" /> :
+    <Flame className="h-5 w-5" />;
+
+  return (
+    <button
+      onClick={onClick}
+      aria-label={`Report a ${label.toLowerCase()}-risk incident`}
+      className={clsx("nn-glass backdrop-blur-md", FAB_STYLE, COLORS[severity])}
+      style={style}
+    >
+      {icon}
+      <span className="font-semibold">{label}</span>
+    </button>
+  );
+}
+
+function SeverityGrid({
+  severity,
+  onPick,
+}: {
+  severity: Severity;
+  onPick: (id: string) => void;
+}) {
+  const items = useMemo(
+    () => INCIDENT_TYPES.filter(t => t.severity === severity),
+    [severity]
+  );
+
+  return (
+    <div className="grid grid-cols-3 gap-3 p-4 pb-6">
+      {items.map(t => (
+        <button
+          key={t.id}
+          onClick={() => onPick(t.id)}
+          className="glass-card rounded-xl p-3 flex flex-col items-center gap-2 hover:bg-white/5 active:scale-[0.98] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+        >
+          <img
+            src={t.buttonIcon ?? "/attached_assets/default.png"}
+            alt={t.label}
+            className="h-10 w-10"
+            loading="lazy"
+            decoding="async"
+          />
+          <span className="text-[11px] leading-tight text-center">{t.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export default function CategorySheets() {
+  const [open, setOpen] = useState<Severity | null>(null);
+  const rp = useReportPanel();
+
+  // reduce motion: remove press animation if user prefers reduced motion
+  useEffect(() => {
+    const mq = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!mq) return;
+    const handler = () => {
+      document.documentElement.classList.toggle("motion-safe", !mq.matches);
+    };
+    handler();
+    mq.addEventListener?.("change", handler);
+    return () => mq.removeEventListener?.("change", handler);
+  }, []);
+
+  const onPick = (id: string) => {
+    const type = INCIDENT_TYPES_BY_ID[id];
+    if (!type) return;
+    setOpen(null);
+    rp.openWith(type); // ✅ your hook expects the full type object
+  };
+
+  // FAB vertical offsets (bigger spacing for fat-finger safety)
+  const baseRight = 16; // px
+  const rowGap = 64;    // px between buttons
+  const safe = "env(safe-area-inset-bottom)";
+  // bottom = home-indicator safe area + base
+
+  return (
+    <>
+      {/* Mobile/Tablet only — Desktop uses full grid */}
+      <div className="fixed inset-0 pointer-events-none lg:hidden z-[55]">
+        <SeverityFab
+          severity="high"   label="High"
+          onClick={() => setOpen("high")}
+          style={{ right: baseRight, bottom: `calc(${safe} + 72px)` , position: "absolute" }}
+        />
+        <SeverityFab
+          severity="medium" label="Medium"
+          onClick={() => setOpen("medium")}
+          style={{ right: baseRight, bottom: `calc(${safe} + ${72 + rowGap}px)`, position: "absolute" }}
+        />
+        <SeverityFab
+          severity="low"    label="Low"
+          onClick={() => setOpen("low")}
+          style={{ right: baseRight, bottom: `calc(${safe} + ${72 + rowGap * 2}px)`, position: "absolute" }}
+        />
+      </div>
+
+      {/* LOW */}
+      <Drawer open={open === "low"} onOpenChange={(v) => setOpen(v ? "low" : null)}>
+        <DrawerContent className="glass-surface rounded-t-2xl z-[61] border border-white/10">
+          <DrawerHeader className="flex items-center justify-between px-4">
+            <div>
+              <DrawerTitle className="text-base font-semibold">Low-risk incidents</DrawerTitle>
+              <DrawerDescription className="text-xs opacity-80">Everyday issues & non-emergencies</DrawerDescription>
+            </div>
+            <DrawerClose className="p-2 rounded-full hover:bg-white/10 active:scale-95">
+              <X className="h-5 w-5" />
+            </DrawerClose>
+          </DrawerHeader>
+          <SeverityGrid severity="low" onPick={onPick} />
+        </DrawerContent>
+      </Drawer>
+
+      {/* MEDIUM */}
+      <Drawer open={open === "medium"} onOpenChange={(v) => setOpen(v ? "medium" : null)}>
+        <DrawerContent className="glass-surface rounded-t-2xl z-[61] border border-white/10">
+          <DrawerHeader className="flex items-center justify-between px-4">
+            <div>
+              <DrawerTitle className="text-base font-semibold">Medium-risk incidents</DrawerTitle>
+              <DrawerDescription className="text-xs opacity-80">Disruptive but not life-threatening</DrawerDescription>
+            </div>
+            <DrawerClose className="p-2 rounded-full hover:bg-white/10 active:scale-95">
+              <X className="h-5 w-5" />
+            </DrawerClose>
+          </DrawerHeader>
+          <SeverityGrid severity="medium" onPick={onPick} />
+        </DrawerContent>
+      </Drawer>
+
+      {/* HIGH */}
+      <Drawer open={open === "high"} onOpenChange={(v) => setOpen(v ? "high" : null)}>
+        <DrawerContent className="glass-surface rounded-t-2xl z-[61] border border-white/10">
+          <DrawerHeader className="flex items-center justify-between px-4">
+            <div>
+              <DrawerTitle className="text-base font-semibold">High-risk incidents</DrawerTitle>
+              <DrawerDescription className="text-xs opacity-80">Urgent situations — act quickly</DrawerDescription>
+            </div>
+            <DrawerClose className="p-2 rounded-full hover:bg-white/10 active:scale-95">
+              <X className="h-5 w-5" />
+            </DrawerClose>
+          </DrawerHeader>
+          <SeverityGrid severity="high" onPick={onPick} />
+        </DrawerContent>
+      </Drawer>
+    </>
+  );
+}
+
+What changed (vs your first pass)
+Larger spacing between FABs (fat-finger safe).
+
+
+Stronger color contrast (distinct amber vs yellow).
+
+
+Press animations, focus rings, and hover states.
+
+
+Sheet header with title + short description and a close button.
+
+
+Grid buttons get proper focus styles and tiny text size for 3-column fit.
+
+
+Safe-area respected (env(safe-area-inset-bottom)).
+
+
+
+2) (Optional) tiny CSS helpers (if not already in your globals)
+/* in client/src/index.css or globals */
+.nn-glass { backdrop-filter: blur(12px); }
+.glass-surface { background: rgba(12, 18, 28, 0.6); backdrop-filter: blur(16px); }
+.glass-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); }
+.motion-safe .active\\:scale-\\[0\\.97\\] { transition: transform 150ms; }
+
+(If you already have glass tokens, keep those—this just ensures consistency.)
+
+3) QA checklist (90 seconds)
+✅ FABs: clear spacing, distinct colors, readable labels.
+
+
+✅ Tap a FAB → sheet slides up with only that severity’s types.
+
+
+✅ Selecting a type closes sheet and opens Report Panel (preselected).
+
+
+✅ Screen reader reads “Report a low-risk incident” etc.
+
+
+✅ Safe-area: buttons don’t collide with iOS home bar.
+
+
+✅ Reduced motion: press animation disabled when user prefers reduced.
+
+
+
+If your drawer.tsx exports have slightly different names, tell me and I’ll adjust imports. Otherwise, drop this in and you should get the exact polished feel you described.

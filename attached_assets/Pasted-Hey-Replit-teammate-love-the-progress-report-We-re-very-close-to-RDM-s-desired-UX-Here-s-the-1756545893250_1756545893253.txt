@@ -1,0 +1,234 @@
+Hey Replit teammate 👋 — love the progress report. We’re very close to @RDM’s desired UX. Here’s the plan I recommend, in this order, with small, surgical patches:
+
+Priority order (fastest user impact → least risk)
+
+Map ↔ List sync + row highlight (tiny, high win)
+
+Shared IncidentList component (removes duplication)
+
+Move filters into the sheet (mobile) (clarifies hierarchy)
+
+vaul peek/half/full (polish, then)
+
+Marker pulse + minor bbox fix (finish line)
+
+Below are concrete patches for each.
+
+1) Map ↔ List sync + row highlight
+
+A) Use the store’s selection everywhere
+
+// useIncidentStore already has selectedId / setSelectedId, right?
+// Use these in Map.tsx + IncidentSheet + Sidebar.
+
+
+B) From list → center & select
+
+// client/src/pages/community/Map.tsx (excerpt)
+import { useIncidentStore } from "@/state/useIncidentStore";
+
+const setSelectedId = useIncidentStore(s => s.setSelectedId);
+
+function handleSelectFromList(id: string) {
+  setSelectedId(id);
+  const i = incidents.find(x => x.id === id);
+  if (!i || !mapRef.current) return;
+  mapRef.current.setView([i.position.lat, i.position.lng], Math.max(15, mapRef.current.getZoom()), { animate: true });
+}
+
+
+Pass onSelect={handleSelectFromList} to IncidentSheet and Sidebar.
+
+C) Row highlight (list)
+Use selectedId to style the active row:
+
+// inside your row renderer
+const selectedId = useIncidentStore(s => s.selectedId);
+const isActive = incident.id === selectedId;
+
+<button
+  aria-selected={isActive}
+  className={`w-full text-left mb-2 p-3 rounded-2xl border transition
+    ${isActive ? "bg-white/15 border-white/30" : "bg-white/5 border-white/10 hover:bg-white/10"}
+  `}
+  onClick={() => onSelect(incident.id)}
+>
+  {/* row content */}
+</button>
+
+2) Shared IncidentList (reuse in Sidebar + Sheet)
+// client/src/components/IncidentList.tsx
+import { timeAgo } from "@/lib/utils";
+import { SeverityIcon, SeverityChip } from "@/components/SeverityUI";
+import { severityColor } from "@/lib/severity";
+import { useIncidentStore } from "@/state/useIncidentStore";
+
+type IncidentRow = {
+  id: string;
+  title: string;
+  description?: string;
+  severity: "low"|"medium"|"high"|"emergency";
+  created_at?: string;
+  position: { lat:number; lng:number };
+};
+
+export default function IncidentList({
+  items,
+  onSelect,
+  dense = false,
+}: {
+  items: IncidentRow[];
+  onSelect: (id: string) => void;
+  dense?: boolean;
+}) {
+  const selectedId = useIncidentStore(s => s.selectedId);
+
+  return (
+    <div className={`px-2 pb-3 overflow-y-auto ${dense ? "space-y-1" : ""}`}>
+      {items.map(i => {
+        const isActive = i.id === selectedId;
+        return (
+          <button
+            key={i.id}
+            onClick={() => onSelect(i.id)}
+            aria-selected={isActive}
+            className={`w-full text-left ${dense ? "p-2" : "p-3"} mb-2 rounded-2xl border transition
+              ${isActive ? "bg-white/15 border-white/30" : "bg-white/5 border-white/10 hover:bg-white/10"}
+            `}
+          >
+            <div className="flex items-start gap-3">
+              <div className={`mt-1 size-3 rounded-full ${severityColor(i.severity)}`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <SeverityIcon sev={i.severity} />
+                  <div className="font-medium truncate">{i.title}</div>
+                </div>
+                {i.description && (
+                  <div className="text-sm text-white/70 line-clamp-2">{i.description}</div>
+                )}
+                <div className="mt-1 flex items-center gap-2 text-xs text-white/60">
+                  <SeverityChip sev={i.severity} />
+                  <span>{timeAgo(i.created_at)}</span>
+                </div>
+              </div>
+            </div>
+          </button>
+        );
+      })}
+      {items.length === 0 && (
+        <div className="p-6 text-center text-white/60">No incidents.</div>
+      )}
+    </div>
+  );
+}
+
+
+Use it:
+
+In IncidentSheet: replace the mapped list with <IncidentList items={filtered} onSelect={onSelect} />.
+
+In Sidebar: <IncidentList items={desktopFiltered} onSelect={handleSelectFromList} dense />.
+
+3) Move severity filters into the sheet (mobile)
+
+Inside IncidentSheet header (mobile-only via CSS or md:hidden), wire to the store:
+
+import { useIncidentStore } from "@/state/useIncidentStore";
+
+const severity = useIncidentStore(s => s.severity);
+const setSeverity = useIncidentStore(s => s.setSeverity);
+const inViewOnly = useIncidentStore(s => s.inViewOnly);
+const toggleInViewOnly = useIncidentStore(s => s.toggleInViewOnly);
+
+<div className="px-4 py-3 flex items-center justify-between">
+  <div className="text-base font-semibold">Recent Incidents</div>
+  <label className="text-xs text-white/80 flex items-center gap-2">
+    <input type="checkbox" checked={inViewOnly} onChange={toggleInViewOnly} />
+    In view
+  </label>
+</div>
+
+<div className="px-3 pb-2 flex gap-2 overflow-x-auto">
+  {(["all","low","medium","high","emergency"] as const).map(s => (
+    <button
+      key={s}
+      onClick={() => setSeverity(s)}
+      className={`px-3 py-1.5 rounded-full text-xs font-medium border ${
+        severity === s ? "bg-white text-slate-900 border-white" : "bg-transparent text-white/80 border-white/20"
+      }`}
+    >
+      {s}
+    </button>
+  ))}
+</div>
+
+
+(You can keep desktop filters above the map; they’ll be reading/writing the same store.)
+
+4) vaul peek/half/full (upgrade the sheet)
+
+Since you’re already using Drawer from vaul, add a simple height state to cycle:
+
+// IncidentSheet.tsx (shell)
+const [height, setHeight] = useState<"peek"|"half"|"full">("peek");
+
+<button
+  onClick={() =>
+    setHeight(h => (h === "peek" ? "half" : h === "half" ? "full" : "peek"))
+  }
+  className="flex justify-center pt-2 w-full"
+  aria-label="Toggle incidents"
+>
+  <div className="h-1.5 w-12 rounded-full bg-white/30" />
+</button>
+
+<div className={`mx-auto max-w-md transition-[height] duration-200
+  ${height === "full" ? "h-[80vh]" : height === "half" ? "h-[52vh]" : "h-[96px]"}
+`}>
+  {/* header + filters + <IncidentList/> */}
+</div>
+
+
+(We can add drag physics later; this cycles cleanly for now.)
+
+5) Marker pulse + bbox init guard
+
+Pulse CSS
+
+/* client/src/styles/globals.css */
+.nn-marker-pulse { box-shadow: 0 0 0 0 rgba(255,255,255,0.5); animation: nn-p 1.6s infinite; }
+@keyframes nn-p { 0% { box-shadow:0 0 0 0 rgba(255,255,255,.5) } 70% { box-shadow:0 0 0 14px rgba(255,255,255,0) } 100% { box-shadow:0 0 0 0 rgba(255,255,255,0) } }
+
+
+Apply to the selected marker’s DOM icon if id === selectedId.
+
+BBox “{}” error on init
+Guard updates until the map is ready:
+
+// Map.tsx (bbox wiring)
+function wireBBox(map: L.Map) {
+  let t:any;
+  const push = () => {
+    try {
+      if (!(map as any)._loaded) return;
+      const b = map.getBounds();
+      setBBox({ north:b.getNorth(), south:b.getSouth(), east:b.getEast(), west:b.getWest() });
+    } catch { /* swallow transient during init */ }
+  };
+  const debounced = () => { clearTimeout(t); t = setTimeout(push, 180); };
+
+  map.whenReady(push);
+  map.on("load", debounced);
+  map.on("moveend", debounced);
+  map.on("zoomend", debounced);
+}
+
+Sanity checkpoints
+
+Both Sidebar and Sheet use IncidentList and the same store → they’ll always agree.
+
+Marker/list sync runs through the same selectedId → consistent highlighting.
+
+Mobile filters live inside the sheet, desktop controls can stay above the map — same store wires them together.
+
+If this plan sounds good, I suggest you start with steps 1 & 2 (sync + shared list). They’re the biggest clarity win for @RDM with minimal surface area. Ping me with any type shapes (your incident interface), and I’ll tailor the snippets exactly to your props.

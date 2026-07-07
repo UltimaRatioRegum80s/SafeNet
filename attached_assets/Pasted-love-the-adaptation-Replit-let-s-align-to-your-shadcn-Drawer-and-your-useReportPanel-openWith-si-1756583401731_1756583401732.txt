@@ -1,0 +1,222 @@
+love the adaptation, Replit — let’s align to your shadcn Drawer and your useReportPanel(openWith) signature that expects the full incident type object. Below is drop-in code that fits your architecture, avoids map/FAB conflicts, and keeps the glass look.
+
+1) New component: 3 severity FABs + bottom sheets
+
+client/src/features/report/CategorySheets.tsx
+
+import { useMemo, useState } from "react";
+import { INCIDENT_TYPES, INCIDENT_TYPES_BY_ID } from "@/shared/incidentTypes";
+import { useReportPanel } from "@/features/report/useReportPanel";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+} from "@/components/ui/drawer"; // shadcn drawer wrapper you already have
+import { AlertTriangle, Circle, Flame } from "lucide-react";
+import clsx from "clsx";
+
+type Severity = "low" | "medium" | "high";
+
+const COLORS = {
+  low:    "from-yellow-400/90 to-yellow-500/90 text-slate-900",
+  medium: "from-amber-500/90 to-amber-600/90 text-slate-900",
+  high:   "from-red-600/90 to-red-700/90 text-white",
+} as const;
+
+function SeverityFab({
+  severity,
+  label,
+  style,
+  onClick,
+}: {
+  severity: Severity;
+  label: string;
+  style: React.CSSProperties;
+  onClick: () => void;
+}) {
+  const icon =
+    severity === "low" ? <Circle className="h-5 w-5" /> :
+    severity === "medium" ? <AlertTriangle className="h-5 w-5" /> :
+    <Flame className="h-5 w-5" />;
+
+  return (
+    <button
+      onClick={onClick}
+      aria-label={`${label} incidents`}
+      className={clsx(
+        "pointer-events-auto rounded-full shadow-lg ring-1 ring-white/20",
+        "backdrop-blur-md bg-gradient-to-br px-4 py-3 flex items-center gap-2",
+        "active:scale-[0.98] transition nn-glass",
+        COLORS[severity],
+      )}
+      style={style}
+    >
+      {icon}
+      <span className="font-semibold">{label}</span>
+    </button>
+  );
+}
+
+function SeverityGrid({
+  severity,
+  onPick,
+}: {
+  severity: Severity;
+  onPick: (id: string) => void;
+}) {
+  const items = useMemo(
+    () => INCIDENT_TYPES.filter(t => t.severity === severity),
+    [severity]
+  );
+  return (
+    <div className="grid grid-cols-3 gap-3 p-4 pb-6">
+      {items.map(t => (
+        <button
+          key={t.id}
+          onClick={() => onPick(t.id)}
+          className="glass-card rounded-xl p-3 flex flex-col items-center gap-2 hover:bg-white/5 active:scale-[0.98] transition focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+        >
+          <img
+            src={t.buttonIcon ?? "/attached_assets/default.png"}
+            alt={t.label}
+            className="h-10 w-10"
+            loading="lazy"
+            decoding="async"
+          />
+          <span className="text-xs text-center">{t.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export default function CategorySheets() {
+  const [open, setOpen] = useState<Severity | null>(null);
+  const rp = useReportPanel();
+
+  const onPick = (id: string) => {
+    const t = INCIDENT_TYPES_BY_ID[id];
+    if (!t) return;
+    setOpen(null);
+    // ✅ your hook expects the full incident object
+    rp.openWith(t);
+  };
+
+  // FAB stack (bottom-right), aware of safe-area; spaced to avoid map controls on right.
+  const baseRight = 16; // px; sm screens will be tight
+  const safeBottom = "calc(env(safe-area-inset-bottom) + 72px)";
+
+  return (
+    <>
+      {/* FABs: show on mobile/tablet only, hide on lg+ where desktop grid is used */}
+      <div className="fixed inset-0 pointer-events-none lg:hidden z-[55]">
+        <SeverityFab
+          severity="high"
+          label="High"
+          onClick={() => setOpen("high")}
+          style={{ right: baseRight, bottom: `calc(${safeBottom} + 0px)`, position: "absolute" }}
+        />
+        <SeverityFab
+          severity="medium"
+          label="Medium"
+          onClick={() => setOpen("medium")}
+          style={{ right: baseRight, bottom: `calc(${safeBottom} + 56px)`, position: "absolute" }}
+        />
+        <SeverityFab
+          severity="low"
+          label="Low"
+          onClick={() => setOpen("low")}
+          style={{ right: baseRight, bottom: `calc(${safeBottom} + 112px)`, position: "absolute" }}
+        />
+      </div>
+
+      {/* Low */}
+      <Drawer open={open === "low"} onOpenChange={(v) => setOpen(v ? "low" : null)}>
+        <DrawerContent className="glass-surface rounded-t-2xl z-[61]">
+          <DrawerHeader>
+            <DrawerTitle>Low-risk incidents</DrawerTitle>
+          </DrawerHeader>
+          <SeverityGrid severity="low" onPick={onPick} />
+        </DrawerContent>
+      </Drawer>
+
+      {/* Medium */}
+      <Drawer open={open === "medium"} onOpenChange={(v) => setOpen(v ? "medium" : null)}>
+        <DrawerContent className="glass-surface rounded-t-2xl z-[61]">
+          <DrawerHeader>
+            <DrawerTitle>Medium-risk incidents</DrawerTitle>
+          </DrawerHeader>
+          <SeverityGrid severity="medium" onPick={onPick} />
+        </DrawerContent>
+      </Drawer>
+
+      {/* High */}
+      <Drawer open={open === "high"} onOpenChange={(v) => setOpen(v ? "high" : null)}>
+        <DrawerContent className="glass-surface rounded-t-2xl z-[61]">
+          <DrawerHeader>
+            <DrawerTitle>High-risk incidents</DrawerTitle>
+          </DrawerHeader>
+          <SeverityGrid severity="high" onPick={onPick} />
+        </DrawerContent>
+      </Drawer>
+    </>
+  );
+}
+
+
+Why this fits your stack
+
+Uses your shadcn Drawer (no snap points needed).
+
+Calls openWith(fullIncident) as you noted.
+
+Keeps glass classes and safe-area spacing.
+
+Stacks FABs on the right but with offsets to avoid existing map controls.
+
+2) Wire into the Report page (mobile/tablet only)
+
+client/src/pages/community/ReportIncident.tsx
+
+import CategorySheets from "@/features/report/CategorySheets";
+// …other imports
+
+export default function ReportIncidentPage() {
+  return (
+    <div className="relative">
+      {/* Desktop view: keep existing quick report grid */}
+      <div className="hidden lg:block">
+        <QuickReportGrid />
+      </div>
+
+      {/* Mobile & tablet: 3 FABs + drawers */}
+      <div className="lg:hidden">
+        <CategorySheets />
+      </div>
+
+      {/* Ensure the shared panel is mounted (it already is in your app) */}
+      <ReportPanel />
+    </div>
+  );
+}
+
+3) QA checklist (super short)
+
+On mobile/tablet, see three FABs (Low/Medium/High) bottom-right; tapping opens a translucent sheet with the correct subset of incident types.
+
+Selecting a type closes the sheet and opens the Report panel preselected (existing flow).
+
+On desktop, nothing changes (full grid remains).
+
+Screen reader: FABs have clear labels; Drawer has titles.
+
+No overlap with map controls; safe-area respected.
+
+4) Notes / options
+
+If you later want snap points, we can swap Drawer → Vaul selectively in this wrapper; the API surface stays the same.
+
+If FABs clash with any page-specific actions, shift baseRight or the vertical offsets by a few px.
+
+If this matches your expectations, feel free to implement as-is. If your drawer.tsx has a slightly different export signature, tell me and I’ll tweak imports to match.

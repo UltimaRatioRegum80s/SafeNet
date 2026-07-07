@@ -1,0 +1,185 @@
+beautiful work, team 🚀
+Since the fixes are in, let’s lock in verification + guardrails so this stays solid across phones/tablets and future changes.
+
+Replit → quick verification matrix (15–20 min)
+
+Please run these on real devices if possible:
+
+A. Create & render
+
+iOS Safari (portrait + landscape)
+
+Android Chrome (portrait + landscape)
+
+iPad/Android tablet (≥768px)
+
+Steps:
+
+Open /map?debug=1.
+
+Create an incident without photo, then with photo.
+
+Observe: optimistic marker appears instantly → stays after server response/refresh.
+
+Rotate device: tiles/markers remain; no blank map.
+
+Background 10–20s → return: Socket: connected within ~3–5s; new incidents stream in.
+
+Please paste back:
+
+Any console log errors/warnings
+
+Whether photo upload cases feel slower / cause missing markers
+
+If rate-limiting blocks burst submissions on mobile (we’ll tune if needed)
+
+Post-fix hardening (drop-in, minimal diff)
+1) Protect against hidden-container mount (tabs/modals)
+
+If the map lives inside a tab that can start hidden, fire an explicit size invalidation when it becomes visible.
+
+// call this when the map's parent panel becomes visible (e.g. after tab change)
+export function onMapPanelShown() {
+  const el = document.getElementById("nn-map");
+  // small async to let layout settle
+  setTimeout(() => {
+    // @ts-ignore potential null guarded
+    el && (el.dispatchEvent(new Event("resize")));
+  }, 0);
+}
+
+
+Trigger onMapPanelShown() in your tab/view switch handler. Our existing listeners (resize/orientation/ResizeObserver) will catch this synthetic resize and run invalidateSize().
+
+2) Guard against excessive cluster rebuilds (perf win on mobile)
+
+If React Query invalidates frequently, we can skip full rebuilds unless the set meaningfully changed.
+
+// in InteractiveMap.tsx, before clearLayers(), quick equality check
+const keyOf = (i: Incident) => `${i.id}-${i.lat}-${i.lng}-${i.type}`;
+const prevKeyRef = useRef<string>("");
+
+const currentKey = incidents.map(keyOf).join("|");
+if (prevKeyRef.current === currentKey) {
+  // nothing meaningful changed; avoid churn
+  return null;
+}
+prevKeyRef.current = currentKey;
+
+// proceed with cluster.clearLayers() & re-add
+
+
+Small but helps on low-end Androids.
+
+3) Socket heartbeat tuning (mobile radios)
+
+If you see intermittent disconnects in the debug overlay, tune ping intervals:
+
+// client/src/lib/socketService.ts
+export const socket = io("/", {
+  transports: ["websocket", "polling"],
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 500,
+  reconnectionDelayMax: 5000,
+  timeout: 20000,
+  autoConnect: true,
+  // 👇 slightly slower heartbeat for mobile radios
+  pingInterval: 25000,
+  pingTimeout: 20000,
+});
+
+
+Only apply if you see frequent reconnects when backgrounding.
+
+4) Server-side: light telemetry to spot mobile-only issues
+
+Add minimal logging around POST and socket emits (strip PII):
+
+// server/middleware/telemetry.ts
+export function logIncidentCreate(req, res, next) {
+  const started = Date.now();
+  res.on("finish", () => {
+    if (req.path === "/api/incidents" && req.method === "POST") {
+      console.log("[INCIDENT_CREATE]", {
+        status: res.statusCode,
+        ms: Date.now() - started,
+        uaMobile: /Mobile|Android|iPhone|iPad/i.test(req.headers["user-agent"] || ""),
+      });
+    }
+  });
+  next();
+}
+
+
+Wire once in your server bootstrap:
+
+app.use(logIncidentCreate);
+
+
+This’ll quickly tell us if mobile POSTs are slower/failing.
+
+5) Quick regression tests (schema + normalization)
+// shared/__tests__/schema.incident.test.ts
+import { insertIncidentSchema, normalizeIncidentCoords } from "../schema";
+
+test("coerces string lat/lng", () => {
+  const p = insertIncidentSchema.parse({ title:"t", description:"d", lat:"-33.9", lng:"18.4", type:"fire" });
+  expect(typeof p.lat).toBe("number");
+});
+
+test("swaps reversed coords", () => {
+  const n = normalizeIncidentCoords({ lat: 120, lng: -33 }); // obviously swapped
+  expect(Math.abs(n.lat) <= 90).toBe(true);
+  expect(Math.abs(n.lng) <= 180).toBe(true);
+});
+
+test("rounds precision", () => {
+  const n = normalizeIncidentCoords({ lat: -33.912345678, lng: 18.412345678 });
+  expect(n.lat.toString().split(".")[1].length).toBeLessThanOrEqual(6);
+});
+
+
+Run in CI to keep the guarantees.
+
+6) Optional: Cypress e2e (mobile viewport smoke)
+
+Fast confidence builder for PRs.
+
+// cypress/e2e/map.mobile.cy.ts
+describe("Mobile map incidents", () => {
+  beforeEach(() => {
+    cy.viewport("iphone-12");
+    cy.visit("/map?debug=1");
+  });
+
+  it("creates incident and shows marker", () => {
+    // Assuming there's a button/form with these selectors; adjust to your UI
+    cy.findByRole("button", { name: /report incident/i }).click();
+    cy.findByLabelText(/title/i).type("Test on mobile");
+    cy.findByLabelText(/type/i).select("fire");
+    // if location is auto-populated, skip; otherwise fill
+    cy.findByRole("button", { name: /submit/i }).click();
+
+    // Debug HUD should show incidents count incrementing or optimistic marker presence
+    cy.contains(/Incidents in cache:/i).should("exist");
+  });
+});
+
+Hand-off to @RDM (plain english)
+
+We fixed how the app reads mobile GPS and renders markers, and made the live updates resilient.
+
+Now we’re confirming it behaves the same on iPhone, Android, and tablets.
+
+If anything still feels flaky (especially with photo uploads or after rotating the phone), we’ll tweak socket heartbeats and a small performance guard we included.
+
+Replit → can you report back:
+
+The verification matrix results (iOS/Android/tablet).
+
+Any console/server logs from the telemetry middleware (status + timing).
+
+Whether photo uploads correlate with “optimistic marker shows but vanishes” (we’ll then keep the optimistic marker until success with a distinct UI state).
+
+If all green, I’ll prep a tiny cleanup PR to remove the Debug HUD and lock Cypress mobile smoke tests in CI.

@@ -1,0 +1,51 @@
+Sure! Here are the findings written up as a message you can paste directly into Replit:
+SafeNet / NaborNet — Code Review Findings
+Reviewed by Claude AI | 15 March 2026
+Hi Replit Agent,
+I've had a thorough code review done on this project and have 10 findings I'd like your help addressing before beta launch. The project is in great shape overall — the architecture is solid and the feature set is impressive. These are improvements to make it production-ready and secure.
+FINDING 1 — CORS Configuration Exposes All Origins (HIGH PRIORITY)
+File: server/index.ts
+The CORS middleware is currently set to app.use(cors({ origin: true, credentials: true })). Setting origin: true with credentials: true means the server accepts authenticated requests (cookies, session tokens) from ANY website. This is a serious security risk that could allow cross-site attacks against our users. Please replace this with an explicit domain allowlist:
+const allowedOrigins = ['https://nabornet.io', 'https://safe-ly.replit.app'];
+app.use(cors({ origin: allowedOrigins, credentials: true }));
+
+FINDING 2 — Dual Password Fields Create a Security Risk (HIGH PRIORITY)
+File: shared/schema.ts
+The users table has two password-related columns — password (labelled "legacy") and passwordHash. Having both active risks different code paths reading/writing to different columns, leaving some accounts in an insecure state. Please audit all auth code paths, confirm everything uses passwordHash, then write a migration to drop the legacy password column and remove all references to it.
+FINDING 3 — server/routes.ts Is Too Large and Must Be Split (MEDIUM PRIORITY)
+File: server/routes.ts
+The main routes file handles incidents, users, sessions, auth, push notifications, moderation, businesses, events, driveby requests, and more — all in one file. This makes the code very hard to maintain and debug. The project already correctly has server/routes/uploads.ts and server/routes/moderation.ts as sub-routers. Please continue this pattern and split routes.ts into:
+
+server/routes/incidents.ts
+server/routes/users.ts
+server/routes/auth.ts
+server/routes/community.ts (businesses, events, etc.)
+Then have the main routes.ts simply mount each of these sub-routers.
+
+
+FINDING 4 — Auth State Is Split Across Zustand and React Query (MEDIUM PRIORITY)
+Files: client/src/App.tsx, client/src/store/auth.ts, client/src/store/user.ts
+The app uses both Zustand stores (useAuthStore, useUserStore) and TanStack React Query to manage the current user's data. When both systems hold user/auth state they can get out of sync, causing bugs where the UI shows stale or incorrect data after login or logout. Please consolidate to a single source of truth — ideally a React Query useCurrentUser() hook backed by /api/me, with the React Query cache being invalidated on login/logout. The Zustand user store can then be removed or kept only for UI state (e.g. which modal is open).
+FINDING 5 — URL Filter Updates in Feed.tsx Bypass the Wouter Router (MEDIUM PRIORITY)
+File: client/src/pages/community/Feed.tsx
+The setRadiusKm and setSinceHours functions use window.history.pushState() directly to update URL params when filter values change. This bypasses Wouter's routing layer, so Wouter doesn't fire a location change event and dependent components don't re-render correctly. Please replace these with Wouter's useLocation hook to push URL changes, so the router and all subscribed components stay in sync.
+FINDING 6 — No React Error Boundaries (MEDIUM PRIORITY)
+File: client/src/App.tsx
+The app doesn't wrap routes in React Error Boundaries. If any page component throws an error (e.g. a bad location API response or undefined data from an API call), the entire app crashes and shows a blank screen to the user. Please add an <ErrorBoundary> wrapper around the main route groups so that errors on one page are caught gracefully and shown as a friendly error message rather than a full app crash.
+FINDING 7 — Dependency Bloat in package.json (LOW PRIORITY)
+File: package.json
+The project has 27+ individual Radix UI packages, 5 Uppy packages, 5 Workbox packages, both uuid and nanoid (two ID generation libraries doing the same job), better-sqlite3 (which appears to be a test/dev artefact since PostgreSQL via Neon is used in production), and @playwright/test in the main dependencies rather than devDependencies. Please audit which packages are actually used, move test tools to devDependencies, remove better-sqlite3 if it's not needed in production, and pick either uuid or nanoid — not both.
+FINDING 8 — Three Redundant Health Check Endpoints (LOW PRIORITY)
+File: server/index.ts
+There are three health endpoints: /api/ping, /api/healthz, and /api/readyz. The first two do exactly the same thing (return { ok: true }). Please remove /api/ping and keep only /api/healthz (simple liveness check) and /api/readyz (readiness check with the DB probe). This keeps the API clean and consistent.
+FINDING 9 — OAuth Signup Mode Needs Consistent Enforcement (LOW PRIORITY)
+File: server/routes.ts
+The SIGNUP_MODE environment variable (defaulting to 'whitelist') is a great feature. Please confirm this whitelist check is enforced on ALL signup paths — including Google OAuth, Microsoft OAuth, and any anonymous join flows — not just the local credential signup. It would be easy for a new OAuth path to be added in future and accidentally bypass the gate.
+FINDING 10 — memorystore Package Still Present Alongside PostgreSQL Sessions (LOW PRIORITY)
+File: package.json, server/index.ts
+The memorystore package is still in the dependencies even though the production session store correctly uses connect-pg-simple (PostgreSQL). Memory-based session stores don't persist across server restarts and aren't suitable for production. Please remove memorystore from the dependencies entirely, or if it is used as a fallback in development, add a clear code comment explaining this and ensure it cannot accidentally be used in production.
+Summary Table
+PriorityFindingFileHIGHCORS origin: true with credentialsserver/index.tsHIGHDual password fields (password + passwordHash)shared/schema.tsMEDIUMroutes.ts too large — needs splittingserver/routes.tsMEDIUMAuth state split across Zustand + React QueryApp.tsx / storesMEDIUMwindow.history.pushState bypassing WouterFeed.tsxMEDIUMNo React Error BoundariesApp.tsxLOWDependency bloat + test deps in wrong placepackage.jsonLOW3 redundant health check endpointsserver/index.tsLOWOAuth paths may bypass SIGNUP_MODE whitelistserver/routes.tsLOWmemorystore still in production dependenciespackage.json
+
+Please address the two HIGH priority findings before any beta users are onboarded, and work through the MEDIUM items as part of the pre-beta hardening sprint. Happy to discuss any of these in more detail.
+Feel free to copy that straight in! Let me know if you'd like any of the findings expanded, softened, or reworded before you send it.

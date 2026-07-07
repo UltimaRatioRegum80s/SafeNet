@@ -1,0 +1,139 @@
+looks great 🙌 the glass theme feels cohesive and the mobile ergonomics are spot on—FABs, popovers, and the panel all line up nicely. Two tiny style nits (optional):
+
+bump focus rings to ring-2 ring-sky-500 on key actions for extra clarity in sunlight.
+
+add shadow-lg hover:shadow-xl on image cards for a little depth on tap/hover.
+
+ready for Milestone 7: Push Notifications. Here’s a lean, production-ready plan that fits our stack and keeps control in our backend (no external vendor):
+
+Milestone 7 — Web Push (VAPID) plan
+What we’ll ship
+
+Soft, respectful opt-in flow (panel entry + settings screen).
+
+Topic routing: nh:{neighborhoodId} and per-incident-type toggles.
+
+Send on incident:created (status “pending”), collapse duplicates.
+
+Deep link on tap → focuses the incident on map.
+
+Backend (Express)
+
+Deps: npm i web-push
+
+VAPID keys: generate once; keep private key in env.
+
+DB: push_subscriptions (id, userId nullable, neighborhoodId, endpoint, p256dh, auth, types jsonb[], createdAt).
+
+Routes:
+
+POST /api/push/subscribe → save/merge subscription, types, neighborhoodId.
+
+DELETE /api/push/subscribe → remove by endpoint.
+
+Send helper:
+
+sendPushToNeighborhood(nhId, payload, filterByTypes?)
+
+Use TTL: 30, urgency: "high" for critical, otherwise "normal".
+
+Hook: in incident creation handler, after socket emit, call send for the incident’s neighborhood; collapse key = incident:<id>.
+
+Client (PWA)
+
+Service worker: public/sw.js
+
+self.addEventListener('push', ...) show notification with {title, body, tag, data:{id, link}}.
+
+notificationclick → clients.openWindow(link).
+
+Registration & subscribe:
+
+At app boot, register SW.
+
+Soft prompt UI → on accept:
+
+Notification.requestPermission()
+
+registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey })
+
+POST to /api/push/subscribe with { endpoint, keys, neighborhoodId, types[] }.
+
+Settings UI:
+
+Toggles for each incident type + a global mute.
+
+“Test notification” button.
+
+Minimal snippets
+server/push.ts
+import webpush from "web-push";
+const VAPID_PUBLIC = process.env.VAPID_PUBLIC!;
+const VAPID_PRIVATE = process.env.VAPID_PRIVATE!;
+webpush.setVapidDetails("mailto:alerts@nnb.example", VAPID_PUBLIC, VAPID_PRIVATE);
+
+export async function sendPush(sub, payload: any) {
+  try {
+    await webpush.sendNotification(sub, JSON.stringify(payload), { TTL: 30 });
+  } catch (e: any) {
+    if (e.statusCode === 410) {/* stale; remove sub */ }
+  }
+}
+
+routes
+// POST /api/push/subscribe
+// body: { endpoint, keys:{p256dh,auth}, neighborhoodId, types: string[] }
+
+sw.js
+self.addEventListener('push', e => {
+  const data = e.data?.json?.() ?? {};
+  const { title, body, link, tag } = data;
+  e.waitUntil(self.registration.showNotification(title || 'NaborNet', {
+    body, tag, data: { link }, icon: '/icons/icon-192.png', badge: '/icons/badge.png',
+  }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = e.notification.data?.link || '/';
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    for (const c of list) { if ('focus' in c) { c.navigate(url); return c.focus(); } }
+    return clients.openWindow(url);
+  }));
+});
+
+client bootstrap
+const reg = await navigator.serviceWorker.register('/sw.js');
+const perm = await Notification.requestPermission();
+if (perm === 'granted') {
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(import.meta.env.VITE_VAPID_PUBLIC),
+  });
+  await fetch('/api/push/subscribe', {
+    method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...formatSub(sub), neighborhoodId, types }),
+  });
+}
+
+payload shape on incident
+{
+  "title": "Fire near Academia",
+  "body": "Reported 2 min ago. Tap to view.",
+  "tag": "incident:12345",
+  "link": "/community/map?focus=12345"
+}
+
+QA checklist
+
+Permission denied path → no errors, gentle re-prompt only from settings.
+
+Background push opens deep link, focuses incident.
+
+Type toggles respected; mute works.
+
+Collapse works (no spam on edits/re-broadcasts).
+
+Anonymous: still receives pushes; subscription stored with neighborhoodId, userId nullable.
+
+If this direction works for you, I’ll prep the exact file touches (server route stubs, SW file, client subscribe util, minimal settings UI) next.

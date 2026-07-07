@@ -1,0 +1,672 @@
+🔁 NABORNET — PROJECT RESTART CAPSULE
+Foundational Context for New Conversations
+1. What This Project Is
+NaborNet is a community safety and situational awareness platform, delivered as an offline-capable Progressive Web App (PWA).
+Its purpose is to allow community members to:
+report observations and incidents (not accusations),
+
+
+view unverified, community-submitted reports on a map/feed,
+
+
+maintain awareness during connectivity loss,
+
+
+without positioning itself as an emergency service, law enforcement tool, or evidence platform.
+
+
+NaborNet is explicitly NOT:
+an emergency service,
+
+
+a policing or investigative platform,
+
+
+a source of verified facts or proof,
+
+
+a chat-based social network.
+
+
+The product philosophy is Safety-Grade MVP:
+Useful, conservative, legally defensible, and intentionally restrained.
+
+2. Current Status (Authoritative)
+Status: 🟢 Closed Beta LIVE
+The system is fully deployed and operating under controlled access with real users.
+
+3. Parties & Roles in This Conversation
+👤 Project Owner / Chief Administrator
+Name: De Wet Moolman
+ Role:
+Final decision-maker
+
+
+Product owner
+
+
+Risk owner (legal, operational, reputational)
+
+
+Controls roadmap, beta scope, and release decisions
+
+
+🤖 Replit (AI Coding Lead / Technical Implementer)
+Role:
+Primary coding agent
+
+
+Implements backend, frontend, PWA, database, and infrastructure
+
+
+Verifies code-level correctness
+
+
+Executes tasks only after owner approval
+
+
+🤖 ChatGPT (Strategic Product, Risk & Architecture Advisor)
+Role:
+Maintains holistic understanding of the system
+
+
+Advises on:
+
+
+legal exposure
+
+
+product scope
+
+
+safety posture
+
+
+phased rollout
+
+
+UX implications of risk controls
+
+
+Acts as second-layer oversight, not a coder
+
+
+Ensures decisions align with:
+
+
+safety
+
+
+liability reduction
+
+
+long-term scalability
+
+
+All three parties collaborate, but final authority rests with the Project Owner.
+
+4. What Has Been Achieved (High-Level)
+A. Platform & Infrastructure
+Live web app + installable PWA
+
+
+Works on desktop and mobile
+
+
+Service worker implemented
+
+
+App shell loads offline
+
+
+B. Access Control
+Closed beta enforced
+
+
+SIGNUP_MODE=whitelist
+
+
+Only explicitly approved emails may register
+
+
+No public signup possible
+
+
+C. Authentication & Security
+Session-based authentication
+
+
+Email verification required to create incidents
+
+
+Password reset flow implemented
+
+
+Login rate limiting (email + IP)
+
+
+No admin/owner bypass of security rules
+
+
+D. Legal & Compliance
+Terms of Service v1.1.0 live (includes anti-doxxing & neutrality clauses)
+
+
+Privacy Policy v1.0.0 live
+
+
+LegalGate consent modal blocks app use until accepted
+
+
+Versioned legal consent stored in database (audit-ready)
+
+
+Explicit disclaimers:
+
+
+not an emergency service
+
+
+not affiliated with police/government
+
+
+reports are unverified
+
+
+E. Incident Reporting (Core Feature)
+Incidents require verified email
+
+
+Database-enforced idempotency:
+
+
+idempotency_key with partial unique index
+
+
+duplicate incidents mathematically impossible
+
+
+Same protections apply to:
+
+
+online creation
+
+
+offline sync ingestion
+
+
+F. Offline Capability (Major Milestone)
+Incidents can be drafted offline
+
+
+Stored locally in IndexedDB
+
+
+Auto-sync on reconnection with retry + backoff
+
+
+Clear UI states: Pending / Syncing / Synced / Failed
+
+
+Exact GPS hidden while offline (“Approx. location”)
+
+
+Offline data fully purged on logout
+
+
+Map tiles explicitly NOT cached
+
+
+No background sync dependency (iOS-safe)
+
+
+G. Operational Safety Controls
+Emergency kill switches:
+
+
+INCIDENT_CREATION_ENABLED
+
+
+OFFLINE_SYNC_ENABLED
+
+
+Enforced server-side before DB writes
+
+
+Allows rapid shutdown of reporting if needed
+
+
+
+5. What Is Intentionally NOT Built (By Design)
+The following are deliberately excluded to reduce legal and safety risk during beta:
+❌ Public chat or neighbourhood chat
+
+
+❌ Free-form public moderation tools
+
+
+❌ Push notifications
+
+
+❌ Media uploads (photos/videos) while offline
+
+
+❌ Production error monitoring (e.g. Sentry)
+
+
+❌ Operator dashboard
+
+
+❌ Analytics / tracking pipeline
+
+
+Schemas for some future features exist, but no public UI or activation is present.
+
+6. Current Known Constraints
+Email delivery is in Resend sandbox mode:
+
+
+Verification emails only deliver to the Resend account owner email
+
+
+Owner account has been manually verified for testing
+
+
+Domain verification for email is intentionally deferred
+
+
+Monitoring is minimal (console/server logs only)
+
+
+Beta cohort is intentionally very small
+
+
+
+7. Safety & Risk Posture
+Formal assessment:
+ ✅ Safe to operate in closed beta
+The platform currently has:
+strong access control
+
+
+legal disclaimers and consent tracking
+
+
+duplicate prevention
+
+
+offline data protection
+
+
+emergency kill switches
+
+
+limited surface area for abuse
+
+
+
+8. Guiding Principles for All Future Discussion
+Any future decisions should be evaluated against these principles:
+Safety over speed
+
+
+Legal defensibility over features
+
+
+Restraint over engagement
+
+
+Observation over accusation
+
+
+Phased rollout over big-bang launches
+
+
+
+9. What the Next Conversation Is Allowed to Focus On
+Future discussions may include:
+Whether and how to test constrained community discussion
+
+
+If / when to introduce media uploads safely
+
+
+Phase 2.5: monitoring & observability
+
+
+Phase 3: widening beta responsibly
+
+
+Operator tooling (only when justified)
+
+
+Legal framing and public-facing explanations
+
+
+
+This restart capsule represents the single source of truth for the NaborNet project at the moment a new conversation begins.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+1️⃣ NABORNET — ONE-PAGE EXECUTIVE BRIEF
+(Non-technical, decision-maker friendly)
+Project Overview
+NaborNet is a community safety and situational awareness platform, delivered as an offline-capable Progressive Web App (PWA). It enables communities to share unverified observations of incidents to improve awareness, especially in low-connectivity environments.
+NaborNet is not an emergency service, not a policing tool, and not an evidence platform.
+Its philosophy is a Safety-Grade MVP:
+conservative, legally defensible, and intentionally restrained.
+
+Current Status
+🟢 Closed Beta LIVE
+The platform is deployed, operational, and accessible only to a small, explicitly whitelisted group of users.
+
+What the Platform Does
+Allows verified users to report community incidents
+
+
+Displays reports on a live map and feed
+
+
+Works offline, with safe automatic sync when connectivity returns
+
+
+Prevents duplicate reports at database level
+
+
+Clearly labels all information as unverified
+
+
+
+Key Safeguards in Place
+Closed beta access (no public signup)
+
+
+Mandatory email verification for reporting
+
+
+Strong legal framing (Terms v1.1.0, Privacy Policy)
+
+
+Explicit disclaimers (“not an emergency service”)
+
+
+Anti-doxxing and neutrality requirements
+
+
+Versioned legal consent stored for audit
+
+
+Emergency kill switches for incident creation and sync
+
+
+Offline privacy protections (approximate location only)
+
+
+
+What Is Intentionally Not Included
+To reduce legal, safety, and operational risk during beta:
+No public chat
+
+
+No push notifications
+
+
+No public moderation tools
+
+
+No offline photo/video uploads
+
+
+No analytics or tracking
+
+
+No operator dashboard
+
+
+These omissions are deliberate and strategic.
+
+Risk & Readiness Assessment
+✅ Safe to operate in closed beta
+The system is stable, legally framed, and operationally controlled.
+ Expansion beyond closed beta will require additional monitoring, email infrastructure, and governance tooling.
+
+Ownership & Governance
+Owner & Chief Administrator: De Wet Moolman
+
+
+Technical Implementation: Replit (AI coding agent)
+
+
+Strategic Oversight: ChatGPT (product, legal, and risk advisor)
+
+
+Final authority rests with the Project Owner.
+
+Strategic Principle
+NaborNet prioritizes:
+ safety over speed, restraint over engagement, and legal defensibility over growth.
+
+2️⃣ NABORNET — TECHNICAL CONTEXT BRIEF
+(For engineers, architects, auditors, or regulators)
+System Purpose
+NaborNet is a PWA-based community incident reporting system designed for situational awareness, not enforcement or emergency response. All user-submitted content is explicitly unverified.
+
+Deployment State
+Environment: Production (Replit-hosted)
+
+
+Access mode: Closed beta
+
+
+Signup control: SIGNUP_MODE=whitelist
+
+
+No public registration endpoints exposed
+
+
+
+Architecture Summary
+Frontend: React + TypeScript
+
+
+Backend: Node.js / Express
+
+
+Auth: Session-based (PostgreSQL store)
+
+
+Realtime: Socket.IO
+
+
+Storage: PostgreSQL (primary), IndexedDB (offline)
+
+
+PWA: Service Worker v2.x, installable manifest
+
+
+
+Authentication & Abuse Controls
+Email/password auth
+
+
+Mandatory email verification enforced server-side for:
+
+
+Online incident creation
+
+
+Offline sync ingestion
+
+
+Password reset with token expiry
+
+
+Login rate limiting (email + IP)
+
+
+No admin/owner auth bypasses
+
+
+
+Incident Integrity
+Each incident assigned a client-generated UUID
+
+
+idempotency_key stored in DB
+
+
+Partial unique index (WHERE idempotency_key IS NOT NULL)
+
+
+Duplicate incidents mathematically impossible
+
+
+Same checks applied to REST and Socket.IO ingestion paths
+
+
+
+Offline & Sync Behavior
+Offline drafts stored in IndexedDB
+
+
+Foreground sync on reconnect (no Background Sync dependency)
+
+
+Retry with exponential backoff
+
+
+Clear state machine: pending / syncing / synced / failed
+
+
+Offline location precision reduced
+
+
+Offline data fully purged on logout
+
+
+Map tiles explicitly excluded from cache
+
+
+
+Legal & Compliance Controls
+Terms of Service v1.1.0
+
+
+Privacy Policy v1.0.0
+
+
+LegalGate modal blocks access until consent
+
+
+Versioned consent stored in DB with:
+
+
+userId
+
+
+timestamp
+
+
+IP address
+
+
+user agent
+
+
+Anti-doxxing and defamation-mitigation language enforced
+
+
+
+Operational Safety
+Environment-based kill switches:
+
+
+INCIDENT_CREATION_ENABLED
+
+
+OFFLINE_SYNC_ENABLED
+
+
+Evaluated before DB writes and socket events
+
+
+Enables rapid shutdown of reporting functionality
+
+
+
+Email Infrastructure
+Resend integrated
+
+
+Currently operating in sandbox mode
+
+
+Verification emails limited to Resend account owner
+
+
+Domain verification intentionally deferred
+
+
+Owner account manually verified for beta testing
+
+
+
+Explicitly Out of Scope (Current Phase)
+Public chat UI (schema exists only)
+
+
+Push notifications
+
+
+Media uploads while offline
+
+
+Production monitoring (e.g., Sentry)
+
+
+Operator dashboard
+
+
+Analytics pipeline
+
+
+
+Safety Assessment
+Conclusion:
+ The system is safe for closed beta operation, with controlled access, legal safeguards, data integrity guarantees, and emergency controls in place.
+
+
+
+
+
+
+
+
+
+

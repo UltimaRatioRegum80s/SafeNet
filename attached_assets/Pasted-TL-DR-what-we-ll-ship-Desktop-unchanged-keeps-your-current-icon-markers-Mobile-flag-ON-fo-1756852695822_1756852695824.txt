@@ -1,0 +1,133 @@
+TL;DR (what we’ll ship)
+
+Desktop: unchanged (keeps your current icon markers).
+
+Mobile (flag ON): force a single, robust path → L.Marker(divIcon) + clustering, with Leaflet zoom animations off (prevents the crash).
+
+Kill switch: one query param/localStorage flip disables it instantly.
+
+Below is a copy-paste instruction block for Replit. After this, you can launch with confidence.
+
+@Replit — MVP Mobile Markers (progress-safe)
+
+Use existing flag NN_FIX_MOBILE_MARKERS (default OFF).
+When the flag is ON, run “Uniform Marker Mode” only for mobile; desktop path untouched.
+
+1) Add a solid mobile check
+
+client/src/lib/platform.ts
+
+export const isMobileLike =
+  window.matchMedia?.('(pointer: coarse)').matches ||
+  /Android|iPhone|iPad|iPod|Mobile|Silk/i.test(navigator.userAgent);
+
+2) Map init: disable animations under the flag (prevents _latLngToNewLayerPoint crash)
+
+In MapView.tsx where the Leaflet map is created:
+
+const map = L.map(container, {
+  // existing options...
+  zoomAnimation: !(Flags.fixMobileMarkers && isMobileLike),
+  markerZoomAnimation: !(Flags.fixMobileMarkers && isMobileLike),
+  fadeAnimation: !(Flags.fixMobileMarkers && isMobileLike),
+});
+mapRef.current = map;
+
+
+(if map is already created elsewhere, immediately override options after creation)
+
+3) Ensure one cluster instance and attach once (idempotent)
+
+Still in MapView.tsx:
+
+if (!clusterRef.current) {
+  clusterRef.current = L.markerClusterGroup(/* your existing options */);
+}
+if (Flags.fixMobileMarkers && isMobileLike && mapRef.current && !mapRef.current.hasLayer(clusterRef.current)) {
+  mapRef.current.addLayer(clusterRef.current);
+}
+
+// debug exports only when flag is ON (helps us verify, harmless)
+if (Flags.fixMobileMarkers) {
+  (window as any)._map = mapRef.current;
+  (window as any)._cluster = clusterRef.current;
+}
+
+4) Marker creation: always a Marker on the flagged mobile path
+
+Where you build markers (the old circleMarker fallback), replace just the flagged path:
+
+import { isMobileLike } from '@/lib/platform';
+
+// existing:
+const icon = typeof getIncidentIcon === 'function' ? getIncidentIcon(inc.type) : null;
+
+let layer: L.Marker;
+
+// desktop path unchanged (uses your image icons)
+if (!Flags.fixMobileMarkers || !isMobileLike) {
+  layer = L.marker(ll, { icon: icon || undefined, title: inc.title ?? inc.type });
+} else {
+  // FLAGGED MOBILE PATH: guaranteed Marker with divIcon (cluster-compatible)
+  const divIcon = L.divIcon({
+    className: 'nn-divicon-wrapper',
+    html: `<div style="width:14px;height:14px;border-radius:9999px;background:rgba(37,99,235,.18);border:2px solid #2563eb;box-shadow:0 1px 2px rgba(0,0,0,.25)"></div>`,
+    iconSize: [14,14], iconAnchor: [7,7], popupAnchor: [0,-7],
+  });
+  layer = L.marker(ll, { icon: divIcon, title: inc.title ?? inc.type });
+}
+
+if (inc.popupHtml) layer.bindPopup(inc.popupHtml, { maxWidth: 320 });
+
+// (Batch add recommended; see Step 5)
+clusterRef.current.addLayer(layer);
+
+5) (Nice-to-have for stability) Batch add under the flag
+
+Where you currently loop addLayer per incident, do this when the flag is ON:
+
+if (Flags.fixMobileMarkers && isMobileLike) {
+  const layers: L.Marker[] = incidents.map(inc => createMarker(inc)); // using logic above
+  clusterRef.current.clearLayers();
+  clusterRef.current.addLayers(layers);
+} else {
+  // existing per-item path (desktop stays as-is)
+}
+
+6) Make sure MarkerCluster CSS is present
+
+In your entry (already partially done, just reconfirm):
+
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
+
+7) Kill switch & rollout
+
+Test mobile with: ?NN_FIX_MOBILE_MARKERS=1
+
+Disable instantly with: ?NN_FIX_MOBILE_MARKERS=0 or
+localStorage.NN_FIX_MOBILE_MARKERS='0'; location.reload();
+
+Commit message:
+
+feat(mobile-markers): Uniform Marker Mode under NN_FIX_MOBILE_MARKERS
+- force Marker+divIcon on mobile, no circleMarker
+- disable Leaflet zoom/marker animations on mobile path
+- single cluster instance, idempotent attach
+- batch add under flag
+
+Acceptance checklist (what you’ll verify)
+
+Desktop (no flag): looks identical to today: icons, clusters, popups ✅
+
+Mobile (flag ON):
+
+Clusters visible at low zoom ✅
+
+Markers visible at higher zoom ✅
+
+Popups open ✅
+
+No _latLngToNewLayerPoint errors ✅
+
+If any hiccup appears, flip the flag off—desktop remains untouched.

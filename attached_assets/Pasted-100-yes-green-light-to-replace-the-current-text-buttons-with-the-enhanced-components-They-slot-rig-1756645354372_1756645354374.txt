@@ -1,0 +1,101 @@
+100% yes—green light to replace the current text buttons with the enhanced components. They slot right into your flow and you’ve already verified analytics + haptics + drawer filtering ✅
+
+Here’s the exact wiring for your setup where openSheet lives inside CategorySheets.tsx:
+
+Drop-in integration (CategorySheets.tsx)
+// CategorySheets.tsx (or the page that renders the mobile/tablet entry UI)
+import { useState } from "react";
+import { useIncidentStore } from "@/stores/useIncidentStore";
+import SeveritySelect, { type Severity } from "@/components/SeveritySelect";
+import SeveritySelectCompact from "@/components/SeveritySelectCompact";
+
+// ...your existing imports (openSheet is defined in this component)
+
+export default function CategorySheets(/* props */) {
+  const setSeverity = useIncidentStore((s) => s.setSeverity);
+  const [isOpening, setIsOpening] = useState(false);
+
+  const onSeveritySelect = (sev: Severity) => {
+    if (isOpening) return;            // guard against double-taps
+    setIsOpening(true);
+    setSeverity(sev);                 // store filter
+    openSheet(sev);                   // your existing function
+    // let the animation complete before re-enabling taps
+    setTimeout(() => setIsOpening(false), 400);
+  };
+
+  return (
+    <>
+      {/* Mobile + Tablet entry section (replaces old FABs) */}
+      <section className="lg:hidden px-4 sm:px-6 pt-10 safe-bottom">
+        <h1 className="text-xl md:text-2xl font-bold text-center md:text-left">Report Incident</h1>
+        <p className="mt-2 text-sm text-slate-400 text-center md:text-left">
+          Choose a severity level. You’ll select the incident type next.
+        </p>
+
+        {/* Pick ONE of these two renderings (or use both with breakpoints): */}
+
+        {/* Vertical, thumb-friendly (phones) */}
+        <div className="mt-8 sm:hidden">
+          <SeveritySelect
+            onSelect={onSeveritySelect}
+            criticalStyle="solid"     // swap to "ring" to A/B
+            trackEvent={true}         // component fires "severity_sheet_open"
+            vibrate={true}
+          />
+        </div>
+
+        {/* Compact (1×4 or 2×2) for wider phones/tablets */}
+        <div className="mt-8 hidden sm:block">
+          <SeveritySelectCompact
+            onSelect={onSeveritySelect}
+            criticalStyle="solid"     // or "ring"
+            trackEvent={true}
+            vibrate={true}
+          />
+        </div>
+      </section>
+
+      {/* Desktop grid remains unchanged */}
+      {/* <DesktopIncidentGrid className="hidden lg:block" /> */}
+
+      {/* ...rest of CategorySheets */}
+    </>
+  );
+}
+
+Important notes
+
+Avoid duplicate analytics: the components already call track("severity_sheet_open", { severity }).
+If you also track in the parent, set trackEvent={false} on the component.
+
+Double-tap guard: the isOpening flag prevents re-opening the sheet if the user taps twice fast.
+
+Focus after open (a11y): if your sheet has a title like id="sheet-title", move focus to it on open:
+
+openSheet(sev);
+requestAnimationFrame(() => document.getElementById("sheet-title")?.focus?.());
+
+Keep/verify these behaviors
+
+Store filter: useIncidentStore.setSeverity(sev) still drives the drawer grid.
+
+Drawer grid filter:
+
+const severity = useIncidentStore((s) => s.severity);
+const visible = severity === "all" ? types : types.filter(t => t.severity === severity);
+
+
+Empty “Critical” state (if no types): show message + “Show all types” that calls setSeverity("all").
+
+Desktop (lg:block) UI unchanged.
+
+Tiny polish (optional)
+
+Add aria-hidden to icons (already in components).
+
+Ensure focus ring visibility is obvious on dark bg (already styled).
+
+If “Critical (solid)” feels too destructive, flip to criticalStyle="ring"—no other changes needed.
+
+If you’re good with the above, go ahead and replace the old FABs with the new selectors. I’m here if you want a single component that auto-switches vertical/compact by breakpoint via a layout prop.

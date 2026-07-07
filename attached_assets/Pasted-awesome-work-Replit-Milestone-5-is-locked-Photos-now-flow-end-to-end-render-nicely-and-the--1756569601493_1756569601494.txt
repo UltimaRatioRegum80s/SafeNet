@@ -1,0 +1,115 @@
+awesome work, Replit 🙌 — Milestone 5 is locked. Photos now flow end-to-end, render nicely, and the pipeline is private + performant. here’s a crisp handoff + next steps so we keep momentum and match @RDM’s goals.
+
+quick validation (final)
+
+uploads return stable, cacheable URLs with headers ✅
+
+incidents include photos: string[] across API, sockets, list + map ✅
+
+submit button guards, cancel + retry, friendly error states ✅
+
+propose Milestone 6 — styling polish (fast wins, low risk)
+
+Goal: consistent “glass + blur” feel, premium micro-interactions, rock-solid mobile ergonomics.
+
+Scope
+
+Glass theme tokens
+
+unify opacity/blur/border tokens (glass-surface, glass-card, glass-toolbar) so panel, map popovers, toasts, and FABs match.
+
+Motion (motion-safe)
+
+subtle enter/exit on ReportPanel + popovers; respect prefers-reduced-motion.
+
+Icon set swap
+
+replace PNG circles with a unified set (SVG or high-res PNG) + consistent sizing; map them in incidentTypes.ts.
+
+Tap target audits (mobile)
+
+44px min; spacing for FAB stack & footer controls; safe-area insets everywhere.
+
+Skeletons & lazy fade-in
+
+skeleton states where photos are loading; fade in images on onLoad.
+
+Map popover design
+
+consistent glass card, one-line metadata (type, time), thumbnail row (lazy).
+
+A11y sweep
+
+keyboard traps, aria labels, focus rings; ESC/Enter behavior mirrored.
+
+Tiny drop-ins (snippets)
+
+Glass utilities (Tailwind layer)
+
+/* globals.css */
+@layer utilities {
+  .glass-surface { @apply backdrop-blur bg-slate-900/60 border border-slate-700/60 shadow-lg; }
+  .glass-card    { @apply backdrop-blur bg-slate-900/50 border border-slate-700/50 shadow-md; }
+  .glass-toolbar { @apply backdrop-blur bg-slate-900/70 border border-slate-700/70 shadow-lg; }
+}
+
+
+Motion-safe wrapper
+
+const prefersReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+const animateProps = prefersReduced ? {} : { initial:{opacity:0, y:8}, animate:{opacity:1,y:0}, exit:{opacity:0,y:8} };
+
+
+Unified Image component
+
+export function NNImage({ src, alt, className }: {src:string; alt:string; className?:string}) {
+  const [ok, setOk] = useState(true);
+  return ok ? (
+    <img
+      src={src} alt={alt} loading="lazy" decoding="async"
+      onError={() => setOk(false)}
+      className={clsx("rounded-lg object-cover transition-opacity duration-300", className)}
+    />
+  ) : (
+    <div className={clsx("rounded-lg bg-slate-800/60 border border-slate-700/60", className)} aria-label="image unavailable" />
+  );
+}
+
+
+QA checklist (15 min)
+
+panel, toasts, popovers all use the same glass tokens.
+
+animations feel subtle; prefers-reduced-motion disables smoothly.
+
+thumbs lazy-load; skeletons show on slow 3G; no layout shift.
+
+FABs, buttons, and photo chips meet 44px tap area; safe-area insets OK.
+
+keyboard + screen reader: titles, labels, ESC close, Enter confirm.
+
+preview Milestone 7 — push notifications (so @RDM can decide)
+
+Backend
+
+topics: nh:{id} + type:{incidentType}; send on incident creation.
+
+payload: { id, type, status, lat, lng, createdAt, neighborhoodId }.
+
+rate limits + collapse keys per incident to prevent spam.
+
+Frontend
+
+opt-in flow (quiet UI → explicit allow): store consent + per-type toggles.
+
+service worker: show notification, tap → deep link /community/report?focus=<id>.
+
+mute controls per type + quiet hours.
+
+QA
+
+permission denied path UX.
+
+foreground vs background handling.
+
+deep link opens panel/map correctly.

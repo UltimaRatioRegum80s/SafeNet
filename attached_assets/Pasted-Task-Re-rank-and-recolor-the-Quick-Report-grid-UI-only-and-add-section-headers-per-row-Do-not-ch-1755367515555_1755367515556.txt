@@ -1,0 +1,73 @@
+Task: Re-rank and recolor the Quick Report grid (UI-only) and add section headers per row. Do not change icons/images or reporting logic.
+
+Keep exactly the same
+
+Route, header, nav, anonymous toggle, modal flow, Firestore writes, toasts.
+
+The 12 button images and labels.
+
+Grid responsiveness, card size, “Report something else” link.
+
+Changes
+
+Order (top → bottom)
+
+Row 1 – Low / Community: Lost Pet, Lost & Found
+
+Row 2 – Medium / Risk: Accident, Break In, Suspicious Persons, Traffic, Construction
+
+Row 3 – High / Emergency: Alarm, Fire, Help (SOS), Violence, Theft
+
+Section headers (add above each row)
+
+Row 1 header: Community
+
+Row 2 header: Risk
+
+Row 3 header: Emergency
+
+Style (Tailwind example): text-sm font-semibold text-slate-600 uppercase tracking-wide mb-2
+
+Provide an aria-level via <h2>/<h3> consistent with page hierarchy.
+
+Add small legend chips if desired:
+
+Community: bg-sky-50 text-sky-700 ring-1 ring-sky-200
+
+Risk: bg-amber-50 text-amber-700 ring-1 ring-amber-200
+
+Emergency: bg-rose-50 text-rose-700 ring-1 ring-rose-200
+
+Card background tint by priority (container only)
+
+High: bg-rose-50 border border-rose-200 hover:bg-rose-100 focus:ring-rose-300
+
+Medium: bg-amber-50 border border-amber-200 hover:bg-amber-100 focus:ring-amber-300
+
+Low: bg-sky-50 border border-sky-200 hover:bg-sky-100 focus:ring-sky-300
+
+Accessibility
+
+Each card aria-label should include priority (e.g., "Alarm, Emergency").
+
+Maintain current keyboard nav; ensure headers are focusable anchors for screen readers.
+
+Implementation notes
+
+If using a ReportSection wrapper, props:
+{ title: 'Community' | 'Risk' | 'Emergency', priority: 'low' | 'medium' | 'high' }
+Render the header then a grid of its cards.
+
+If a single grid is used, group with visually separated <section> elements and apply mt-6 spacing between sections.
+
+Acceptance criteria
+
+The grid displays three sections with headers: Community, Risk, Emergency.
+
+Rows contain the specified items in the specified order.
+
+Cards show the correct tinted backgrounds; icons/images are unchanged.
+
+Hover/focus rings match priority colors.
+
+No layout or logic changes elsewhere; submitting still posts to feed + map exactly as before.

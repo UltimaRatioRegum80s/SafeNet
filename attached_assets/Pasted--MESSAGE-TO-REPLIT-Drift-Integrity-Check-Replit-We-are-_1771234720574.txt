@@ -1,0 +1,167 @@
+📩 MESSAGE TO REPLIT — Drift & Integrity Check
+
+Replit,
+
+We are conducting a structured integrity check following recent Phase 3D-A changes (OAuth, access gate, feed layout, UI fixes, domain migration).
+
+This is not a bug report.
+This is a drift prevention exercise.
+
+Please respond clearly and explicitly to each section.
+
+1️⃣ Deployment Truth Confirmation
+
+Confirm the following:
+
+/api/version returns the current commit hash in production (nabornet.io).
+
+HTML shell is served with no-store.
+
+Service Worker is currently disabled intentionally.
+
+No cached bundle is serving stale code.
+
+Production build matches latest repo commit.
+
+Answer clearly:
+
+Is the code currently running in production exactly the code in the repository head?
+
+No speculation. Yes or no + proof.
+
+2️⃣ Access Gate Integrity (Phase 3D-A)
+
+Confirm:
+
+All /api/* routes except auth, legal, version, ping, healthz, access, admin, e2e are protected by access gate middleware.
+
+Pending users cannot:
+
+Create incidents
+
+View community feed
+
+Access map data
+
+Denied users receive 403 consistently.
+
+Approved users function normally.
+
+Confirm there are no unguarded API routes.
+
+3️⃣ Incident System — Regression Check
+
+We must confirm:
+
+Database idempotency still enforced (idempotency_key unique index intact).
+
+Offline sync ingestion still respects duplicate protection.
+
+Reaction upsert model (1 per user per incident) intact.
+
+Rate limits still enforced (20 reactions / 5 min).
+
+No viewport logic was accidentally reintroduced in feed or incident refresh flows.
+
+Specifically:
+
+Did any of the recent changes modify refresh intervals, polling effects, or map-related useEffect dependencies?
+
+4️⃣ Map Architecture Guardrail Check
+
+Given our Prime Directive (User interaction owns viewport) 
+
+Map Architecture Rules
+
+:
+
+Confirm:
+
+No new fitBounds, setView, flyTo, panTo, setZoom calls were introduced.
+
+MapContainer does not receive a dynamic key.
+
+No feed layout changes cause map remount.
+
+Snap-Back Acceptance Suite would still pass today. 
+
+Safe-ly _ NaborNet – Map Snap-B…
+
+Explicitly state:
+
+If I perform Test 1–4 on Android right now, will they pass?
+
+5️⃣ Kill Switch Verification
+
+Current config:
+
+SIGNUP_MODE=whitelist
+
+VITE_EXPRESS_REPORT_ENABLED=false
+
+Confirm:
+
+Express report UI truly does not render.
+
+Server rejects express-report endpoint if manually hit.
+
+Incident creation still respects INCIDENT_CREATION_ENABLED.
+
+6️⃣ Drift Check Against Restart Capsule
+
+Compare current implementation against Restart Capsule principles 
+
+Chat foundation
+
+:
+
+Confirm we have NOT accidentally introduced:
+
+Social feed mechanics
+
+Public signup
+
+Push notifications
+
+Free-form discussion
+
+Media upload
+
+Operator dashboard exposure
+
+Engagement loops
+
+Explicitly list anything newly introduced that increases surface area.
+
+7️⃣ Architectural Surface Area Delta
+
+List ALL files modified in the last two weeks that touch:
+
+Map
+
+Feed
+
+Incident creation
+
+Auth
+
+Access
+
+Layout
+
+Service worker
+
+For each file, state:
+
+Purpose of change
+
+Whether it modifies behavior or only presentation
+
+8️⃣ Final Question (Critical)
+
+Based on code reality — not intention — answer:
+
+Are we still operating inside the Safety-Grade MVP philosophy?
+
+If yes — explain why.
+If no — explain where drift occurred.

@@ -1,0 +1,332 @@
+awesome — here’s Milestone 4: Location Refine UX as clean, drop-in snippets. You’ll get:
+
+ghost pin while picking
+
+confirm / cancel glass footer
+
+bounds guard (Southern Africa)
+
+optional road-snap using MapLibre’s rendered roads (+ fallback)
+
+keyboard: Esc cancels, Enter confirms
+
+tiny analytics hooks
+
+I’m assuming your map is MapLibre GL JS (or compatible) and your Map.tsx already holds a mapRef and click handlers.
+
+1) Geo helpers (bounds + formatting + optional snap)
+
+client/src/lib/geo.ts
+
+export type LngLat = { lng: number; lat: number };
+
+/** Southern Africa rough bounds (adjust as needed) */
+export const SA_BOUNDS = {
+  minLat: -35, maxLat: -10,
+  minLng:  10, maxLng:  40,
+};
+
+export function inSouthernAfrica({ lat, lng }: { lat: number; lng: number }) {
+  return (
+    lat >= SA_BOUNDS.minLat && lat <= SA_BOUNDS.maxLat &&
+    lng >= SA_BOUNDS.minLng && lng <= SA_BOUNDS.maxLng
+  );
+}
+
+export function fmtCoord(n: number) {
+  return n.toFixed(5);
+}
+
+/**
+ * Try to snap to nearest visible road using MapLibre.
+ * - Pass the map instance and raw lng/lat.
+ * - Returns snapped coords or the original if no road found.
+ * - `roadLayerFilter` optionally narrows results to road layers.
+ */
+export function snapToNearestRoad(opts: {
+  map: any; lng: number; lat: number;
+  pixelRadius?: number;
+  roadLayerFilter?: (layerId: string) => boolean;
+}): { lng: number; lat: number } {
+  const { map, lng, lat, pixelRadius = 16, roadLayerFilter } = opts;
+  if (!map || !map.queryRenderedFeatures) return { lng, lat };
+
+  // Build a small bbox around the screen point
+  const p = map.project([lng, lat]);
+  const bbox = [
+    { x: p.x - pixelRadius, y: p.y - pixelRadius },
+    { x: p.x + pixelRadius, y: p.y + pixelRadius },
+  ];
+
+  let features: any[] = map.queryRenderedFeatures([bbox[0], bbox[1]]);
+  if (!features?.length) return { lng, lat };
+
+  // Filter to roads if requested
+  if (roadLayerFilter) {
+    features = features.filter(f => roadLayerFilter(f.layer?.id || ""));
+  } else {
+    // heuristic: keep layers that look like roads
+    features = features.filter(f => /road|street|highway|transport/i.test(f.layer?.id || ""));
+  }
+  if (!features.length) return { lng, lat };
+
+  // Find the nearest line geometry vertex to our point
+  let best: { lng: number; lat: number; d2: number } | null = null;
+  const lngLatToWorld = (ll: [number, number]) => map.project(ll);
+  const d2 = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+    (a.x - b.x) ** 2 + (a.y - b.y) ** 2;
+
+  for (const f of features) {
+    const geom = f.geometry;
+    const lines: number[][][] =
+      geom.type === "LineString" ? [geom.coordinates] :
+      geom.type === "MultiLineString" ? geom.coordinates : [];
+    for (const line of lines) {
+      for (const coord of line) {
+        const w = lngLatToWorld(coord as [number, number]);
+        const d2v = d2({ x: w.x, y: w.y }, p);
+        if (!best || d2v < best.d2) {
+          best = { lng: coord[0], lat: coord[1], d2: d2v };
+        }
+      }
+    }
+  }
+  return best ? { lng: best.lng, lat: best.lat } : { lng, lat };
+}
+
+2) Safer events + analytics (you already added events; add these names)
+
+client/src/lib/analytics.ts (you already have; just use these)
+
+export const track = (name: string, props?: Record<string, unknown>) => {
+  console.debug("[analytics]", name, props);
+};
+
+
+We’ll call:
+
+pick_start
+
+pick_confirm
+
+pick_cancel
+
+3) Map ghost-pin picking mode + footer UI
+A) Styles (ghost pin + footer)
+
+Add just a couple of utility classes (Tailwind handles most):
+
+/* optional: globals.css */
+.nn-glass {
+  @apply backdrop-blur bg-slate-900/60 border border-slate-700 text-white shadow-lg;
+}
+
+B) Map.tsx updates
+
+Key pieces:
+
+local state: isPicking, ghost, snapEnabled
+
+event listeners: begin/cancel/confirm + keyboard
+
+click → update ghost (snapped + bounds guard)
+
+glass footer with Confirm/Cancel
+
+// client/src/pages/community/Map.tsx
+import { useEffect, useRef, useState } from "react";
+import { useReportPanel } from "@/features/report/useReportPanel";
+import { INCIDENT_TYPES } from "@/features/report/incidentTypes";
+import { beginLocationPick, emitLocationPicked } from "@/lib/events";
+import { inSouthernAfrica, fmtCoord, snapToNearestRoad } from "@/lib/geo";
+import { track } from "@/lib/analytics";
+// import your map ref provider; assume mapRef.current is a MapLibre instance
+
+export default function MapPage() {
+  const mapRef = useRef<any>(null);
+  const { openWith } = useReportPanel();
+
+  // --- refine picking state ---
+  const [isPicking, setIsPicking] = useState(false);
+  const [ghost, setGhost] = useState<{ lng: number; lat: number } | null>(null);
+  const [snapEnabled, setSnapEnabled] = useState(true);
+
+  // listen for "begin pick"
+  useEffect(() => {
+    const onBegin = () => {
+      setIsPicking(true);
+      setGhost(null);
+      track("pick_start");
+      // show a temporary ghost layer if you like; we’ll render a simple marker below
+      document.body.style.cursor = "crosshair";
+    };
+    window.addEventListener("nn:begin-location-pick", onBegin as EventListener);
+    return () => window.removeEventListener("nn:begin-location-pick", onBegin as EventListener);
+  }, []);
+
+  // keyboard: Esc cancel, Enter confirm
+  useEffect(() => {
+    if (!isPicking) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsPicking(false); setGhost(null); document.body.style.cursor = "";
+        track("pick_cancel");
+      } else if (e.key === "Enter" && ghost) {
+        emitLocationPicked(ghost.lat, ghost.lng);
+        setIsPicking(false); setGhost(null); document.body.style.cursor = "";
+        track("pick_confirm", { lat: ghost.lat, lng: ghost.lng });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isPicking, ghost]);
+
+  // map click to place/move ghost pin
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const onClick = (e: any) => {
+      if (!isPicking) return;
+      const pt = e.lngLat ?? e; // MapLibre: e.lngLat has {lng,lat}
+      let next = { lng: pt.lng, lat: pt.lat };
+
+      // bounds guard
+      if (!inSouthernAfrica(next)) {
+        // optionally toast; for now just clamp to Windhoek-ish fallback or reject
+        console.warn("Out of bounds:", next);
+        return;
+      }
+
+      // optional snap to road
+      if (snapEnabled) {
+        try {
+          next = snapToNearestRoad({
+            map,
+            lng: next.lng, lat: next.lat,
+            pixelRadius: 24,
+            roadLayerFilter: (id) => /road|street|highway|transport/i.test(id),
+          });
+        } catch {
+          // ignore snapping errors
+        }
+      }
+      setGhost(next);
+    };
+
+    map.on("click", onClick);
+    return () => map.off("click", onClick);
+  }, [isPicking, snapEnabled]);
+
+  // confirm/cancel handlers (footer buttons)
+  function confirmPick() {
+    if (!ghost) return;
+    emitLocationPicked(ghost.lat, ghost.lng);
+    setIsPicking(false);
+    setGhost(null);
+    document.body.style.cursor = "";
+    track("pick_confirm", { lat: ghost.lat, lng: ghost.lng });
+  }
+  function cancelPick() {
+    setIsPicking(false);
+    setGhost(null);
+    document.body.style.cursor = "";
+    track("pick_cancel");
+  }
+
+  // ---- UI ----
+  return (
+    <div className="relative h-full">
+      {/* your Map component should set mapRef.current */}
+      {/* <Map onLoad={(m) => (mapRef.current = m)} ... /> */}
+
+      {/* Ghost pin */}
+      {isPicking && ghost && (
+        <div
+          className="absolute -translate-x-1/2 -translate-y-full pointer-events-none"
+          style={{
+            left: mapRef.current?.project([ghost.lng, ghost.lat]).x ?? -9999,
+            top:  mapRef.current?.project([ghost.lng, ghost.lat]).y ?? -9999,
+          }}
+        >
+          {/* Simple marker; replace with your own SVG */}
+          <div className="h-6 w-6 rounded-full bg-sky-400 ring-4 ring-white/30 shadow" />
+        </div>
+      )}
+
+      {/* Glass footer controls (only while picking) */}
+      {isPicking && (
+        <div className="absolute inset-x-0 bottom-3 px-3 pointer-events-none">
+          <div
+            className="nn-glass rounded-2xl px-3 py-2 flex items-center gap-3 justify-between pointer-events-auto"
+            style={{ paddingBottom: "calc(env(safe-area-inset-bottom) / 2 + 0.25rem)" }}
+          >
+            <div className="text-xs sm:text-sm opacity-90">
+              {ghost ? (
+                <>Chosen: <span className="font-mono">{fmtCoord(ghost.lat)}, {fmtCoord(ghost.lng)}</span></>
+              ) : (
+                <>Tap on the map to drop a pin</>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-xs flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={snapEnabled}
+                  onChange={(e) => setSnapEnabled(e.target.checked)}
+                />
+                Snap to road
+              </label>
+
+              <button
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 transition"
+                onClick={cancelPick}
+              >
+                Cancel (Esc)
+              </button>
+
+              <button
+                className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50 transition"
+                onClick={confirmPick}
+                disabled={!ghost}
+              >
+                Confirm (Enter)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Existing FABs (including Report) — unchanged */}
+      {/* <FABs … /> */}
+    </div>
+  );
+}
+
+
+Notes:
+
+We render the ghost pin in an absolutely positioned div by projecting map coords to screen via map.project. You can swap for a proper MapLibre Marker if you prefer; the absolute approach is snappier for a “ghost” preview.
+
+snapToNearestRoad queries visible rendered features; it’s cheap and offline. If your style’s road layer IDs differ, tweak the regex or pass a custom filter.
+
+4) Panel: small copy tweak (optional)
+
+When picking begins, the panel already shows the tip you added. If you want, disable the panel’s Submit button while isPicking (to avoid confusion). That’s optional; current UX is fine since confirm emits nn:location-picked back into your useEnhancedLocation flow.
+
+5) QA checklist (2 mins)
+
+Tap Drop a pin → crosshair cursor, footer appears.
+
+Click map → ghost pin appears; coords show in footer.
+
+Toggle Snap to road: near a road, pin adjusts; off = raw click position.
+
+Esc cancels; Enter confirms → panel’s location updates; panel submit enabled.
+
+Click far outside SA → click ignored (no ghost); log warns (or add toast if desired).
+
+Mobile: footer respects safe-area; FABs not blocked.
+
+If you want, I can also supply a MapLibre-native ghost marker variant (using new maplibregl.Marker({ element })) and a quick toast for OOB clicks. Want me to add those, or is this version good to merge?

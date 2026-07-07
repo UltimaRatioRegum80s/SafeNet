@@ -1,0 +1,263 @@
+Absolutely—let’s proceed. Below is a clean, drop-in implementation that matches your architecture and data model, keeps chat bubbles as-is, and upgrades incidents to modern, professional timeline cards.
+
+1) Enable line-clamp (Tailwind)
+// tailwind.config.ts
+import type { Config } from "tailwindcss";
+
+const config: Config = {
+  content: ["./index.html", "./client/src/**/*.{ts,tsx}"],
+  theme: { extend: {} },
+  plugins: [
+    require("tailwindcss-animate"),
+    require("@tailwindcss/typography"),
+    require("@tailwindcss/line-clamp"), // ✅ add this
+  ],
+};
+export default config;
+
+2) New component: IncidentCard.tsx
+// client/src/components/IncidentCard.tsx
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  AlertTriangle,
+  MapPin,
+  Clock,
+  Image as ImageIcon,
+} from "lucide-react";
+import clsx from "clsx";
+
+export type IncidentItem = {
+  id: string;
+  title: string;
+  description?: string;
+  severity: "low" | "medium" | "high" | "critical";
+  type: string;
+  category: string;
+  userId?: string;
+  reportedBy?: string;
+  createdAt: string; // ISO
+  latitude: number;
+  longitude: number;
+  isAnonymous: boolean;
+  state: "new" | "validated" | "acknowledged" | "resolved" | "closed";
+  photos: string[];
+  metadata: any;
+};
+
+const severityStyles: Record<IncidentItem["severity"], string> = {
+  low: "bg-emerald-500/15 text-emerald-300 ring-1 ring-inset ring-emerald-500/20",
+  medium: "bg-amber-500/15 text-amber-300 ring-1 ring-inset ring-amber-500/20",
+  high: "bg-orange-500/15 text-orange-300 ring-1 ring-inset ring-orange-500/25",
+  critical: "bg-red-500/15 text-red-300 ring-1 ring-inset ring-red-500/30",
+};
+
+const stateStyles: Record<IncidentItem["state"], string> = {
+  new: "text-zinc-400",
+  validated: "text-sky-300",
+  acknowledged: "text-amber-300",
+  resolved: "text-emerald-300",
+  closed: "text-zinc-500",
+};
+
+export function IncidentCard({ incident }: { incident: IncidentItem }) {
+  const {
+    title,
+    description,
+    severity,
+    createdAt,
+    latitude,
+    longitude,
+    photos = [],
+    state,
+  } = incident;
+
+  return (
+    <Card className="group relative overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/60 shadow-[0_8px_24px_-16px_rgba(0,0,0,0.6)] backdrop-blur transition hover:border-white/20 hover:shadow-[0_16px_40px_-20px_rgba(0,0,0,0.7)]">
+      <CardContent className="p-4 sm:p-5">
+        {/* Header */}
+        <div className="flex items-start gap-3">
+          <div className="mt-0.5 flex h-9 w-9 flex-none items-center justify-center rounded-xl bg-zinc-800/80 ring-1 ring-white/10">
+            <AlertTriangle className="h-5 w-5 text-amber-300" />
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="truncate text-base font-semibold leading-snug text-zinc-100">
+                {title}
+              </h3>
+
+              <div className="flex items-center gap-2">
+                <Badge className={clsx("rounded-full px-2.5 py-0.5 text-xs", severityStyles[severity])}>
+                  {severity.toUpperCase()}
+                </Badge>
+              </div>
+            </div>
+
+            {/* Description (clamped for uniform height) */}
+            {description ? (
+              <p className="mt-1 line-clamp-2 text-sm text-zinc-300/90">
+                {description}
+              </p>
+            ) : null}
+
+            {/* Photos grid (shows up to 3, with +N overlay) */}
+            {photos.length > 0 ? (
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                {photos.slice(0, 3).map((src, idx) => {
+                  const isLast = idx === 2 && photos.length > 3;
+                  const remaining = photos.length - 3;
+                  return (
+                    <div key={src + idx} className="relative overflow-hidden rounded-xl ring-1 ring-white/10">
+                      <img
+                        src={src}
+                        alt={`incident-photo-${idx}`}
+                        className="h-24 w-full object-cover"
+                        loading="lazy"
+                      />
+                      {isLast && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-sm font-medium text-white">
+                          +{remaining}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {/* Meta */}
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px]">
+              <span className={clsx("inline-flex items-center gap-1.5", stateStyles[state])}>
+                <Badge variant="outline" className="border-white/10 bg-white/5 text-current">
+                  {state.toUpperCase()}
+                </Badge>
+              </span>
+
+              <span className="inline-flex items-center gap-1.5 text-zinc-400">
+                <Clock className="h-4 w-4 opacity-80" />
+                {formatTime(createdAt)}
+              </span>
+
+              <span className="inline-flex items-center gap-1.5 text-zinc-400">
+                <MapPin className="h-4 w-4 opacity-80" />
+                {formatCoords(latitude, longitude)}
+              </span>
+
+              {photos.length === 0 && (
+                <span className="inline-flex items-center gap-1.5 text-zinc-500">
+                  <ImageIcon className="h-4 w-4 opacity-70" />
+                  No photos
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </CardContent>
+
+      {/* subtle hover accent */}
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-1.5 bg-gradient-to-r from-transparent via-amber-400/30 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+    </Card>
+  );
+}
+
+function formatTime(iso: string) {
+  const d = new Date(iso);
+  return d.toLocaleString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatCoords(lat: number, lng: number) {
+  const latStr = `${lat >= 0 ? "" : "-"}${Math.abs(lat).toFixed(3)}°`;
+  const lngStr = `${lng >= 0 ? "" : "-"}${Math.abs(lng).toFixed(3)}°`;
+  return `${latStr}, ${lngStr}`;
+}
+
+3) Replace inline incident rendering in Feed.tsx
+
+Goals
+
+Keep your MessageList (chat bubbles) untouched.
+
+Use IncidentCard for incident items.
+
+Center the feed on desktop; fluid on mobile.
+
+// client/src/pages/community/Feed.tsx
+// ...
+import { IncidentCard } from "@/components/IncidentCard"; // ✅ new
+// (keep existing imports for MessageList, React Query hooks, etc.)
+
+export default function Feed() {
+  // ... existing hooks/selectors that provide a merged list
+
+  return (
+    <AppLayout>
+      <FeedPageWrapper>
+        {/* Filters / tabs (unchanged) */}
+        <div className="mx-auto w-full max-w-2xl px-4 sm:max-w-3xl sm:px-6 lg:max-w-4xl lg:px-8">
+          {/* timeline */}
+          <section className="py-4 sm:py-6">
+            <div className="space-y-3 sm:space-y-4">
+              {items.map((item) => {
+                if (item.kind === "incident") {
+                  // item.data matches IncidentItem shape
+                  return <IncidentCard key={item.data.id} incident={item.data} />;
+                }
+                // Chat message path remains as-is
+                if (item.kind === "message") {
+                  return (
+                    <MessageList
+                      key={item.data.id}
+                      message={item.data}
+                      // whatever props you already pass
+                    />
+                  );
+                }
+                return null;
+              })}
+            </div>
+          </section>
+        </div>
+
+        {/* Sticky input at bottom (unchanged) */}
+        <StickyComposer />
+      </FeedPageWrapper>
+    </AppLayout>
+  );
+}
+
+
+If your current feed returns a single IncidentItem[] for incidents and a separate list for messages, keep your existing merge logic. The only change is which component renders incidents.
+
+4) Optional: Skeletons for incidents (loading state)
+// client/src/components/IncidentCard.skeleton.tsx
+import { Card, CardContent } from "@/components/ui/card";
+
+export function IncidentCardSkeleton() {
+  return (
+    <Card className="rounded-2xl border border-white/10 bg-zinc-900/60">
+      <CardContent className="p-4 sm:p-5">
+        <div className="flex items-start gap-3">
+          <div className="h-9 w-9 rounded-xl bg-zinc-800/80" />
+          <div className="min-w-0 flex-1">
+            <div className="mb-2 h-4 w-3/5 rounded bg-zinc-800" />
+            <div className="h-4 w-full rounded bg-zinc-800" />
+            <div className="mt-2 h-4 w-2/3 rounded bg-zinc-800" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+Notes for Replit (fit check)
+
+No schema changes required; component consumes your IncidentItem as-is (coords, photos, state, etc.).
+
+No routing/state changes; feed logic stays intact.
+
+Design respects serious tone for incidents; chat bubbles remain social.
+
+Photos: if your CDN requires signed URLs, ensure photos[] already contains usable paths; fallback is “No photos”.
+
+Performance: Images are loading="lazy" and grid is capped to 3 thumbs with +N overlay to keep cards compact.

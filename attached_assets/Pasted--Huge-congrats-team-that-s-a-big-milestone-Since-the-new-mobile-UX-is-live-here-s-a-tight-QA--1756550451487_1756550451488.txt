@@ -1,0 +1,85 @@
+👏 Huge congrats, team — that’s a big milestone. Since the new mobile UX is live, here’s a tight QA + hardening checklist so @RDM gets a buttery, reliable experience across devices, then a few high-impact next steps.
+
+Quick QA (15–20 mins)
+
+Drag sheet
+
+Drag up/down → snaps to peek/half/full without scroll jank.
+
+Tap handle cycles states; list remains scrollable in half/full.
+
+Selection sync
+
+Tap marker → sheet opens (mobile), row highlights, marker pulses.
+
+Tap row → map centers, zoom ≥ 15, marker pulses.
+
+Filters
+
+Change severity/time in sheet → desktop filters reflect state.
+
+Toggle “In view” → list matches visible markers exactly; toggle off → full list returns.
+
+Timestamps
+
+Verify created_at in seconds and ms both display correctly (“m/h/d ago”).
+
+Bounds init
+
+Reload page on slow device → no bbox init error in console.
+
+Responsive
+
+iPhone SE/Android small → labels don’t wrap badly; FABs not blocking map gestures.
+
+Accessibility
+
+Handle has aria-label, rows expose aria-selected, focus ring visible.
+
+Perf checks (5 mins)
+
+Pan/zoom rapidly with 200+ incidents → no dropped frames.
+
+Confirm marker pulse adds/removes class instead of re-rendering markers.
+
+Ensure list renders from a memoized items (no extra React work on pan).
+
+Tiny hardening patches (copy-paste)
+
+Debounce selection pans (avoid spamming if user taps multiple rows quickly):
+
+let panT: any;
+function centerTo(map: L.Map, lat: number, lng: number, minZoom = 15) {
+  clearTimeout(panT);
+  panT = setTimeout(() => {
+    map.setView([lat, lng], Math.max(minZoom, map.getZoom()), { animate: true });
+  }, 60);
+}
+
+
+Passive listeners on map overlays (keep panning smooth):
+
+/* Any overlay wrapper above the map */
+.overlay-events-none { pointer-events: none; }
+.overlay-events-auto { pointer-events: auto; } /* for buttons only */
+
+Observability (add 5 lightweight events)
+
+map_opened, sheet_height_changed, filter_changed, incident_selected, marker_clicked
+(helps @RDM see how people actually use the page.)
+
+High-impact next steps (pick 1–2)
+
+Server-side bbox & time filtering
+Send ?bbox=n,s,e,w&timeRange=…&severity=… to shrink payloads on mobile.
+
+Selected incident deep-link
+/?incidentId=abc opens sheet focused; great for sharing alerts.
+
+Empty/error states
+Nice copy + retry when no incidents / network fails.
+
+Offline hint
+Toast when offline, keep last known incidents in memory (or IndexedDB later).
+
+If you want, I can draft the API query param contract for server-side bbox/time filtering and the deep-link open logic (tiny router patch).

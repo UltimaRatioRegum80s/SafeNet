@@ -1,0 +1,38 @@
+Phase 2 Tasks (MVP-locked) — please align your task board to this list + acceptance criteria.
+
+A) Service Worker + Offline App Load
+1) Implement service worker (Workbox OK) and ensure app shell loads offline.
+2) Caching strategy:
+   - App shell: stale-while-revalidate
+   - Static assets: cache-first
+   - API GET list endpoints (read-only): network-first with offline fallback
+   - NO caching of auth/session/profile/moderation endpoints, uploads, or any Set-Cookie responses.
+3) Cache limits:
+   - Either do NOT cache map tiles for MVP, OR enforce strict caps (max entries + max age) to avoid storage bloat (esp iOS).
+
+B) Offline Incident Queue (IndexedDB)
+4) IndexedDB store for pending incidents (text + coords only for MVP; no offline media refs).
+5) Client-generated UUID + idempotencyKey per incident.
+6) Queue operations: enqueue, list pending, retry, mark error, purge old items (>7 days).
+7) Sync engine: foreground sync on reconnect/app open with exponential backoff (1 → 5 → 15 min, max 5 retries).
+8) Duplicate prevention: backend idempotency check returns existing incident if already created.
+
+C) UX + Privacy
+9) Status HUD: online/offline indicator + pending count.
+10) Pending/synced/error badges in feed.
+11) Offline privacy: show reduced-precision/approx location for pending offline incidents until synced.
+12) Clear all offline data + relevant caches on logout (via SW message).
+
+D) Install UX
+13) Handle beforeinstallprompt + show Install button.
+14) Confirm manifest/icons valid (maskable icons).
+
+E) QA + Docs
+15) Manual tests: offline submit → reconnect sync; logout purge; duplicate prevention; iOS + Android smoke.
+16) Add minimal docs to PROJECT_GUIDE.md describing offline behavior + limitations.
+
+Acceptance criteria to declare Phase 2 complete:
+- Lighthouse: PWA installable + app loads offline.
+- Offline incident can be created, shows “pending”, and syncs successfully when online.
+- Auth boundaries respected (no private endpoints cached).
+- Logout clears offline queue + caches.

@@ -1,0 +1,114 @@
+you did the right check—clusterLayers = 50, but clusterEls = 0.
+That means: the cluster group has 50 markers internally, but no cluster icons were drawn into the DOM for your current view. Two most likely reasons (often both on mobile):
+
+Map view never refreshes after layers are added (mobile timing; cluster doesn’t render icons until a proper moveend/size).
+
+You’re centered away from the incidents (so nothing is in the viewport; with removeOutsideVisibleBounds the plugin won’t draw off-screen icons).
+
+Let’s fix both at once, behind the existing flag so desktop stays untouched.
+
+@Replit — copy/paste patch (flag-gated, progress-safe)
+
+File: client/src/components/MapView.tsx
+
+Add this helper near the top (after imports):
+
+import { Flags } from "@/lib/flags";
+import { isMobileLike } from "@/lib/platform";
+
+// Ensure mobile cluster renders & the map centers on data (flag only)
+function postAddMobileRefresh(map: L.Map, cluster: L.MarkerClusterGroup) {
+  if (!Flags.fixMobileMarkers || !isMobileLike) return;
+
+  // 1) Ensure Leaflet knows container size (mobile layout often changes)
+  map.invalidateSize();
+
+  // 2) Ask MarkerCluster to (re)draw icons now
+  (cluster as any).refreshClusters?.();
+
+  // 3) If the current view doesn't intersect data, fit to data bounds
+  const b = cluster.getBounds();
+  if (b && b.isValid()) {
+    const intersects = map.getBounds().intersects(b);
+    if (!intersects) {
+      map.fitBounds(b.pad(0.2), { animate: false });
+    }
+  }
+}
+
+Where to call it (two places)
+
+Right after you attach the cluster to the map (flag already used here):
+
+if (Flags.fixMobileMarkers && isMobileLike && mapRef.current && clusterRef.current) {
+  if (!mapRef.current.hasLayer(clusterRef.current)) {
+    mapRef.current.addLayer(clusterRef.current);
+  }
+  // NEW: render/center once attached
+  postAddMobileRefresh(mapRef.current, clusterRef.current);
+}
+
+
+Immediately after you add the incident layers (whether you batch or loop):
+
+// After addLayers(...) or after the forEach addLayer(...)
+if (Flags.fixMobileMarkers && isMobileLike && mapRef.current && clusterRef.current) {
+  postAddMobileRefresh(mapRef.current, clusterRef.current);
+}
+
+(Optional) Make cluster tolerant to being offscreen during init
+
+When you create the cluster group, add this option under the flag:
+
+if (!clusterRef.current) {
+  clusterRef.current = L.markerClusterGroup({
+    // your existing options...
+    removeOutsideVisibleBounds: false, // safer on mobile init; OK with ~50 markers
+  });
+}
+
+
+Keeping removeOutsideVisibleBounds: false only while the flag is ON is fine for MVP; with 50 markers the perf hit is negligible.
+
+Keep these already-in-place guards
+
+Mobile uses L.Marker with divIcon (never circleMarker).
+
+zoomAnimation, markerZoomAnimation, fadeAnimation disabled when the flag is ON (prevents the Leaflet zoom race).
+
+MarkerCluster CSS now loaded via <link>s in index.html ✅.
+
+Commit message
+
+fix(mobile-map): force cluster render + fit-to-data after add (flag-only)
+
+@RDM — how to verify (1 minute)
+
+Open the map in a new tab with ?NN_FIX_MOBILE_MARKERS=1.
+
+Zoomed out: you should see blue cluster bubbles (numbers).
+
+Zoom in: blue dots with popups.
+
+Console quick check:
+
+({
+  clusterLayers: window._cluster?.getLayers().length,             // 50
+  clusterEls: document.querySelectorAll('.marker-cluster').length, // >0
+  markerIcons: document.querySelectorAll('.leaflet-marker-icon').length // >0
+})
+
+
+Pass = clusterEls > 0 and markerIcons > 0; you also see them.
+
+Why this will work
+
+Your latest output shows the data is loaded (clusterLayers: 50) but no cluster icons are in the DOM (clusterEls: 0). That happens when mobile adds layers before the map is fully sized/settled or when the initial view doesn’t intersect your data bounds. The patch explicitly:
+
+invalidates size (so Leaflet can compute positions),
+
+refreshes the cluster (forces icon generation),
+
+fits to data when the view is off the incidents.
+
+All of it is flag-gated — desktop remains exactly as-is and you can turn it off instantly with ?NN_FIX_MOBILE_MARKERS=0.

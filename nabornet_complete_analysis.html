@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NaborNet - Complete Application Code Analysis</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            background: #0d1117;
+            color: #e6edf3;
+            line-height: 1.6;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #1f2937 0%, #374151 100%);
+            padding: 2rem;
+            text-align: center;
+            border-bottom: 3px solid #3b82f6;
+        }
+        
+        .header h1 {
+            color: #60a5fa;
+            font-size: 2.5em;
+            margin-bottom: 0.5rem;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .header p {
+            color: #9ca3af;
+            font-size: 1.1em;
+        }
+        
+        .stats {
+            background: #161b22;
+            padding: 1rem;
+            text-align: center;
+            border-bottom: 1px solid #30363d;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        
+        .stat-item {
+            background: #21262d;
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid #30363d;
+        }
+        
+        .stat-number {
+            font-size: 2em;
+            color: #3fb950;
+            font-weight: bold;
+        }
+        
+        .stat-label {
+            color: #8b949e;
+            text-transform: uppercase;
+            font-size: 0.8em;
+            letter-spacing: 1px;
+        }
+        
+        .container {
+            max-width: 100%;
+            padding: 0;
+        }
+        
+        .nav {
+            background: #161b22;
+            padding: 1rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            border-bottom: 1px solid #30363d;
+        }
+        
+        .nav-content {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        
+        .nav-button {
+            background: #21262d;
+            color: #e6edf3;
+            border: 1px solid #30363d;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 0.85em;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        
+        .nav-button:hover {
+            background: #30363d;
+            color: #58a6ff;
+            transform: translateY(-1px);
+        }
+        
+        .nav-button.active {
+            background: #1f6feb;
+            color: white;
+        }
+        
+        .search-box {
+            background: #0d1117;
+            border: 1px solid #30363d;
+            color: #e6edf3;
+            padding: 0.5rem;
+            border-radius: 6px;
+            font-size: 0.9em;
+            margin-left: auto;
+            width: 300px;
+        }
+        
+        .file-section {
+            margin: 2rem 0;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        .file-header {
+            background: linear-gradient(90deg, #21262d 0%, #30363d 100%);
+            padding: 1rem;
+            border-bottom: 1px solid #30363d;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .file-title {
+            color: #58a6ff;
+            font-size: 1.1em;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .file-icon {
+            width: 16px;
+            height: 16px;
+            fill: currentColor;
+        }
+        
+        .file-info {
+            color: #8b949e;
+            font-size: 0.9em;
+        }
+        
+        .copy-button {
+            background: #238636;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: background 0.2s;
+        }
+        
+        .copy-button:hover {
+            background: #2ea043;
+        }
+        
+        .code-content {
+            background: #0d1117;
+            overflow-x: auto;
+        }
+        
+        .code-block {
+            background: transparent;
+            color: #e6edf3;
+            padding: 1.5rem;
+            white-space: pre;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.85em;
+            line-height: 1.5;
+            overflow-x: auto;
+            border: none;
+            margin: 0;
+        }
+        
+        .line-numbers {
+            color: #6e7681;
+            user-select: none;
+            margin-right: 1rem;
+            text-align: right;
+            min-width: 3rem;
+            display: inline-block;
+        }
+        
+        .keyword { color: #ff7b72; }
+        .string { color: #a5d6ff; }
+        .comment { color: #8b949e; font-style: italic; }
+        .function { color: #d2a8ff; }
+        .variable { color: #ffa657; }
+        .number { color: #79c0ff; }
+        .operator { color: #ff7b72; }
+        
+        .toc {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin: 2rem 0;
+        }
+        
+        .toc h3 {
+            color: #f0f6fc;
+            margin-bottom: 1rem;
+            font-size: 1.2em;
+        }
+        
+        .toc-section {
+            margin: 1rem 0;
+        }
+        
+        .toc-section h4 {
+            color: #58a6ff;
+            margin-bottom: 0.5rem;
+            font-size: 1em;
+        }
+        
+        .toc-list {
+            list-style: none;
+            padding-left: 1rem;
+        }
+        
+        .toc-list li {
+            margin: 0.25rem 0;
+        }
+        
+        .toc-list a {
+            color: #e6edf3;
+            text-decoration: none;
+            font-size: 0.9em;
+            transition: color 0.2s;
+        }
+        
+        .toc-list a:hover {
+            color: #58a6ff;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 2em;
+            }
+            
+            .nav-content {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            
+            .search-box {
+                width: 100%;
+                margin-left: 0;
+                margin-top: 0.5rem;
+            }
+            
+            .code-block {
+                font-size: 0.75em;
+                padding: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🏘️ NaborNet</h1>
+        <p>Complete Application Code Analysis - Community Safety Platform</p>
+    </div>
+    
+    <div class="stats">
+        <div class="stat-item">
+            <div class="stat-number" id="total-files">0</div>
+            <div class="stat-label">Total Files</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-number" id="total-lines">0</div>
+            <div class="stat-label">Lines of Code</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-number" id="frontend-files">0</div>
+            <div class="stat-label">Frontend Files</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-number" id="backend-files">0</div>
+            <div class="stat-label">Backend Files</div>
+        </div>
+    </div>
+    
+    <div class="nav">
+        <div class="nav-content">
+            <button class="nav-button active" onclick="filterFiles('all')">All Files</button>
+            <button class="nav-button" onclick="filterFiles('frontend')">Frontend</button>
+            <button class="nav-button" onclick="filterFiles('backend')">Backend</button>
+            <button class="nav-button" onclick="filterFiles('shared')">Shared</button>
+            <button class="nav-button" onclick="filterFiles('config')">Configuration</button>
+            <input type="text" class="search-box" placeholder="Search files..." onkeyup="searchFiles(this.value)">
+        </div>
+    </div>
+    
+    <div class="container">
+        <div class="toc">
+            <h3>📋 Table of Contents</h3>
+            <div id="toc-content"></div>
+        </div>
+        
+        <div id="file-contents">
+            <!-- Files will be loaded here -->
+        </div>
+    </div>
+
+    <script>
+        const files = [];
+        let currentFilter = 'all';
+        
+        function addFile(path, content, category) {
+            files.push({ path, content, category });
+        }
+        
+        function getFileIcon(path) {
+            const ext = path.split('.').pop();
+            const icons = {
+                'tsx': '⚛️',
+                'ts': '📘',
+                'js': '📜',
+                'jsx': '⚛️',
+                'json': '📋',
+                'md': '📝',
+                'css': '🎨',
+                'html': '🌐'
+            };
+            return icons[ext] || '📄';
+        }
+        
+        function getCategory(path) {
+            if (path.includes('client/')) return 'frontend';
+            if (path.includes('server/')) return 'backend';
+            if (path.includes('shared/')) return 'shared';
+            if (path.includes('functions/')) return 'backend';
+            if (path.match(/\.(json|config|ts)$/)) return 'config';
+            return 'other';
+        }
+        
+        function syntaxHighlight(code, extension) {
+            // Basic syntax highlighting
+            if (['ts', 'tsx', 'js', 'jsx'].includes(extension)) {
+                return code
+                    .replace(/\b(import|export|from|const|let|var|function|class|interface|type|async|await|return|if|else|for|while|try|catch|finally|throw|new|this|super|extends|implements)\b/g, '<span class="keyword">$1</span>')
+                    .replace(/(\/\/.*$|\/\*[\s\S]*?\*\/)/gm, '<span class="comment">$1</span>')
+                    .replace(/(['"`])((?:\\.|(?!\1)[^\\])*?)\1/g, '<span class="string">$1$2$1</span>')
+                    .replace(/\b(\d+\.?\d*)\b/g, '<span class="number">$1</span>');
+            }
+            return code;
+        }
+        
+        function addLineNumbers(code) {
+            const lines = code.split('\n');
+            return lines.map((line, i) => 
+                `<span class="line-numbers">${(i + 1).toString().padStart(3, ' ')}</span>${line}`
+            ).join('\n');
+        }
+        
+        function renderFiles() {
+            const container = document.getElementById('file-contents');
+            const tocContainer = document.getElementById('toc-content');
+            
+            const filteredFiles = files.filter(file => {
+                if (currentFilter === 'all') return true;
+                return file.category === currentFilter;
+            });
+            
+            // Update stats
+            document.getElementById('total-files').textContent = files.length;
+            document.getElementById('total-lines').textContent = files.reduce((sum, f) => sum + f.content.split('\n').length, 0);
+            document.getElementById('frontend-files').textContent = files.filter(f => f.category === 'frontend').length;
+            document.getElementById('backend-files').textContent = files.filter(f => f.category === 'backend').length;
+            
+            // Generate TOC
+            const tocSections = {};
+            filteredFiles.forEach(file => {
+                if (!tocSections[file.category]) tocSections[file.category] = [];
+                tocSections[file.category].push(file);
+            });
+            
+            tocContainer.innerHTML = Object.keys(tocSections).map(category => `
+                <div class="toc-section">
+                    <h4>${category.charAt(0).toUpperCase() + category.slice(1)} (${tocSections[category].length})</h4>
+                    <ul class="toc-list">
+                        ${tocSections[category].map(file => `
+                            <li><a href="#file-${file.path.replace(/[^a-zA-Z0-9]/g, '-')}">${getFileIcon(file.path)} ${file.path}</a></li>
+                        `).join('')}
+                    </ul>
+                </div>
+            `).join('');
+            
+            // Render files
+            container.innerHTML = filteredFiles.map(file => {
+                const fileId = file.path.replace(/[^a-zA-Z0-9]/g, '-');
+                const extension = file.path.split('.').pop();
+                const highlightedCode = syntaxHighlight(file.content, extension);
+                const numberedCode = addLineNumbers(highlightedCode);
+                const lineCount = file.content.split('\n').length;
+                const size = new Blob([file.content]).size;
+                
+                return `
+                    <div class="file-section" id="file-${fileId}">
+                        <div class="file-header">
+                            <div class="file-title">
+                                ${getFileIcon(file.path)} ${file.path}
+                            </div>
+                            <div class="file-info">
+                                ${lineCount} lines • ${(size / 1024).toFixed(1)}KB
+                            </div>
+                            <button class="copy-button" onclick="copyToClipboard(\`${file.content.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)">
+                                📋 Copy
+                            </button>
+                        </div>
+                        <div class="code-content">
+                            <pre class="code-block">${numberedCode}</pre>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        function filterFiles(category) {
+            currentFilter = category;
+            document.querySelectorAll('.nav-button').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            renderFiles();
+        }
+        
+        function searchFiles(query) {
+            const sections = document.querySelectorAll('.file-section');
+            sections.forEach(section => {
+                const path = section.querySelector('.file-title').textContent.toLowerCase();
+                const content = section.querySelector('.code-block').textContent.toLowerCase();
+                const matches = query === '' || path.includes(query.toLowerCase()) || content.includes(query.toLowerCase());
+                section.style.display = matches ? 'block' : 'none';
+            });
+        }
+        
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                // Show feedback
+                event.target.textContent = '✅ Copied!';
+                setTimeout(() => {
+                    event.target.textContent = '📋 Copy';
+                }, 2000);
+            });
+        }
+        
+        // Load files data
+        function loadFiles() {
+            // This will be populated by the script
+        }
+        
+        // Initialize
+        loadFiles();
+    </script>
+</body>
+</html>

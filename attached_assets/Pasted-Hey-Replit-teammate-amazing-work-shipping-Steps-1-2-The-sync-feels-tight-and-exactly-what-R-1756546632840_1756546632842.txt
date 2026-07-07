@@ -1,0 +1,189 @@
+Hey Replit teammate 👋 — amazing work shipping Steps 1 & 2. The sync feels tight and exactly what @RDM wanted.
+
+Let’s do Step 3: move mobile filters into the bottom sheet, while keeping desktop filters above the map. Below are surgical, copy-paste patches that only touch the sheet UI + small responsive tweaks.
+
+1) Add filters inside IncidentSheet (mobile)
+
+This reads/writes the centralized useIncidentStore so Sidebar/Map stay in sync. It adds:
+
+header with In view toggle
+
+severity chips (All / Low / Medium / High / Emergency)
+
+a time range segmented control (All / 24h / 7d / 30d)
+
+(keeps your shared IncidentList below)
+
+// client/src/components/IncidentSheet.tsx (replace the header area; keep your Drawer wrapper)
+import React, { useMemo, useState } from "react";
+import { Drawer } from "vaul";
+import IncidentList, { IncidentMarker } from "@/components/IncidentList";
+import { useIncidentStore } from "@/state/useIncidentStore";
+
+export default function IncidentSheet({
+  open,
+  onOpenChange,
+  items,
+  onSelect,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  items: IncidentMarker[];
+  onSelect: (id: string) => void;
+}) {
+  const [height, setHeight] = useState<"peek" | "half" | "full">("peek");
+
+  // store-backed filters
+  const severity = useIncidentStore((s) => s.severity);
+  const setSeverity = useIncidentStore((s) => s.setSeverity);
+  const inViewOnly = useIncidentStore((s) => s.inViewOnly);
+  const toggleInViewOnly = useIncidentStore((s) => s.toggleInViewOnly);
+  const timeRange = useIncidentStore((s) => s.timeRange);
+  const setTimeRange = useIncidentStore((s) => s.setTimeRange);
+
+  // client-side filter is already applied upstream; we only render UI here
+  const shown = useMemo(() => items, [items]);
+
+  return (
+    <Drawer.Root open={open} onOpenChange={onOpenChange} modal={false} shouldScaleBackground={false}>
+      <Drawer.Trigger className="hidden" />
+      <Drawer.Portal>
+        <Drawer.Overlay className="fixed inset-0 bg-black/20" />
+        <Drawer.Content className="fixed inset-x-0 bottom-0 z-30">
+          <div
+            className={`mx-auto max-w-md transition-[height] duration-200
+              ${height === "full" ? "h-[80vh]" : height === "half" ? "h-[52vh]" : "h-[96px]"}
+            `}
+          >
+            <div className="mx-3 rounded-t-3xl bg-slate-900 border border-slate-800 shadow-2xl h-full flex flex-col">
+              {/* Handle (cycle peek → half → full) */}
+              <button
+                onClick={() => setHeight((h) => (h === "peek" ? "half" : h === "half" ? "full" : "peek"))}
+                className="flex justify-center pt-2 w-full"
+                aria-label="Toggle incidents"
+              >
+                <div className="h-1.5 w-12 rounded-full bg-white/30" />
+              </button>
+
+              {/* Header row with In-view toggle */}
+              <div className="px-4 py-3 flex items-center justify-between">
+                <div className="text-base font-semibold">Recent Incidents</div>
+                {/* mobile-only visibility; desktop has filters elsewhere */}
+                <label className="text-xs text-white/80 flex items-center gap-2 md:hidden">
+                  <input
+                    type="checkbox"
+                    className="accent-white"
+                    checked={inViewOnly}
+                    onChange={toggleInViewOnly}
+                  />
+                  In view
+                </label>
+              </div>
+
+              {/* Severity chips (mobile-first) */}
+              <div className="px-3 pb-2 flex gap-2 overflow-x-auto md:hidden">
+                {(["all", "low", "medium", "high", "emergency"] as const).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setSeverity(s as any)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium border whitespace-nowrap ${
+                      severity === s
+                        ? "bg-white text-slate-900 border-white"
+                        : "bg-transparent text-white/80 border-white/20"
+                    }`}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+
+              {/* Time range segmented control (mobile-first) */}
+              <div className="px-3 pb-2 md:hidden">
+                <div className="inline-flex rounded-xl overflow-hidden border border-white/15 bg-white/5">
+                  {(["all", "24h", "7d", "30d"] as const).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setTimeRange(t)}
+                      className={`px-3 py-1.5 text-xs font-medium border-r border-white/10 last:border-r-0 ${
+                        timeRange === t ? "bg-white text-slate-900" : "text-white/80"
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Shared list */}
+              <div className="min-h-0 flex-1">
+                <IncidentList items={shown} onSelect={onSelect} />
+              </div>
+            </div>
+          </div>
+        </Drawer.Content>
+      </Drawer.Portal>
+    </Drawer.Root>
+  );
+}
+
+
+Note: desktop filters can remain where they are; these mobile filters are hidden on md+ via md:hidden.
+
+2) Hide old mobile filters above the map
+
+Wherever you render the map-top filter chips/buttons now, hide them on small screens so the sheet becomes the mobile filter hub:
+
+// existing top-of-map filters container
+<div className="hidden md:flex items-center gap-2">
+  {/* existing desktop filters live here unchanged */}
+</div>
+
+
+If you previously showed them on mobile, wrap that block with hidden md:flex.
+
+3) (Optional) Small helper: “Filters” FAB to open the sheet
+
+If @RDM wants a very clear entry point on mobile:
+
+// client/src/pages/community/Map.tsx (within the map container)
+{!isIncidentSheetOpen && (
+  <button
+    onClick={() => setIsIncidentSheetOpen(true)}
+    className="md:hidden absolute left-3 bottom-[calc(96px+1rem)] z-20 h-12 px-4 rounded-2xl bg-white/90 text-slate-900 shadow-lg font-medium"
+    aria-label="Open filters & incidents"
+  >
+    Filters & Incidents
+  </button>
+)}
+
+4) Tiny bbox init guard reminder (you added it, just keep it)
+// after map init
+function wireBBox(map: L.Map) {
+  let t: any;
+  const push = () => {
+    try {
+      if (!(map as any)._loaded) return;
+      const b = map.getBounds();
+      useIncidentStore.getState().setBBox({
+        north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest(),
+      });
+    } catch {}
+  };
+  const debounced = () => { clearTimeout(t); t = setTimeout(push, 180); };
+  map.whenReady(push);
+  map.on("load", debounced);
+  map.on("moveend", debounced);
+  map.on("zoomend", debounced);
+}
+
+What this delivers for @RDM (immediately)
+
+Mobile users control filters inside the sheet (Google Maps pattern).
+
+Desktop keeps its top-bar filters.
+
+All views stay in lockstep via the store.
+
+No data or Leaflet plumbing changed.
+
+If you hit any prop/types friction while wiring the sheet props, paste the current IncidentSheet signature and I’ll tailor it line-for-line. When this lands, we can add the peek/half/full drag polish or the selected marker pulse next—your call.

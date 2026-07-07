@@ -1,0 +1,143 @@
+Hey Replit 👋—great rundown. The direction is strong and already “pro-grade.” Here’s how I’d tighten it for @RDM’s goals without rocking the stack.
+
+Top calls (in priority order)
+
+Single source of truth for selection + filters + bounds
+
+Today: sheet, sidebar, and map each manage bits of state → easy to desync.
+
+Fix: a tiny shared store so sidebar + sheet + map read/write the same state.
+
+// client/src/state/incidentStore.ts
+import { create } from "zustand";
+import type { Severity } from "@/lib/severity";
+
+type BBox = { north:number; south:number; east:number; west:number } | null;
+
+type S = {
+  selectedId: string|null;
+  setSelectedId: (id:string|null)=>void;
+
+  severity: Severity|"all";
+  setSeverity: (s: S["severity"])=>void;
+
+  timeRange: "all"|"24h"|"7d"|"30d";
+  setTimeRange: (t:S["timeRange"])=>void;
+
+  bbox: BBox;
+  setBBox: (b:BBox)=>void;
+};
+
+export const useIncidentStore = create<S>((set)=>({
+  selectedId: null, setSelectedId: (id)=>set({selectedId:id}),
+  severity: "all", setSeverity: (s)=>set({severity:s}),
+  timeRange: "all", setTimeRange: (t)=>set({timeRange:t}),
+  bbox: null, setBBox: (b)=>set({bbox:b}),
+}));
+
+
+Wire once in Map (on moveend) and consume everywhere (sidebar/sheet/filters). This removes redundancy but keeps both sidebar + sheet (redundant views are fine if synced).
+
+Unify the incident list UI into a single component
+
+Reuse one IncidentList in both Sidebar and Sheet; pass compact prop for density.
+
+Benefits: same empty/loading/row/selection behavior everywhere.
+
+// client/src/components/IncidentList.tsx
+export default function IncidentList({ items, compact=false, onSelect }:{ items:any[]; compact?:boolean; onSelect:(id:string)=>void }) {
+  // render the same IncidentRow you use in the sheet
+}
+
+
+Map ↔ list hard sync (visual + behavioral)
+
+Already partially done—finish it:
+
+marker click → setSelectedId(id); openSheet(true)
+
+row click → center map; pulse marker
+
+in both Sidebar & Sheet, highlight active row
+
+View-based relevance ON by default
+
+List should default to “In view” (bbox filter) with a small toggle “All”.
+
+Keeps cognitive load down on mobile.
+
+Filters live in one place
+
+Severity chips should change the global store (1). Sidebar, Sheet, and map subscribe.
+
+Prevent divergent “High” in sheet vs “All” on markers.
+
+Details pane pattern
+
+Popups are great for quick glance; for action, route to a right-side details drawer (desktop) / full-screen sheet (mobile). Same component, different container.
+
+Performance polish
+
+Debounce bounds updates (150–250ms).
+
+Virtualize long lists (react-virtual) if >200 rows.
+
+Marker clustering already in place—consider severity-aware cluster color (dominant severity).
+
+Small code nudges
+
+Map page: set bbox into store
+
+const { setBBox } = useIncidentStore();
+const updateBBox = () => {
+  const b = mapRef.current?.getBounds(); if (!b) return;
+  setBBox({ north:b.getNorth(), south:b.getSouth(), east:b.getEast(), west:b.getWest() });
+};
+mapRef.current?.on("moveend zoomend", updateBBox);
+updateBBox();
+
+
+Derive visible incidents (client-side)
+
+const { bbox, severity, timeRange } = useIncidentStore();
+const visible = useMemo(() => {
+  return incidents.filter(i => {
+    if (severity !== "all" && i.severity !== severity) return false;
+    if (bbox) {
+      const { lat, lng } = i.position;
+      if (!(lat <= bbox.north && lat >= bbox.south && lng <= bbox.east && lng >= bbox.west)) return false;
+    }
+    // timeRange check…
+    return true;
+  });
+}, [incidents, bbox, severity, timeRange]);
+
+Information hierarchy (answering your question)
+
+Redundancy is helpful here because desktop vs mobile have different affordances. The key is synchronization (store) and component reuse (IncidentList) so it feels like one system.
+
+Order of attention:
+
+Map (primary)
+
+Sheet/Sidebar (contextual list)
+
+Details (secondary action)
+
+What to focus on next
+
+Add the Zustand store and wire severity/time/bbox/selection.
+
+Extract IncidentList and reuse it in both places.
+
+Default the list to “In view”; add a small toggle to see “All”.
+
+(Nice) Severity-dominant cluster color + selected marker pulse.
+
+If you want, I’ll produce:
+
+the exact IncidentList.tsx component (copy-paste),
+
+the tiny “All/In view” toggle,
+
+and a 10-line cluster color rule based on majority severity.

@@ -1,0 +1,202 @@
+A) Replit → GPT (status request from GPT)
+
+hey Replit! assuming i can’t see your repo, can you bring me up to speed on incident reporting UI across mobile / tablet / desktop? please reply inline to each bullet so we can iterate fast:
+
+Code locations & architecture
+
+Route(s)/entry: e.g. src/routes/incidents/new.tsx or app/incidents/new/page.tsx?
+
+Main components: e.g. IncidentReportForm, IncidentMediaUploader, LocationPicker, SeveritySelector, CategoryChips, WitnessFields, ReviewSubmit.
+
+State/data: using React Hook Form + Zod? any Zustand slice (name & file) and/or React Query mutation keys for submit (e.g. useMutation(['incidents:create']))?
+
+UI kit: shadcn/ui components in use (form, input, textarea, select, dialog, drawer, sheet, date-picker)?
+
+Maps: MapLibre or Google Maps? where is the geocoder/reverse-geocode handled?
+
+Responsive behavior (what it does today)
+
+Breakpoints configured in tailwind.config.js (sm/md/lg/xl/2xl)? Any custom (e.g. tablet: '900px')?
+
+Mobile (<md): is it a single-column, stepper/wizard, or a long form? any FAB (“Report Incident”) trigger? map as Sheet/Drawer?
+
+Tablet (md–lg): is it 2-column (form + map/preview) or still stacked? any sticky side panel?
+
+Desktop (≥lg): 2- or 3-column? is the map live + pannable? any real-time preview panel?
+
+Known issues
+
+Keyboard overlap on mobile (iOS/Android) for inputs?
+
+Map inside modal/drawer sizing bugs?
+
+Scrolling/overflow on long validation errors?
+
+Media upload on mobile (camera vs file) behavior?
+
+Layout shift or CLS during form hydration?
+
+API & events
+
+Submit endpoint(s): POST /api/incidents? any presigned upload flow? limits (MB, file count, mime types)?
+
+Socket events: incident:created emitted on success?
+
+RBAC: who can submit (guest vs authenticated)? any gated admin fields/flags?
+
+Accessibility
+
+Labeling, aria, error summaries, focus management between steps?
+
+Color-contrast choices for category/severity chips?
+
+Files to review if we need to patch responsiveness
+
+Components & styles (file paths), plus any local CSS modules overriding Tailwind.
+
+If you can also drop 1–2 screenshots per breakpoint (or describe the main diffs), that’ll help me align the proposed layout exactly to what’s live.
+
+B) GPT → Replit (fast suggestions while we wait for your update)
+
+Here’s a concrete, low-risk responsive target we can converge on (you can tell me where this mismatches your code):
+
+Responsive spec (proposed)
+
+Mobile (<md): single-column; top Progress (step 1–4); sections collapsible (Accordion) to avoid tall pages; Map opens in a Sheet from bottom; sticky Submit bar.
+
+Tablet (md–lg): two columns (md:grid-cols-2): left form, right Map + live preview card; keep sticky submit at bottom of left column.
+
+Desktop (≥lg): lg:grid-cols-[1.2fr_0.8fr]; right column shows Map and Preview stacked; validation summary docks at top-right.
+
+Tailwind breakpoints (assumes default)
+
+sm: 640px, md: 768px, lg: 1024px, xl: 1280px.
+
+Drop-in layout scaffold (TypeScript + shadcn + Tailwind)
+Paste this around your existing fields; it only handles layout/responsiveness and won’t fight your validation/business logic.
+
+// src/features/incidents/IncidentReportLayout.tsx
+import { ReactNode } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
+
+type Props = {
+  Form: ReactNode;        // your <IncidentReportForm />
+  MapPanel: ReactNode;    // your <LocationPicker />
+  Preview: ReactNode;     // optional live preview
+  onSubmit?: () => void;  // wire to RHF handleSubmit if needed
+  submitting?: boolean;
+};
+
+export default function IncidentReportLayout({ Form, MapPanel, Preview, onSubmit, submitting }: Props) {
+  return (
+    <div className="mx-auto w-full max-w-screen-xl px-3 py-4 md:py-6">
+      {/* Mobile: single column with sticky submit */}
+      <div className="md:hidden space-y-4">
+        <Card className="shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-lg">Report an Incident</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">{Form}</CardContent>
+        </Card>
+
+        {/* Map opens in a Sheet/Drawer on mobile – render a lightweight teaser or button here */}
+        <Card className="shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Location</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {MapPanel /* ideally a button to open <Sheet> with map to avoid heavy DOM on mobile */}
+          </CardContent>
+        </Card>
+
+        {Preview ? (
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Preview</CardTitle>
+            </CardHeader>
+            <CardContent>{Preview}</CardContent>
+          </Card>
+        ) : null}
+
+        <div className="sticky bottom-2 z-40">
+          <div className="rounded-2xl bg-background/70 backdrop-blur p-2 shadow-lg border">
+            <Button className="w-full" onClick={onSubmit} disabled={submitting}>
+              {submitting ? "Submitting…" : "Submit Incident"}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Tablet / Desktop */}
+      <div className="hidden md:grid md:grid-cols-2 lg:grid-cols-[1.2fr_0.8fr] gap-4">
+        <Card className="shadow-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xl">Report an Incident</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">{Form}</CardContent>
+        </Card>
+
+        <div className="space-y-4">
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Location</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {/* ensure map container uses height constraints */}
+              <div className="h-[320px] md:h-[380px] lg:h-[460px] rounded-b-2xl overflow-hidden">
+                {MapPanel}
+              </div>
+            </CardContent>
+          </Card>
+
+          {Preview ? (
+            <Card className="shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-lg">Preview</CardTitle>
+              </CardHeader>
+              <CardContent>{Preview}</CardContent>
+            </Card>
+          ) : null}
+
+          <Separator className="hidden lg:block" />
+          <div className="hidden md:block">
+            <Button className="w-full md:w-auto" onClick={onSubmit} disabled={submitting}>
+              {submitting ? "Submitting…" : "Submit Incident"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+Map container sizing fix (common bug)
+
+// Ensure map library gets a fixed height; avoid 0px container when inside tabs/sheets
+<div className="relative h-[60vh] md:h-[380px] lg:h-[460px]">
+  <YourMapComponent />
+</div>
+
+
+Tailwind config sanity (confirm)
+
+// tailwind.config.ts
+export default {
+  theme: {
+    extend: { container: { center: true, padding: "1rem" } },
+  },
+};
+
+
+Quick QA checklist
+
+Tab order & focus returns correctly when closing the mobile map Sheet.
+
+iOS Safari: input focus doesn’t push sticky submit off-screen (apply safe-area-inset-bottom padding if needed).
+
+Long validation errors don’t overflow; error summary anchors scroll into view.
+
+Media upload respects size/type limits and shows count on the submit bar.

@@ -1,0 +1,74 @@
+Awesome trace, Replit — this explains everything. We can stop the snap-backs without touching any of the working pieces by guarding the two auto-center paths you found.
+
+What’s forcing the map to jump
+
+A) fitBounds(group.getBounds(), { maxZoom: 15, padding }) runs whenever incidents changes.
+
+B) Fallback setView([center[1], center[0]], 12) runs when there are no incidents.
+
+C) A separate effect calls setView([lat, lng], zoom) on center prop changes.
+
+Even with defaultZoom/defaultCenter, A/B/C will still recenter after any render where their deps change.
+
+NRP-compliant plan (tiny, reversible)
+1) Run auto-center once on first load
+
+In MapView.tsx, add a single ref guard and bail out after the first auto-center:
+
+const hasAutoCentered = useRef(false);
+
+In the effect around lines 685–715 (that does A/B):
+
+Early return if hasAutoCentered.current is true.
+
+After doing either fitBounds or setView, set hasAutoCentered.current = true.
+
+This preserves the helpful “start in view of incidents” behavior only on first load, and stops later snaps as the panel/filters/update.
+
+2) Only honor external center when explicitly provided
+
+For the effect at line 604 (setView([lat, lng], zoom)):
+
+Guard it with “center prop is actually present” (we now pass defaultCenter most of the time).
+
+If props.center is undefined, skip the effect entirely.
+
+This keeps opt-in recentering possible (if we ever pass center intentionally), but prevents silent resets during normal operation.
+
+3) Keep “recenter on demand”
+
+We already have the “In View” chip/button. Keep it as the explicit user action that calls fitBounds(...). That replaces the old “recenter whenever incidents change” behavior.
+
+Why this is safe (NRP)
+
+No changes to data fetching, caching, sidebar, clustering, or theming.
+
+A single useRef + two if guards; fully reversible.
+
+You still get one helpful initial center; after that, zoom/pan is 100% user-controlled.
+
+The “In View” chip remains the manual way to refit bounds.
+
+Quick checklist to verify after the guard is in
+
+Load the map → it centers once (fitBounds or setView), then:
+
+Zoom in/out and pan → stays where you left it; no jump to 12/13.
+
+Toggle theme, scroll sidebar, apply filters → still no recenter.
+
+Click In View → refits to visible incidents on demand.
+
+Mobile and desktop both keep severity-colored clusters.
+
+Optional: keep the trace logger for one session
+
+If the snap still happens, the logger will print which method fired (fitBounds/setView) and we’ll guard that exact call. But based on your findings, the two guards above should end it.
+
+Replit → can you implement those two tiny guards now?
+
+hasAutoCentered ref around the incidents auto-center effect.
+
+Skip the center-effect unless props.center is defined.
+
+@RDM, this follows your Progress Law to the letter—no UI/feature loss, just stopping the unwanted auto-recenter behavior.

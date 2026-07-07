@@ -1,0 +1,166 @@
+Replit (Lead Coder) — new product direction for Feed + Incident Interactions (Beta)
+
+Hi Replit — we’re changing the interaction model for NaborNet to reduce legal exposure while keeping engagement. We will address incident taxonomy (button names) later; for now we focus on feed + interactions.
+
+1) Core change: remove neighbourhood chat rooms
+
+Goal: Incidents are not tied to “rooms” anymore.
+
+No neighbourhood chat rooms
+
+No free-chat tab
+
+No “must join room to see feed”
+
+Feed becomes location-based: users see incident cards within a radius of their current location (plus time window + filters).
+
+So: Map + Feed are just two views of the same incident dataset.
+
+Implementation ask
+
+Update data model / queries so feed is based on:
+
+center_lat, center_lng, radius_km
+
+time_window (e.g., last 72h default)
+
+optional filters (severity/category)
+
+Make sure access control still applies (verified users create incidents etc.)
+
+2) Replace comments/chat with structured “Incident Responses” (preferred interaction)
+
+Each incident card should support structured responses (no threads, no replies-to-replies):
+
+👁️ I observed this too
+
+⏱️ Still ongoing
+
+✅ Resolved / no longer occurring
+
+🔁 Similar incident nearby
+
+📍 Different location
+
+❗ Needs attention
+
+These responses should be aggregatable (counts per incident) and expire with the incident.
+
+Implementation ask
+
+Add an incident_responses table (or equivalent)
+
+id
+
+incident_id
+
+user_id
+
+response_type (enum)
+
+created_at
+
+Prevent spam (e.g., one response type per user per incident; allow updates)
+
+Show counts on incident cards.
+
+3) Beta experiment: allow “NaborNotes” (free-text) BUT with legal-risk isolation
+
+I still want to test whether users feel the need to write short notes, BUT we must not publish legally risky speech publicly.
+
+UI behaviour
+
+Add a “NaborNote” text box on incident cards (or in incident detail view).
+
+Notes are allowed in beta, but the system will scan text for risk.
+
+If text is deemed risky (defamation / attribution / targeting / doxxing / incitement / safety-misinformation):
+
+The note is still “posted”
+
+BUT it is only visible to the author (shadowban / private visibility)
+
+It is framed with a thin red border around the note box
+
+Include a small label like: “Visible only to you (flagged as risky)”
+
+If the text is not risky:
+
+Note is visible publicly to all users who can see that incident card (within radius/time scope)
+
+Implementation detail proposal
+
+Store every note, but with a visibility status:
+
+visibility = 'public' | 'author_only'
+
+risk_flags = [] (array of detected categories)
+
+For risky notes: set visibility = author_only
+
+Data model ask
+
+Add table incident_notes:
+
+id
+
+incident_id
+
+user_id
+
+text
+
+visibility (public/author_only)
+
+risk_flags (json/array)
+
+created_at
+
+Safety detection (MVP heuristic)
+
+Start simple: regex + keyword rules. We can upgrade later.
+We should detect:
+
+Defamation (e.g., “thief”, “criminal”, “rapist”, “drug dealer”, “he did it”, “they did it”)
+
+Pattern attribution (“same people again”, “those guys”, “always them”, “repeat offenders”)
+
+Harassment/targeting (“go to house X”, “watch this person”, “follow them”, “teach them a lesson”)
+
+Doxxing (phone numbers, full names patterns, exact addresses, unit numbers, plate numbers if we decide)
+
+Vigilantism/incitement (“hurt”, “kill”, “beat”, “shoot”, “let’s get them”, “burn”)
+
+Dangerous misinformation in safety context (we can start minimal: “bomb”, “gun”, “jammers” — but this one may be tricky)
+
+Important
+
+No “warn and publish publicly” flow. Risky = author-only visibility.
+
+4) Questions for you (Replit)
+
+What’s the fastest way to implement radius-based feed queries with our current DB structure?
+
+Are incidents already stored with lat/lng in a way we can query efficiently? If not, what do we need?
+
+For “author-only risky notes”, can we enforce visibility at query layer so it’s impossible to leak?
+
+Do you recommend implementing risk detection on:
+
+backend only (preferred), or
+
+backend + client pre-check for UX?
+
+What’s the simplest anti-spam rule for notes and responses in beta?
+
+If you’re aligned, let’s implement in this order:
+
+remove chat rooms + membership dependency
+
+radius/time-based feed query
+
+structured incident responses + counters
+
+nabor notes with visibility gating + red-border UI for author-only notes
+
+What do you think?

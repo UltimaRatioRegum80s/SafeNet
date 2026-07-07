@@ -1,0 +1,199 @@
+let’s do it ready-to-drop style, just like we did with Quick Report.
+Here are the two enhancements (Optimistic Marker + Offline Queue) pre-integrated with your existing architecture.
+
+⚡ 1) Optimistic Marker
+A) Extend your useIncidentStore
+
+Add a couple of helpers for temporary markers:
+
+// client/src/state/useIncidentStore.ts
+import { create } from "zustand";
+import type { IncidentType, IncidentSeverity } from "@/features/report/incidentTypes";
+
+export type Incident = {
+  id: string;
+  type: IncidentType;
+  severity: IncidentSeverity;
+  latitude: number;
+  longitude: number;
+  description?: string;
+  optimistic?: boolean;
+};
+
+type IncidentState = {
+  incidents: Incident[];
+  addIncident: (i: Incident) => void;
+  removeIncident: (id: string) => void;
+  updateIncidentId: (tempId: string, newId: string) => void;
+};
+
+export const useIncidentStore = create<IncidentState>((set) => ({
+  incidents: [],
+  addIncident: (i) => set((s) => ({ incidents: [...s.incidents, i] })),
+  removeIncident: (id) => set((s) => ({ incidents: s.incidents.filter((x) => x.id !== id) })),
+  updateIncidentId: (tempId, newId) =>
+    set((s) => ({
+      incidents: s.incidents.map((x) =>
+        x.id === tempId ? { ...x, id: newId, optimistic: false } : x
+      ),
+    })),
+}));
+
+B) Update QuickReportCard.tsx
+
+Optimistically drop the pin before POST:
+
+import { useIncidentStore } from "@/state/useIncidentStore";
+
+// inside QuickReportCard component
+const addIncident = useIncidentStore((s) => s.addIncident);
+const updateIncidentId = useIncidentStore((s) => s.updateIncidentId);
+const removeIncident = useIncidentStore((s) => s.removeIncident);
+
+const onSubmit = async () => {
+  if (!type || !severity || isBusy) return;
+  try {
+    setIsLocating(true);
+    const { lat, lng } = await getCurrentPosition();
+
+    // 🔥 Optimistic marker
+    const tempId = `temp-${Date.now()}`;
+    addIncident({
+      id: tempId,
+      type,
+      severity,
+      latitude: lat,
+      longitude: lng,
+      description: note?.trim() || undefined,
+      optimistic: true,
+    });
+
+    const result = await createIncident.mutateAsync({
+      type,
+      severity,
+      latitude: lat,
+      longitude: lng,
+      description: note?.trim() || undefined,
+    });
+
+    updateIncidentId(tempId, (result as any).id);
+    reset();
+    setLocation(`/map?focus=${encodeURIComponent((result as any).id)}`);
+  } catch (err: any) {
+    removeIncident(tempId);
+    toast({
+      title: "Couldn’t submit",
+      description: err?.message ?? "Check your connection and try again.",
+      variant: "destructive",
+    });
+  } finally {
+    setIsLocating(false);
+  }
+};
+
+
+👉 This gives users an instant marker drop, even before the server responds.
+
+📶 2) Offline Queue
+A) New store for queued reports
+
+client/src/state/useOfflineQueueStore.ts
+
+import { create } from "zustand";
+
+type OfflineIncident = { id: string; payload: any };
+
+export const useOfflineQueueStore = create<{
+  queue: OfflineIncident[];
+  enqueue: (payload: any) => void;
+  flush: () => Promise<void>;
+}>((set, get) => ({
+  queue: [],
+  enqueue: (payload) =>
+    set((s) => ({
+      queue: [...s.queue, { id: `offline-${Date.now()}`, payload }],
+    })),
+  flush: async () => {
+    const q = get().queue;
+    for (const inc of q) {
+      try {
+        await fetch("/api/incidents", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(inc.payload),
+        });
+        set((s) => ({ queue: s.queue.filter((i) => i.id !== inc.id) }));
+      } catch {
+        // still offline → leave in queue
+      }
+    }
+  },
+}));
+
+// register global flush on reconnect
+if (typeof window !== "undefined") {
+  window.addEventListener("online", () => {
+    useOfflineQueueStore.getState().flush();
+  });
+}
+
+B) Update QuickReportCard.tsx again
+
+Queue reports if offline:
+
+import { useOfflineQueueStore } from "@/state/useOfflineQueueStore";
+
+const enqueue = useOfflineQueueStore((s) => s.enqueue);
+
+const onSubmit = async () => {
+  if (!type || !severity || isBusy) return;
+  try {
+    setIsLocating(true);
+    const { lat, lng } = await getCurrentPosition();
+
+    const payload = {
+      type,
+      severity,
+      latitude: lat,
+      longitude: lng,
+      description: note?.trim() || undefined,
+    };
+
+    if (!navigator.onLine) {
+      enqueue(payload);
+      toast({
+        title: "Saved offline",
+        description: "Will submit automatically when back online.",
+      });
+      reset();
+      setLocation("/map");
+      return;
+    }
+
+    // (otherwise normal optimistic marker flow)
+    const tempId = `temp-${Date.now()}`;
+    addIncident({ id: tempId, ...payload, optimistic: true });
+
+    const result = await createIncident.mutateAsync(payload);
+    updateIncidentId(tempId, (result as any).id);
+
+    reset();
+    setLocation(`/map?focus=${encodeURIComponent((result as any).id)}`);
+  } catch (err: any) {
+    toast({
+      title: "Couldn’t submit",
+      description: err?.message ?? "Check your connection and try again.",
+      variant: "destructive",
+    });
+  } finally {
+    setIsLocating(false);
+  }
+};
+
+✅ Resulting UX
+
+Online + fast: Incident pins instantly (optimistic marker), then syncs with server/socket.
+
+Online + slow: User still sees immediate pin; updates reconcile later.
+
+Offline: Incident is queued → toast says “Saved offline” → when connection restores, it flushes and syncs.

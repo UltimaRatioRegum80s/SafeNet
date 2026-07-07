@@ -1,0 +1,75 @@
+Kenya mobile re-test update (good + two new issues):
+
+✅ Good news: Previously submitted Kenya incidents now correctly appear in BOTH the feed and the map (so the read path + geo fixes worked).
+
+❌ New Issue #1 — FEED flicker / rapid switching between incidents and empty state
+On mobile in Kenya:
+- Feed rapidly flickers between:
+  - showing the incident cards correctly, then
+  - showing an empty feed state (as if there are 0 incidents),
+  - then back again, repeatedly.
+- It feels like two competing render states:
+  - “incidents loaded” vs “empty / no location / no data”
+  are both firing alternately.
+
+Please investigate deeply:
+1) Confirm what state transitions are causing this:
+   - locationStatus toggling (ok ↔ unavailable/stale)?
+   - query enabling/disabling repeatedly?
+   - React Query / SWR cache invalidation loop?
+   - useEffect dependency loop that triggers refetch/reset?
+2) In Feed.tsx:
+   - Are we conditionally rendering empty state based on BOTH:
+     - `locationStatus` AND
+     - `incidents.length` AND
+     - `isLoading/isFetching` ?
+   - Are we using `pickQueryLocation()` and a stale window in a way that flips between null and lastGood repeatedly?
+3) Add temporary console logs (or dev logging) around:
+   - locationStatus
+   - selected query location (lat/lng)
+   - query enabled flag
+   - incidents length
+   - isLoading / isFetching / error
+   to confirm the exact flicker cycle.
+
+Desired behavior:
+- Once location is valid (or lastGood valid), the feed should remain stable and show incidents.
+- While refetching, show a “loading skeleton” or subtle loading indicator, NOT switch to empty state.
+
+Likely fix approach:
+- Ensure empty-state rendering only happens when:
+  - query is disabled AND no lastGood exists, OR
+  - query completed and incidents truly empty
+- Do not render empty state during transient fetches.
+
+------------------------------------------
+❌ New Issue #2 — MAP zoom rebound / zoom resets after user interaction
+On the map:
+- Incidents display in correct Kenya location.
+- But when I zoom in/out or pan, the map “jumps back” to a default zoom/viewport shortly after.
+- It feels like an effect is repeatedly calling fitBounds / setView to include all incidents or to enforce a default zoom.
+
+Please investigate:
+1) In Map.tsx:
+   - Search for any useEffect that runs when:
+     - incidents array changes
+     - location changes
+     - focus param changes
+     and calls:
+     - map.setView / map.flyTo / map.fitBounds / map.invalidateSize
+2) Confirm whether you’re doing “auto-fit to all incidents” on every render or every data refresh.
+3) If focus=incidentId exists, ensure it runs once (on initial focus only) and then stops.
+4) Implement a guard:
+   - Only auto-center/auto-fit on initial load, or when focus param changes,
+   - NEVER override user-initiated zoom/pan.
+   - Use a flag like `hasUserInteracted` or `didInitialAutoFit` to prevent repeated resets.
+   - Also check if a resize/rehydration event is causing repeated fitBounds calls.
+
+Deliverable:
+- Please report back with the exact root cause(s):
+  - which state variables are toggling on Feed
+  - which effect/logic is forcing Map zoom resets
+  - exact files + lines + minimal patch plan
+Then proceed to implement the fix.
+
+This is now the last blocker for smooth Kenya mobile field testing.

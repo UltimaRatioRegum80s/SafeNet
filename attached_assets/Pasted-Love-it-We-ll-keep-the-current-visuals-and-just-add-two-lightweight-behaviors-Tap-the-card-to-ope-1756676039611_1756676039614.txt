@@ -1,0 +1,353 @@
+Love it. We’ll keep the current visuals and just add two lightweight behaviors:
+
+Tap the card to open/close comments (lazy-loads comments, real-time updates).
+
+“Someone took a look” — a subtle review checkbox + count in the meta row.
+
+Below are copy-paste pieces for client + server that slot into your existing NN stack (Express + Socket.io + PostgreSQL w/ Drizzle, React Query).
+
+Server (Express + Drizzle)
+1) DB schema
+// server/db/schema/incidents.ts
+import { pgTable, text, varchar, timestamp, uuid, boolean, integer, primaryKey } from "drizzle-orm/pg-core";
+
+export const incidentComments = pgTable("incident_comments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  incidentId: uuid("incident_id").notNull().index(),
+  userId: uuid("user_id").notNull().index(),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const incidentReviews = pgTable("incident_reviews", {
+  incidentId: uuid("incident_id").notNull(),
+  userId: uuid("user_id").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.incidentId, t.userId] }), // one check per user
+}));
+
+2) Routes
+// server/routes/incidents.ts
+import { Router } from "express";
+import { db } from "../db";
+import { incidentComments, incidentReviews } from "../db/schema/incidents";
+import { and, eq, count } from "drizzle-orm";
+
+export const incidentsRouter = Router();
+
+// GET comments (paginated)
+incidentsRouter.get("/:id/comments", async (req, res) => {
+  const { id } = req.params;
+  const limit = Math.min(Number(req.query.limit ?? 20), 100);
+  const cursor = req.query.cursor as string | undefined;
+
+  const rows = await db.query.incidentComments.findMany({
+    where: eq(incidentComments.incidentId, id),
+    orderBy: (t, { desc }) => [desc(t.createdAt)],
+    limit,
+    offset: cursor ? Number(cursor) : 0,
+  });
+
+  res.json({ items: rows, nextCursor: rows.length === limit ? (Number(cursor ?? 0) + limit) : null });
+});
+
+// POST comment
+incidentsRouter.post("/:id/comments", async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user!.id; // assume auth middleware sets req.user
+  const { body } = req.body as { body: string };
+
+  const [row] = await db.insert(incidentComments).values({ incidentId: id, userId, body }).returning();
+  req.io.to(`incident:${id}`).emit("incident:comment:new", { incidentId: id, comment: row });
+  res.status(201).json(row);
+});
+
+// GET review summary
+incidentsRouter.get("/:id/reviews", async (req, res) => {
+  const { id } = req.params;
+  const [{ c }] = await db.select({ c: count() }).from(incidentReviews).where(eq(incidentReviews.incidentId, id));
+  res.json({ count: Number(c) });
+});
+
+// PUT toggle review
+incidentsRouter.put("/:id/reviews/toggle", async (req, res) => {
+  const { id } = req.params;
+  const userId = req.user!.id;
+
+  const existing = await db.query.incidentReviews.findFirst({
+    where: and(eq(incidentReviews.incidentId, id), eq(incidentReviews.userId, userId)),
+  });
+
+  if (existing) {
+    await db.delete(incidentReviews).where(and(eq(incidentReviews.incidentId, id), eq(incidentReviews.userId, userId)));
+  } else {
+    await db.insert(incidentReviews).values({ incidentId: id, userId });
+  }
+
+  const [{ c }] = await db.select({ c: count() }).from(incidentReviews).where(eq(incidentReviews.incidentId, id));
+  req.io.to(`incident:${id}`).emit("incident:review:count", { incidentId: id, count: Number(c) });
+  res.json({ reviewed: !existing, count: Number(c) });
+});
+
+
+Socket rooms: when a client opens an incident, join incident:${id}; leave on close.
+
+Client (React + React Query + Socket.io)
+1) Types
+// client/src/types/incident.ts
+export type IncidentComment = {
+  id: string;
+  incidentId: string;
+  userId: string;
+  body: string;
+  createdAt: string;
+};
+
+export type IncidentReviewSummary = { count: number };
+
+2) API hooks
+// client/src/features/incidents/api.ts
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { socket } from "@/lib/socket";
+
+export function useIncidentComments(incidentId: string, enabled: boolean) {
+  const key = ["incidents", incidentId, "comments"];
+  const q = useQuery({
+    queryKey: key,
+    enabled,
+    queryFn: async () => {
+      const res = await fetch(`/api/incidents/${incidentId}/comments`);
+      const data = await res.json();
+      return data.items as any[];
+    },
+  });
+
+  // live updates
+  React.useEffect(() => {
+    if (!enabled) return;
+    const room = `incident:${incidentId}`;
+    socket.emit("join", room);
+    const handler = (payload: any) => {
+      if (payload.incidentId !== incidentId) return;
+      q.refetch(); // simple: refetch on new comment
+    };
+    socket.on("incident:comment:new", handler);
+    return () => {
+      socket.emit("leave", room);
+      socket.off("incident:comment:new", handler);
+    };
+  }, [incidentId, enabled]);
+
+  return q;
+}
+
+export function useAddComment(incidentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: string) => {
+      const res = await fetch(`/api/incidents/${incidentId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body }),
+      });
+      if (!res.ok) throw new Error("Failed to add comment");
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["incidents", incidentId, "comments"] });
+    },
+  });
+}
+
+export function useReviewSummary(incidentId: string, enabled: boolean) {
+  const key = ["incidents", incidentId, "reviews"];
+  const q = useQuery({
+    queryKey: key,
+    enabled,
+    queryFn: async () => {
+      const res = await fetch(`/api/incidents/${incidentId}/reviews`);
+      return (await res.json()) as { count: number };
+    },
+  });
+
+  React.useEffect(() => {
+    if (!enabled) return;
+    const room = `incident:${incidentId}`;
+    socket.emit("join", room);
+    const handler = (p: any) => {
+      if (p.incidentId !== incidentId) return;
+      q.refetch();
+    };
+    socket.on("incident:review:count", handler);
+    return () => {
+      socket.emit("leave", room);
+      socket.off("incident:review:count", handler);
+    };
+  }, [incidentId, enabled]);
+
+  return q;
+}
+
+export function useToggleReview(incidentId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/incidents/${incidentId}/reviews/toggle`, { method: "PUT" });
+      return (await res.json()) as { reviewed: boolean; count: number };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["incidents", incidentId, "reviews"] });
+    },
+  });
+}
+
+3) Comment UI (keeps your art; collapses inside card)
+// client/src/components/IncidentComments.tsx
+import * as React from "react";
+import { useIncidentComments, useAddComment } from "@/features/incidents/api";
+import { Send, MessageSquare } from "lucide-react";
+
+export function IncidentComments({ incidentId, open }: { incidentId: string; open: boolean }) {
+  const { data: comments = [], isLoading } = useIncidentComments(incidentId, open);
+  const add = useAddComment(incidentId);
+  const [text, setText] = React.useState("");
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="
+        mt-3 rounded-xl border border-white/10 bg-zinc-900/50 p-3
+      "
+      onClick={(e) => e.stopPropagation()} // prevent card toggle while interacting
+    >
+      <div className="mb-2 flex items-center gap-2 text-xs text-zinc-400">
+        <MessageSquare className="h-4 w-4" />
+        <span>Comments</span>
+      </div>
+
+      <div className="max-h-56 space-y-3 overflow-y-auto pr-1">
+        {isLoading && <div className="text-sm text-zinc-500">Loading…</div>}
+        {!isLoading && comments.length === 0 && (
+          <div className="text-sm text-zinc-500">Be the first to comment.</div>
+        )}
+        {comments.map((c) => (
+          <div key={c.id} className="rounded-lg bg-zinc-800/60 p-2 text-sm">
+            <div className="text-zinc-200">{c.body}</div>
+            <div className="mt-1 text-[11px] text-zinc-500">{new Date(c.createdAt).toLocaleString()}</div>
+          </div>
+        ))}
+      </div>
+
+      <form
+        className="mt-3 flex items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!text.trim()) return;
+          add.mutate(text.trim(), { onSuccess: () => setText("") });
+        }}
+      >
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Write a comment…"
+          className="flex-1 rounded-lg border border-white/10 bg-zinc-950/70 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-white/20"
+        />
+        <button
+          type="submit"
+          className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-zinc-900 px-3 py-2 text-xs text-zinc-200 hover:bg-zinc-800"
+        >
+          <Send className="h-4 w-4" />
+          Send
+        </button>
+      </form>
+    </div>
+  );
+}
+
+4) Add to your existing IncidentCard (minimal, no art changes)
+
+Make the whole card toggle comments.
+
+Add a subtle review checkbox + count in the meta row (same tone as “No photos”).
+
+// client/src/components/IncidentCard.tsx (additions only)
+import { CheckSquare, Square } from "lucide-react";
+import { IncidentComments } from "./IncidentComments";
+import { useReviewSummary, useToggleReview } from "@/features/incidents/api";
+import * as React from "react";
+
+export function IncidentCard({ incident }: { incident: IncidentItem }) {
+  const [open, setOpen] = React.useState(false);
+  const { data: reviewSummary } = useReviewSummary(incident.id, open);
+  const toggleReview = useToggleReview(incident.id);
+
+  return (
+    <Card
+      onClick={() => setOpen((v) => !v)}
+      className="group relative overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/60 shadow-[0_8px_24px_-16px_rgba(0,0,0,0.6)] backdrop-blur transition hover:border-white/20 hover:shadow-[0_16px_40px_-20px_rgba(0,0,0,0.7)] cursor-pointer"
+      role="button"
+      aria-expanded={open}
+      aria-controls={`incident-comments-${incident.id}`}
+    >
+      <CardContent className="p-4 sm:p-5">
+        {/* ...your existing header, summary, photos... */}
+
+        {/* Meta row – append the review toggle (minimal visual change) */}
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-zinc-400">
+          {/* existing: state badge, time, location, photos… */}
+
+          {/* Review toggle */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleReview.mutate();
+            }}
+            className="inline-flex items-center gap-1.5 text-zinc-400 hover:text-zinc-200"
+            aria-label="Mark as checked (someone took a look)"
+            title="Mark as checked"
+          >
+            {/* We don’t know user state; we just show a filled icon when count>0 as a soft signal */}
+            {(reviewSummary?.count ?? 0) > 0 ? (
+              <CheckSquare className="h-4 w-4 text-emerald-400" />
+            ) : (
+              <Square className="h-4 w-4" />
+            )}
+            <span>{reviewSummary?.count ?? 0} checked</span>
+          </button>
+        </div>
+
+        {/* Collapsible comments */}
+        <div id={`incident-comments-${incident.id}`}>
+          <IncidentComments incidentId={incident.id} open={open} />
+        </div>
+      </CardContent>
+      {/* ...existing gradient accent... */}
+    </Card>
+  );
+}
+
+
+Single-click open/close: the card toggles open.
+
+Interacting with the comment box or review button won’t close it (we stopPropagation() inside the comments and button).
+
+The review “checkbox” is subtle and uses your existing meta styling → no new art.
+
+5) Socket join/leave (tiny)
+
+When the card opens, the comments/review hooks already join the incident room. Nothing else needed in the card.
+
+6) QA checklist
+
+Mobile tap targets ≥ 40px (buttons use padding; OK).
+
+Keyboard support: role="button" + aria-expanded; optional: add onKeyDown to toggle on Enter/Space.
+
+Perf: comments are fetched only when open.
+
+Security: server uses req.user!.id (ensure auth middleware present).
+
+Abuse control: consider profanity/length limit server-side (e.g., 1–500 chars).

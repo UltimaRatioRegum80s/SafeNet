@@ -1,0 +1,55 @@
+yes ✅ — let’s go with Option A: extract INCIDENT_TYPES into a shared file.
+
+reasons it’s the right move:
+
+both ReportPanel and ReportIncidentPage need them now.
+
+soon, Map FAB and maybe feed filters will too.
+
+single source of truth makes it trivial to adjust severity defaults or swap icons.
+
+suggested steps
+
+create file:
+client/src/features/report/incidentTypes.ts
+
+export type Severity = "low" | "medium" | "high" | "critical";
+
+export type IncidentType = {
+  id: string;
+  label: string;
+  severity: Severity;
+  iconSrc: string; // path to PNG/SVG asset
+};
+
+export const INCIDENT_TYPES: IncidentType[] = [
+  { id: "car_accident", label: "Car Accident", severity: "medium", iconSrc: "/assets/icons/car-accident.png" },
+  { id: "fire", label: "Fire Emergency", severity: "high", iconSrc: "/assets/icons/fire.png" },
+  { id: "burglary", label: "Break In / Burglary", severity: "medium", iconSrc: "/assets/icons/burglary.png" },
+  { id: "suspicious_person", label: "Suspicious Person", severity: "medium", iconSrc: "/assets/icons/suspicious.png" },
+  { id: "traffic_issue", label: "Traffic Issue", severity: "low", iconSrc: "/assets/icons/traffic.png" },
+  { id: "construction", label: "Construction Work", severity: "medium", iconSrc: "/assets/icons/construction.png" },
+  { id: "emergency_alarm", label: "Emergency Alarm", severity: "high", iconSrc: "/assets/icons/alarm.png" },
+  { id: "sos", label: "SOS / Need Help", severity: "critical", iconSrc: "/assets/icons/sos.png" },
+  { id: "violence", label: "Violence / Fight", severity: "high", iconSrc: "/assets/icons/violence.png" },
+  { id: "lost_pet", label: "Lost Pet", severity: "low", iconSrc: "/assets/icons/lost-pet.png" },
+  { id: "lost_found", label: "Lost & Found", severity: "low", iconSrc: "/assets/icons/lost-found.png" },
+  { id: "hit_run", label: "Hit & Run", severity: "high", iconSrc: "/assets/icons/hitrun.png" },
+];
+
+
+update imports:
+
+ReportPanel.tsx: import { INCIDENT_TYPES } from "@/features/report/incidentTypes";
+
+ReportIncident.tsx: same import.
+
+deep-linking implementation (use openWith() and ?type= param handling as I outlined).
+
+FAB polish: add bottom spacing + safe-area inset so it doesn’t collide with iOS bars or your other FABs.
+
+analytics hooks: drop in the track() util + fire events at panel open/close/submit.
+
+once you extract the types, the rest of Milestone 3 falls in cleanly.
+
+👉 want me to prep a short task checklist for you (Replit) so you can implement in one sweep without hunting through files?

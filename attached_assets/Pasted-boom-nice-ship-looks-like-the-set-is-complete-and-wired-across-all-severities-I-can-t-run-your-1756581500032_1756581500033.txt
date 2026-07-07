@@ -1,0 +1,61 @@
+boom—nice ship! 🔴 looks like the set is complete and wired across all severities.
+
+I can’t run your app here, but here’s a fast, reliable verification script you (or Replit) can follow to confirm the reds are perfect end-to-end:
+
+Quick Report (UI)
+
+Open the Quick Report panel.
+
+Confirm you see 6 red rounds: Fire, Gun Shots, SOS, Medical, Theft, Violence.
+
+Hover/focus each → alt text matches label; tap targets ≥44px.
+
+Map markers (create + render)
+
+For each red type, submit a minimal report:
+
+Expect the pin color to be red and the shape to be the new red pin graphic.
+
+Popover shows the correct type label and any photos.
+
+Optimistic marker shows immediately, then reconciles (no duplicate).
+
+Fallback safety
+
+Temporarily rename one red icon filename (local test) → component should fall back to blue icon without crashing (then revert).
+
+Socket + feed
+
+After submit, another client in the same neighborhood sees the red pin via incident:created.
+
+Feed/list card shows the matching red round icon.
+
+Anonymous + moderation
+
+Submit a red incident as anonymous → public users see it (unless heuristics shadow), admins see reporter; icon unaffected.
+
+If auto-shadow triggers, staff receive incident:flagged—icon still renders correctly in the mod queue.
+
+Quick code sanity (optional)
+
+If you added the dev guard, check the console for missing assets:
+
+if (import.meta.env.DEV) {
+  for (const t of INCIDENT_TYPES) {
+    for (const k of ["buttonIcon","mapIcon"] as const) {
+      if (t[k]) fetch(t[k]!, { method: "HEAD" }).then(r => {
+        if (!r.ok) console.warn("Missing icon asset:", t.id, k, t[k]);
+      }).catch(()=> console.warn("Missing icon asset:", t.id, k, t[k]));
+    }
+  }
+}
+
+Tiny polish (nice-to-have)
+
+Ensure INCIDENT_TYPES has unique IDs (no duplicates from the old blue set). If any collide, use the merge-by-id helper you added.
+
+Track usage: add trackEvent('report_start', { typeId, severity }) from the Quick Report button click to see distribution across the new set.
+
+When ready, we can relocate all assets from /attached_assets/ → /public/icons/{low|medium|high}/… by only updating paths in incidentTypes.ts.
+
+If any red icon doesn’t render as expected, tell me the type ID and the actual filename in /attached_assets/, and I’ll adjust the mapping text immediately. Otherwise, congrats—your icon system now spans 21 types with clean severity color language. 🙌

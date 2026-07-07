@@ -1,0 +1,108 @@
+Great progress! The warnings you’re seeing are purely structure/semantics—easy to fix without changing UI styles.
+
+1) Warning: “Invalid prop … supplied to React.Fragment”
+
+Cause: A parent (Router/Replit) passes props (like data-replit-metadata) to the page component, and the page returns a <> Fragment </> at the root. Fragments can only accept key/children, so React complains.
+
+Fix (keep layout/styles unchanged)
+
+client/src/pages/community/Feed.tsx — make the page root a <div> that can accept arbitrary props.
+
+// BEFORE (simplified)
+export default function CommunityFeed() {
+  return (
+    <>
+      {/* page content */}
+    </>
+  );
+}
+
+// AFTER
+import type { HTMLAttributes } from "react";
+
+export default function CommunityFeed(props: HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div {...props}>
+      {/* page content (unchanged) */}
+    </div>
+  );
+}
+
+
+If you have any other pages returning a top-level <>...</>, consider the same change; it future-proofs against router/host-injected props.
+
+2) Warning: “validateDOMNesting: <button> cannot appear as a descendant of <button>”
+
+Cause: In IncidentList.tsx an outer button wraps the whole row (to make it clickable), and inner buttons exist for actions (flag/menu/etc.). HTML forbids nesting buttons.
+
+Minimal, UI-safe fixes (choose ONE)
+Option A — Make the row a div role=button
+
+Keeps inner real buttons intact (best accessibility without DOM nesting errors).
+
+client/src/components/IncidentList.tsx (around line ~27)
+
+// BEFORE
+<button className="w-full text-left ..." onClick={openIncident}>
+  {/* inner action buttons exist here */}
+</button>
+
+// AFTER
+function onKeyActivate(e: React.KeyboardEvent) {
+  if (e.key === "Enter" || e.key === " ") {
+    e.preventDefault();
+    openIncident();
+  }
+}
+
+<div
+  role="button"
+  tabIndex={0}
+  onClick={openIncident}
+  onKeyDown={onKeyActivate}
+  className="w-full text-left ..."   // keep existing classes
+>
+  {/* inner action buttons remain <button> elements as they are */}
+</div>
+
+Option B — Keep the row a real <button>, change inner action buttons to non-buttons
+
+Only do this if you must keep the outer element as a <button>.
+
+// Replace inner <button ...> with:
+<span
+  role="button"
+  tabIndex={0}
+  onClick={(e) => { e.stopPropagation(); doAction(); }}
+  onKeyDown={(e) => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.stopPropagation(); doAction(); } }}
+  className="inline-flex items-center ..." // keep styling
+>
+  {/* icon/label */}
+</span>
+
+
+Either option removes the nesting error; Option A is typically cleaner.
+
+3) Quick verification checklist
+
+Reload Feed & Map pages.
+
+Console:
+
+Fragment warning gone.
+
+validateDOMNesting warning gone.
+
+Functionality:
+
+Rows still open on click / Enter / Space.
+
+Inner actions (flag/menu/etc.) still work and don’t trigger the row click.
+
+Heads-up for consistency
+
+If any other page component uses a root Fragment, update it to <div {...props}> as above.
+
+If you have another list component using a “clickable row” pattern, ensure it doesn’t nest buttons.
+
+If you paste the ~20 lines around IncidentList.tsx:27, I’ll tailor the exact replacement to your component structure and shadcn/ui usage.

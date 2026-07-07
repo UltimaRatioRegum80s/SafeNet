@@ -1,0 +1,155 @@
+Thought for 11s
+
+🔥 nice work, Replit — Milestone 2 looks shipped! I ran a mental pass on edge cases + polish so we don’t get papercuts later. Here’s tight feedback and a few drop-in tweaks.
+
+Quick validation checklist
+
+Panel opens from Quick Report and Map FAB (same UI) ✅
+
+GPS default captured; pin refine handshake fires ✅
+
+No accuracy badge visible ✅
+
+Max 2 photos enforced ✅ (client)
+
+Anon OFF by default, toggle honored ✅
+
+30s cooldown shows countdown & blocks submit ✅
+
+Targeted improvements (small, high-impact)
+1) Persist cooldown across tab refreshes (prevents bypass)
+// in ReportPanel.tsx
+const COOLDOWN_KEY = "nn:lastIncidentSubmitAt";
+const [lastSubmitAt, setLastSubmitAt] = useState<number | null>(() => {
+  const v = localStorage.getItem(COOLDOWN_KEY);
+  return v ? Number(v) : null;
+});
+
+onSuccess: () => {
+  const ts = Date.now();
+  setLastSubmitAt(ts);
+  localStorage.setItem(COOLDOWN_KEY, String(ts));
+  // ...
+}
+
+2) Require a location (or clearly allow no-location)
+
+Since accuracy is a key metric, consider requiring coords before enabling submit. If you want to allow skipping, keep the button enabled but show a subtle nudge.
+
+const hasCoords = !!chosenCoords?.lat && !!chosenCoords?.lng;
+const submitDisabled = mutation.isPending || cooldownActive || !hasCoords;
+
+<Button onClick={handleSubmit} disabled={submitDisabled}>
+  {mutation.isPending ? "Submitting…" : cooldownActive ? `Wait ${secondsLeft}s` : hasCoords ? "Submit" : "Set location"}
+</Button>
+
+
+Add a small helper text when location is missing:
+
+{!hasCoords && (
+  <div className="text-xs text-amber-400">
+    Tip: tap “Drop a pin” to set an exact spot.
+  </div>
+)}
+
+3) Robust refine handshake (return path)
+
+Right now we fire nn:begin-location-pick. Let’s also listen for a nn:location-picked with {lat,lng} so the panel updates even if it’s reopened later:
+
+// ReportPanel.tsx
+useEffect(() => {
+  const handler = (e: Event) => {
+    const detail = (e as CustomEvent<{lat:number;lng:number}>).detail;
+    if (detail && setRefinedCoords) setRefinedCoords(detail);
+  };
+  window.addEventListener("nn:location-picked", handler as EventListener);
+  return () => window.removeEventListener("nn:location-picked", handler as EventListener);
+}, [setRefinedCoords]);
+
+
+And in your Map page, when the user confirms the pin:
+
+window.dispatchEvent(new CustomEvent("nn:location-picked", { detail: { lat, lng } }));
+
+4) Close panel on route change (prevents “dangling overlay”)
+import { useLocation } from "react-router-dom";
+const { close } = useReportPanel();
+const { pathname } = useLocation();
+useEffect(() => { close(); }, [pathname, close]);
+
+5) Stronger type for ImageUpload (max 2, always slice)
+
+Even if the component enforces maxFiles, keep a belt-and-suspenders slice:
+
+<ImageUpload
+  value={photos}
+  onChange={(files: string[]) => setPhotos(files.slice(0, 2))}
+  accept="image/*"
+  capture="environment"
+  maxFiles={2}
+/>
+
+6) Optimistic update (map/feed feel instant)
+
+Use a tiny incidents store so UI updates immediately; socket confirm will reconcile.
+
+// client/src/store/incidentsStore.ts
+import { create } from "zustand";
+type Incident = { id: string; type: string; status: "pending"; lat?:number; lng?:number; createdAt:string; /* ... */ };
+export const useIncidents = create<{items:Incident[]; add:(i:Incident)=>void; reconcile:(id:string, i:Incident)=>void}>((set) => ({
+  items: [],
+  add: (i) => set((s) => ({ items: [i, ...s.items] })),
+  reconcile: (id, next) => set((s) => ({ items: s.items.map(x => x.id === id ? next : x) })),
+}));
+
+
+In ReportPanel submit:
+
+const tempId = `temp-${crypto.randomUUID()}`;
+useIncidents.getState().add({
+  id: tempId, type: selected.id, status: "pending", lat: chosenCoords?.lat, lng: chosenCoords?.lng, createdAt: new Date().toISOString(),
+});
+
+
+Socket listener (Map/Feed bootstrap):
+
+socket.on("incident:created", (incident) => {
+  const { reconcile, add } = useIncidents.getState();
+  // replace temp if matches nearby fields; else just add
+  const temp = useIncidents.getState().items.find(i => i.id.startsWith("temp-") && i.type === incident.type);
+  temp ? reconcile(temp.id, incident) : add(incident);
+});
+
+7) Geolocation denied UX
+
+Add a subtle callout so users know what to do when GPS is blocked.
+
+{!hasPermission && (
+  <div className="text-xs text-slate-300/80">
+    Location is off. You can still <button className="underline" onClick={beginRefineOnMap}>drop a pin</button>.
+  </div>
+)}
+
+8) EXIF privacy (server)
+
+If you store original photos, consider stripping EXIF GPS on upload to avoid leaking private metadata later. (We can wire sharp/exiftool in Milestone 5 when we revisit media.)
+
+9) Admin visibility is honored
+
+You already hide userId in broadcasts when anonymous — great. Ensure API GETs also alias state → status and strip userId for non-admins consistently (feed/map queries).
+
+// toApiIncident(row, isAdmin) — use everywhere you serialize incidents
+
+Mini QA sweep (Milestone 2)
+
+Refresh page within 30s → submit remains locked (cooldown persisted).
+
+Start report with GPS denied → can still “Drop a pin” and submit.
+
+Submit → optimistic marker drops, socket reconciling works.
+
+Navigate away while panel open → panel closes.
+
+Uploads >2 → only first 2 included.
+
+If you’re happy, I’ll prep Milestone 3 (entry points fully consistent + tiny UX flourishes) or jump to Milestone 4 (map refine integration details) — your call.

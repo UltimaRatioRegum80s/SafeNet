@@ -1,0 +1,198 @@
+Awesome—thanks, Replit. Let’s implement the single source of truth using the Feed’s React Query cache (['/api/incidents']) and wire both the panel and markers to it. No UI or style changes—just data plumbing.
+
+Plan (zero-disruption)
+
+Add a tiny hook useFeedIncidents() that:
+
+Reads ['/api/incidents'] from React Query cache
+
+Normalizes { items: [...] } vs [...]
+
+Subscribes to cache updates so it stays in sync
+
+(Optional safety) If cache is empty (user opened Map first), it prefetches once using the same endpoint
+
+Use this hook:
+
+In the Map page to feed markers
+
+In the “Recent Incidents” panel to render the list
+
+1) Normalizer + shared hook
+// src/lib/incidentsShape.ts
+export type Incident = {
+  id: string;
+  title: string;
+  createdAt: string;
+  lat: number;
+  lng: number;
+  // ... any other fields you display
+};
+
+type Paginated<T> = { items: T[]; total?: number; nextCursor?: string };
+
+export function itemsFromAnyPayload(payload: any): Incident[] {
+  if (Array.isArray(payload)) return payload as Incident[];
+  if (payload && Array.isArray((payload as Paginated<Incident>).items)) {
+    return (payload as Paginated<Incident>).items;
+  }
+  return [];
+}
+
+// src/features/incidents/useFeedIncidents.ts
+import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Incident, itemsFromAnyPayload } from "@/lib/incidentsShape";
+
+const FEED_KEY = ["/api/incidents"]; // ← must match Feed page
+
+export function useFeedIncidents() {
+  const qc = useQueryClient();
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+
+  // 1) read current cache
+  useEffect(() => {
+    const data = qc.getQueryData(FEED_KEY);
+    const items = itemsFromAnyPayload(data);
+    setIncidents(items);
+  }, [qc]);
+
+  // 2) subscribe to cache updates
+  useEffect(() => {
+    const unsub = qc.getQueryCache().subscribe((event) => {
+      const q = event?.query;
+      if (!q) return;
+      // string compare for stable key
+      if (q.queryKey.toString() === FEED_KEY.toString()) {
+        setIncidents(itemsFromAnyPayload(q.state.data));
+      }
+    });
+    return () => { unsub?.(); };
+  }, [qc]);
+
+  // 3) safety: prefetch once if cache empty and we’re on the Map first
+  useEffect(() => {
+    if (incidents.length > 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/incidents?limit=50");
+        const payload = await res.json();
+        const items = itemsFromAnyPayload(payload);
+        if (!cancelled) {
+          // populate both our state and the Feed cache so future visits reuse it
+          setIncidents(items);
+          qc.setQueryData(FEED_KEY, payload);
+        }
+      } catch {
+        /* silent */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [incidents.length, qc]);
+
+  // derived helpers if needed later
+  const count = incidents.length;
+  return useMemo(() => ({ incidents, count }), [incidents, count]);
+}
+
+2) Use it in the Map page (markers + panel)
+// src/pages/community/Map.tsx
+import { useEffect, useRef } from "react";
+import { MapContainer } from "react-leaflet";
+import L from "leaflet";
+import { useFeedIncidents } from "@/features/incidents/useFeedIncidents";
+import type { Incident } from "@/lib/incidentsShape";
+import RecentIncidentsPanel from "@/features/map/RecentIncidentsPanel";
+
+const markerBag = new Map<string, L.Marker>();
+
+export default function CommunityMap() {
+  const mapRef = useRef<L.Map | null>(null);
+  const { incidents } = useFeedIncidents();
+
+  // add/upsert markers whenever feed incidents change AND map exists
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || incidents.length === 0) return;
+    upsertMarkers(map, incidents);
+  }, [incidents]);
+
+  return (
+    <div className="grid grid-cols-12 gap-4">
+      <div className="col-span-7">
+        <MapContainer
+          whenCreated={(m) => (mapRef.current = m)}
+          // keep your existing props (center, zoom, className, etc.)
+        >
+          {/* layers/controls unchanged */}
+        </MapContainer>
+      </div>
+
+      <div className="col-span-5">
+        {/* Panel reads from the same hook (or accept incidents as prop) */}
+        <RecentIncidentsPanel />
+      </div>
+    </div>
+  );
+}
+
+function upsertMarkers(map: L.Map, items: Incident[]) {
+  for (const it of items) {
+    if (markerBag.has(it.id)) continue;
+    const marker = L.marker([it.lat, it.lng]); // replace with your existing custom icon/cluster if any
+    marker.addTo(map);
+    markerBag.set(it.id, marker);
+  }
+}
+
+3) Panel component—read from the same hook (no layout change)
+// src/features/map/RecentIncidentsPanel.tsx
+import { useFeedIncidents } from "@/features/incidents/useFeedIncidents";
+
+export default function RecentIncidentsPanel() {
+  const { incidents } = useFeedIncidents();
+
+  if (!incidents?.length) {
+    return (
+      <section className="card">
+        <div className="card-body">No incidents.</div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="card">
+      <div className="card-body space-y-2">
+        {incidents.slice(0, 20).map((i) => (
+          <div key={i.id} className="rounded-xl bg-neutral-800 p-3">
+            <div className="font-medium">{i.title}</div>
+            <div className="text-xs opacity-70">
+              {new Date(i.createdAt).toLocaleTimeString()}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+Why this will work (and is safe)
+
+Uses the exact Feed key ['/api/incidents'] → same cache, same data.
+
+No UI/style changes; only data wiring.
+
+If users land on Map first, the prefetch fills cache once and keeps it consistent.
+
+Markers & panel now stay in lockstep with the Feed.
+
+Replit → quick checks
+
+Confirm Feed’s query key is exactly ['/api/incidents'].
+
+Panel previously had its own fetch—remove it to avoid double sources.
+
+Your custom icon/cluster logic: replace the simple L.marker line with your existing implementation.
+
+@RDM: this uses the Feed’s data as requested—simple, robust, and minimal.

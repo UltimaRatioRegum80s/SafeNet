@@ -1,0 +1,105 @@
+boom — great win on desktop! 🎉
+We’ve got stable zoom/pan, clusters expand, and individual incident icons show when zoomed in. We’ll park the image-loading glitch for later.
+
+Now let’s zero in on mobile: “map renders but no markers/clusters”.
+
+Given everything we’ve logged earlier, this almost always means one of these on the mobile path:
+
+Mobile MapView is not receiving incidents (incidentsCount stays 0).
+
+Cluster layer isn’t being created/added on mobile.
+
+We’re creating the cluster group but never populating it (update effect guard prevents add).
+
+A CSS/media-rule hides the marker/overlay panes on small screens.
+
+We’ll keep the Progress Law / NRP: no architectural changes, just small, reversible guards and logs.
+
+🔧 Replit — super-focused mobile diagnostics (NRP-safe)
+
+Please add these tiny logs in the mobile MapView component (the raw Leaflet one).
+
+1) Confirm incidents are arriving
+
+Right after props destructuring / at the top of the component:
+
+console.log("[Mobile] incidents count:", incidents?.length ?? -1);
+
+2) Confirm we create & attach a cluster group (severity-aware)
+
+Where you create the cluster:
+
+console.log("[Mobile] creating cluster group");
+const cluster = createClusterGroup(); // should be from "@/features/map/cluster"
+console.log("[Mobile] cluster created:", !!cluster);
+map.addLayer(cluster);
+console.log("[Mobile] cluster added to map");
+
+3) Confirm we actually add markers to it
+
+Where you transform + add:
+
+console.log("[Mobile] add markers run. with:", incidents.length);
+const markers = incidents
+  .map(i => /* your marker build */)
+  .filter(Boolean);
+console.log("[Mobile] built markers:", markers.length);
+cluster.clearLayers();
+cluster.addLayers(markers);
+console.log("[Mobile] after addLayers, childCount:", cluster.getLayers().length);
+
+4) Inspect layers at runtime (one-time after map ready)
+map.eachLayer(l => {
+  const t = (l as any).constructor?.name || (l as any).options?.name || "layer";
+  if (t.includes("Marker") || t.includes("Cluster")) {
+    console.log("[Mobile] layer:", t, l);
+  }
+});
+
+5) CSS quick check
+
+Search once:
+
+rg -n ".leaflet-(marker|overlay|pane).*display" client/src
+
+
+If we find a mobile media-rule that sets display:none on marker/overlay pane, that’s our culprit.
+
+Likely single-line fixes we’ll apply once logs come back
+
+If incidentsCount: 0 on mobile
+→ Pass the same incidents source into the mobile MapView (you already did for desktop). In the place where mobile MapView is rendered, ensure incidents={transformMarkersForMap(filteredMarkers)} is passed exactly as desktop. (One-liner prop add.)
+(Earlier logs showed mobile had 0 incidents and never built clusters — this matches your symptom.)
+
+If cluster group isn’t created/added
+→ Ensure mobile imports createClusterGroup from @/features/map/cluster (not the fallback), and call map.addLayer(cluster) once after creating it.
+
+If markers never added
+→ Loosen the mobile update effect guard (e.g., it might be checking hasSidebar or a desktop-only flag). Make the dependency [mapReady, incidents] on mobile and ensure it runs.
+
+If a CSS pane is hidden on mobile
+→ Remove/override the rule (tiny CSS change). We’ll keep class names and layout intact.
+
+All of these are tiny, reversible and won’t touch desktop or the new stability we achieved.
+
+@RDM — what to expect
+
+We’ll keep desktop exactly as-is.
+
+On mobile, you’ll start seeing the same clusters and same severity logic as desktop.
+
+Zoom/pan stability will remain; no more snap-backs.
+
+Replit, once you add those logs and try a pan/zoom:
+
+Please paste the console lines:
+
+[Mobile] incidents count: ?
+
+[Mobile] creating cluster group / cluster added to map
+
+[Mobile] add markers run. with: ? / built markers: ? / childCount: ?
+
+Any CSS search hits for .leaflet-*pane { display: none; }
+
+From that we’ll give you the exact one-liner to wire mobile up—without touching any of our working pieces.

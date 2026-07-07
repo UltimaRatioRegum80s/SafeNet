@@ -1,0 +1,282 @@
+awesome — thanks, Replit! based on your report, here’s a tight plan + drop-in code to standardize headers with Wouter while keeping the Map exception intact.
+
+Implementation plan (incremental, low-risk)
+
+Add shared layout + headers
+
+TopBar (default compact header)
+
+TopBarMap (transparent overlay variant)
+
+AppLayout (wraps all non-map pages; accepts per-route header config)
+
+Wire Wouter with the layout
+
+Wrap routes in AppLayout except /map
+
+Pass title, actions, and optional secondary content per route
+
+Migrate pages gradually
+
+Remove per-page header markup from Dashboard.tsx, Chat.tsx, Report…tsx
+
+Keep page content only; header comes from AppLayout
+
+Preserve Map page
+
+Leave client/src/pages/community/Map.tsx as is for now, or swap its top bar to TopBarMap when convenient.
+
+1) TopBar.tsx
+
+client/src/components/layout/TopBar.tsx
+
+import * as React from "react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import {
+  Share2, Search, Bell, MoreHorizontal, Home,
+} from "lucide-react";
+
+type Action = { key: string; aria: string; onClick?: () => void; icon?: React.ReactNode };
+
+export interface TopBarProps {
+  title: string;
+  subtitle?: string;
+  actions?: Action[];               // optional; defaults provided
+  onMenu?: () => void;
+  secondary?: React.ReactNode;      // tabs/chips row
+  className?: string;
+}
+
+export function TopBar({
+  title,
+  subtitle,
+  actions,
+  onMenu,
+  secondary,
+  className,
+}: TopBarProps) {
+  const defaultActions: Action[] = [
+    { key: "share", aria: "Share", icon: <Share2 className="h-5 w-5" /> },
+    { key: "search", aria: "Search", icon: <Search className="h-5 w-5" /> },
+    { key: "bell", aria: "Notifications", icon: <Bell className="h-5 w-5" /> },
+    { key: "more", aria: "More", onClick: onMenu, icon: <MoreHorizontal className="h-5 w-5" /> },
+  ];
+
+  const items = actions ?? defaultActions;
+
+  return (
+    <header
+      role="banner"
+      className={cn(
+        "sticky top-0 z-40 border-b bg-background/70 backdrop-blur supports-[backdrop-filter]:bg-background/60",
+        className
+      )}
+    >
+      <div className="mx-auto w-full max-w-screen-md px-3 md:px-4 h-14 md:h-16 flex items-center justify-between">
+        <div className="flex items-center gap-2 min-w-0">
+          <a href="/" aria-label="Home" className="shrink-0">
+            <Home className="h-5 w-5 opacity-80" />
+          </a>
+          <div className="min-w-0">
+            <div className="text-base font-semibold tracking-[-0.01em] truncate">
+              {title}
+            </div>
+            {subtitle ? (
+              <div className="hidden md:block text-xs text-muted-foreground truncate">
+                {subtitle}
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          {items.map((a) => (
+            <Button
+              key={a.key}
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9"
+              aria-label={a.aria}
+              onClick={a.onClick}
+            >
+              {a.icon}
+            </Button>
+          ))}
+        </div>
+      </div>
+
+      {secondary ? (
+        <div className="h-11 border-t bg-background/70 backdrop-blur px-2 overflow-x-auto no-scrollbar">
+          <div className="mx-auto max-w-screen-md h-full flex items-center gap-2">
+            {secondary}
+          </div>
+        </div>
+      ) : null}
+    </header>
+  );
+}
+
+2) TopBarMap.tsx
+
+client/src/components/layout/TopBarMap.tsx
+
+import * as React from "react";
+import { cn } from "@/lib/utils";
+
+interface TopBarMapProps {
+  children?: React.ReactNode;   // search, filters, layers
+  className?: string;
+}
+
+export function TopBarMap({ children, className }: TopBarMapProps) {
+  return (
+    <div
+      className={cn(
+        "pointer-events-none fixed inset-x-0 top-0 z-40 px-3 md:px-4",
+        className
+      )}
+    >
+      <div className="mx-auto max-w-screen-md pt-3 flex gap-2 justify-between">
+        <div className="pointer-events-auto flex-1">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+3) AppLayout.tsx
+
+client/src/components/layout/AppLayout.tsx
+
+import * as React from "react";
+import { TopBar, TopBarProps } from "./TopBar";
+
+interface AppLayoutProps {
+  header: Pick<TopBarProps, "title" | "subtitle" | "actions" | "secondary">;
+  children: React.ReactNode;
+  footer?: React.ReactNode; // e.g., MobileFloatingTopMenu
+  className?: string;
+}
+
+export default function AppLayout({ header, children, footer }: AppLayoutProps) {
+  return (
+    <div className="min-h-dvh bg-background text-foreground">
+      <TopBar {...header} />
+      <main className="mx-auto w-full max-w-screen-md px-3 md:px-4 py-3">
+        {children}
+      </main>
+      {footer ? <div className="sticky bottom-0 z-30">{footer}</div> : null}
+    </div>
+  );
+}
+
+4) Wire it into Wouter
+
+Update your root routing where you define <Route> components.
+
+client/src/App.tsx (excerpt)
+
+import { Route, Switch } from "wouter";
+import AppLayout from "@/components/layout/AppLayout";
+import { MobileFloatingTopMenu } from "@/components/MobileFloatingTopMenu"; // existing
+import Dashboard from "@/pages/Dashboard";
+import Chat from "@/pages/Chat";
+import ReportIncident from "@/pages/report/ReportIncident";
+import Map from "@/pages/community/Map";
+
+export default function App() {
+  return (
+    <Switch>
+      {/* Map keeps its own overlay header */}
+      <Route path="/map" component={Map} />
+
+      <Route path="/chat">
+        <AppLayout
+          header={{ title: "Chat", subtitle: "Neighborhood updates" }}
+          footer={<MobileFloatingTopMenu />}
+        >
+          <Chat />
+        </AppLayout>
+      </Route>
+
+      <Route path="/report">
+        <AppLayout
+          header={{
+            title: "Report Incident",
+            secondary: <IconTabs />, // optional; see below
+          }}
+          footer={<MobileFloatingTopMenu />}
+        >
+          <ReportIncident />
+        </AppLayout>
+      </Route>
+
+      <Route path="/">
+        <AppLayout
+          header={{ title: "Dashboard", subtitle: "Community Management" }}
+          footer={<MobileFloatingTopMenu />}
+        >
+          <Dashboard />
+        </AppLayout>
+      </Route>
+    </Switch>
+  );
+}
+
+
+Optional icon tabs used under the header
+
+import { Camera, Home, MapPin, MessageSquare, BarChart3 } from "lucide-react";
+function IconTabs() {
+  const cls = "flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/40 hover:bg-muted text-sm";
+  return (
+    <nav className="flex items-center gap-2">
+      <a href="/" className={cls}><Home className="h-4 w-4" />Home</a>
+      <a href="/report" className={cls}><Camera className="h-4 w-4" />Report</a>
+      <a href="/map" className={cls}><MapPin className="h-4 w-4" />Map</a>
+      <a href="/chat" className={cls}><MessageSquare className="h-4 w-4" />Chat</a>
+      <a href="/analytics" className={cls}><BarChart3 className="h-4 w-4" />Analytics</a>
+    </nav>
+  );
+}
+
+5) Page migration examples (tiny diffs)
+
+Before (Dashboard.tsx): page renders its own header JSX.
+After: keep content only
+
+// client/src/pages/Dashboard.tsx
+export default function Dashboard() {
+  return (
+    <section className="py-8">
+      <h2 className="sr-only">Dashboard</h2>
+      <div className="text-center text-muted-foreground">
+        Dashboard Coming Soon
+      </div>
+    </section>
+  );
+}
+
+
+Chat.tsx and ReportIncident.tsx: remove their top areas; content only.
+No other changes required.
+
+6) Notes about existing pieces
+
+MobileFloatingTopMenu: already used on some pages — we slot it into AppLayout.footer so you don’t have to duplicate it per page.
+
+Theme switcher: if you have a dedicated theme button component, pass it through header.actions to replace the default actions.
+
+Map page: later, we can replace its custom overlay with TopBarMap for consistency, but there’s no urgency.
+
+7) Acceptance checklist
+
+ All non-map pages show a compact 56–64px header with identical spacing/typography.
+
+ No duplicated header markup lives inside pages.
+
+ Secondary bar appears only where passed (e.g., Report).
+
+ Map retains full-viewport behavior.
+
+if you’re good with this, I’ll also prep a quick codemod checklist (search/replace snippets) to strip old headers from Dashboard.tsx, Chat.tsx, and the Report page so migration is 10–15 minutes tops.

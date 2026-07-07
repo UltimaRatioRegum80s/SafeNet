@@ -1,0 +1,136 @@
+# NaborNet Standardized Header (Wireframe + Spec)
+
+> Goal: a compact, consistent header used across all screens **except Map** (which has its own variant). Targets mobile-first PWA with Tailwind + shadcn/ui.
+
+---
+
+## 1) Visual Wireframe (Mobile, \~56–64px tall)
+
+```
+┌─────────────────────────────────────────────┐
+│ ◱  NaborNet        Report Incident      ⋯   │
+│ ▨  (logo)          (page title)        [≡] │
+└─────────────────────────────────────────────┘
+```
+
+* Left: **Logo** (tap → Home). Optional app name below 480px is hidden.
+* Center: **Page Title** (single line, ellipsized).
+* Right: **Actions Cluster** (icon buttons): Share, Search, Bell, Theme, Menu (overflow). Show 2–3 most relevant on mobile; remainder in overflow.
+
+### Secondary Bar (optional, shown on some pages)
+
+```
+┌─────────────────────────────────────────────┐
+│  Home  Camera  Location  Chat  Analytics    │  ← icon tabs / filter chips
+└─────────────────────────────────────────────┘
+```
+
+* Scrollable horizontal icons or tabs; 40–44px tall. Hidden when not needed.
+
+### Content Area starts immediately below
+
+* Use safe-area insets; maintain 8–12px top margin for visual breathing room if needed.
+
+---
+
+## 2) Map Page Variant (exception)
+
+```
+┌─────────────────────────────────────────────┐
+│ ◱  Map                                     │
+│ [Search…]     [Filter]     [Layers]  [≡]   │  ← condensed controls overlay
+└─────────────────────────────────────────────┘
+```
+
+* Transparent/overlay header to maximize map viewport.
+* Sticky controls panel; auto-hide on scroll.
+
+---
+
+## 3) Component API
+
+**`<TopBar />`** (used everywhere)
+
+```ts
+interface TopBarProps {
+  title: string;                 // required
+  subtitle?: string;             // optional small text under title on >= md
+  actions?: React.ReactNode;     // right-side custom actions
+  onMenu?: () => void;           // overflow menu handler
+  showSecondary?: boolean;       // toggles secondary bar
+  secondary?: React.ReactNode;   // content of secondary bar (tabs, chips, etc.)
+  className?: string;
+}
+```
+
+**`<TopBarMap />`** (map-only variant)
+
+```ts
+interface TopBarMapProps {
+  onMenu?: () => void;
+  children?: React.ReactNode;    // search, filters, layer toggles
+  className?: string;
+}
+```
+
+---
+
+## 4) Layout Usage
+
+```
+<AppLayout>
+  <TopBar title="Report Incident" showSecondary secondary={<IconTabs/>} />
+  <main>…page content…</main>
+</AppLayout>
+```
+
+* Map route uses `<TopBarMap>`.
+
+---
+
+## 5) Tailwind/shadcn Notes (compact, consistent)
+
+* Height: **h-14** (56px) on mobile, **md\:h-16** if needed.
+* Container: `sticky top-0 z-40 backdrop-blur supports-[backdrop-filter]:bg-background/70 border-b`.
+* Inner: `mx-auto w-full max-w-screen-md px-3 md:px-4`.
+* Title: `text-base font-semibold tracking-[-0.01em] truncate`.
+* Actions: `flex items-center gap-1.5` with `Button` variant=`ghost` size=`icon`.
+* Secondary bar: `h-11 border-b bg-background/70 overflow-x-auto no-scrollbar`.
+
+---
+
+## 6) Icon Set
+
+* Home, Camera, MapPin, MessageSquare, BarChart, Share2, Search, Bell, Moon/ Sun, MoreHorizontal (lucide-react).
+
+---
+
+## 7) States & Behavior
+
+* **Scroll**: header remains sticky; optional subtle shadow on scroll.
+* **Density**: reduce icon count on `<sm>`; move extras to overflow menu.
+* **Accessibility**: landmark `role="banner"`, icons have `aria-label`; focus-visible rings.
+* **Theming**: dark by default; respects system theme.
+
+---
+
+## 8) Success Criteria
+
+* Single `<TopBar>` used by Report, Dashboard, Chat, etc.
+* Visual parity across pages (spacing, font sizes, icon sizes).
+* Map page uses `<TopBarMap>` overlay to preserve viewport.
+
+---
+
+## 9) Quick CSS Tokens (can adapt to theme)
+
+* Header height: `--nn-header-h: 56px` (mobile), `--nn-header-h-md: 64px`.
+* Secondary height: `--nn-subbar-h: 44px`.
+
+---
+
+## 10) Next Steps
+
+1. Replit confirms existing layout/wrapper and whether a header component already exists.
+2. Implement `<TopBar>` and `<TopBarMap>`; migrate pages to use layout wrapper.
+3. Remove legacy per-page header markup.

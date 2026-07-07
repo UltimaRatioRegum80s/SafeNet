@@ -1,0 +1,116 @@
+@Replit — next steps (flag ON only, Progress Law safe)
+
+We now expose window._map and window._cluster behind the flag. Please:
+
+1) Run this quick check in the browser Console (on the map with ?NN_FIX_MOBILE_MARKERS=1)
+({
+  hasMap: !!window._map,
+  hasCluster: !!window._cluster,
+  clusterOnMap: window._map && window._cluster ? window._map.hasLayer(window._cluster) : false,
+  clusterLayerCount: window._cluster ? window._cluster.getLayers().length : 0
+})
+
+2) Based on the output, do the smallest gated fix:
+Case A — hasMap:true, hasCluster:true, clusterOnMap:false
+
+The cluster exists but isn’t attached.
+
+Add (idempotent) attach behind the flag where the map is ready:
+
+if (Flags.fixMobileMarkers && mapRef.current && clusterRef.current && !mapRef.current.hasLayer(clusterRef.current)) {
+  mapRef.current.addLayer(clusterRef.current);
+}
+
+Case B — clusterOnMap:true, clusterLayerCount:0 (but incidents = 50)
+
+We’re adding markers to a different cluster instance or skipping add.
+
+Ensure single instance and same ref is used for add + attach:
+
+// create once
+if (!clusterRef.current) clusterRef.current = L.markerClusterGroup(/* opts */);
+
+// attach once (keep the Case A snippet)
+if (Flags.fixMobileMarkers && mapRef.current && !mapRef.current.hasLayer(clusterRef.current)) {
+  mapRef.current.addLayer(clusterRef.current);
+}
+
+// when incidents change
+clusterRef.current.clearLayers();
+visibleIncidents.forEach(inc => clusterRef.current!.addLayer(createMarker(inc)));
+
+
+Also log once to confirm we’re adding to the same object:
+
+console.log('[NN] add to clusterRef?', clusterRef.current === (window as any)._cluster);
+
+Case C — clusterOnMap:true, clusterLayerCount>0, but nothing visible
+
+Likely missing MarkerCluster CSS in the PWA bundle.
+
+Add these imports in the actual entry that loads for the map route:
+
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
+
+
+(If already present, verify they’re in the mobile chunk; as a proof, inject at runtime to test:)
+
+['MarkerCluster.css','MarkerCluster.Default.css'].forEach(n=>{
+  const l=document.createElement('link');
+  l.rel='stylesheet';
+  l.href=`https://unpkg.com/leaflet.markercluster/dist/${n}`;
+  document.head.appendChild(l);
+});
+
+
+If clusters appear after this injection, the fix is confirmed—keep the static imports.
+
+Case D — Still invisible after Case C
+
+Rare CSS layering issue.
+
+Ship a flag-gated CSS override:
+
+/* only when NN_FIX_MOBILE_MARKERS=1 (import this small file when flag is on) */
+.leaflet-marker-pane{ z-index:650 !important; display:block !important; opacity:1 !important; }
+.leaflet-popup-pane { z-index:700 !important; }
+
+3) Visual probes (confirm rendering)
+
+Run in Console with flag ON:
+
+// Direct marker (magenta) — bypasses cluster, should be visible
+(() => {
+  const m = window._map; if(!m) return;
+  const icon=L.divIcon({className:'nn-divicon-wrapper',
+    html:'<div style="width:18px;height:18px;border-radius:9999px;background:#ff00ff;border:2px solid #fff"></div>',
+    iconSize:[18,18], iconAnchor:[9,9]});
+  L.marker(m.getCenter(),{icon,title:'direct-probe'}).addTo(m);
+})();
+
+// Clustered marker (green) — should increase cluster count or appear
+(() => {
+  const m=window._map, cl=window._cluster; if(!m||!cl) return;
+  const icon=L.divIcon({className:'nn-divicon-wrapper',
+    html:'<div style="width:18px;height:18px;border-radius:9999px;background:#10b981;border:2px solid #065f46"></div>',
+    iconSize:[18,18], iconAnchor:[9,9]});
+  cl.addLayer(L.marker(m.getCenter(),{icon,title:'cluster-probe'}));
+  console.log('cluster count:', cl.getLayers().length);
+})();
+
+4) Report back
+
+The values from step 1,
+
+Whether the direct/cluster probes are visible,
+
+Whether CSS injection made clusters appear.
+
+Guardrails
+
+All changes remain behind NN_FIX_MOBILE_MARKERS; desktop path remains untouched.
+
+Instant rollback: ?NN_FIX_MOBILE_MARKERS=0 or localStorage.NN_FIX_MOBILE_MARKERS='0'.
+
+TL;DR for @RDM: just send the above block to Replit. They’ll run the quick check and apply the one-liner that matches the result. This keeps desktop perfect while unblocking mobile.

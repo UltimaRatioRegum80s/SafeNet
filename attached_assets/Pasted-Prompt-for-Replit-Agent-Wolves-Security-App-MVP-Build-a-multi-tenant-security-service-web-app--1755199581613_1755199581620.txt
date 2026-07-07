@@ -1,0 +1,197 @@
+Prompt for Replit Agent — Wolves Security App (MVP)
+
+Build a multi-tenant security service web app (PWA) called Wolves Security for guard companies and estates. Use the stack and scope below. Generate a working repo with clean, commented code, seed scripts, and example data so I can preview everything immediately.
+
+Stack & Project Setup
+
+Frontend: React + Vite + TypeScript, Tailwind CSS, shadcn/ui, React Router, Zustand (state).
+
+Backend: Firebase (Auth, Firestore, Cloud Functions, Storage, FCM).
+
+Maps: MapLibre (open-source) with fallback to Google Maps if an API key is present.
+
+App type: Installable PWA with offline caching for key screens.
+
+Structure: Monorepo or two folders: apps/web and functions.
+
+Add .env support and a sample .env.example.
+
+Auth, Tenancy & Roles (must-have)
+
+Auth: email/password + magic link (passwordless).
+
+Roles: guard, supervisor, client, admin (RBAC).
+
+Multi-tenant isolation: every document includes tenantId. Users have a single tenantId claim.
+
+After sign-in, fetch custom claims and route users to the correct area.
+
+Admin-only “Tenant bootstrap” page to create tenants and invite users (by email).
+
+Firestore Data Model (collections)
+
+tenants: { id, name, billingPlan, createdAt }
+
+users: { uid, tenantId, roles: string[], displayName, phone, status }
+
+sites: { id, tenantId, name, geofence, active }
+
+patrolPoints: { id, siteId, label, location{lat,lng}, radiusM, qrCode, nfcTagId, order }
+
+routes: { id, siteId, name, pointIds: string[] }
+
+shifts: { id, siteId, guardId, startAt, endAt, status }
+
+checkins: { id, siteId, patrolPointId, guardId, timestamp, location, batteryPct, photoUrl, method }
+
+incidents: { id, siteId, createdBy, createdAt, category, severity, description, photos: string[], status, assignedTo, resolvedAt }
+
+alerts: { id, siteId, guardId, type: "SOS", createdAt, location, handledBy, handledAt }
+
+Include audit fields on all writes: createdBy, updatedBy, createdAt, updatedAt.
+
+Firestore Security (minimum rules)
+
+Only authenticated users.
+
+Enforce request.auth.token.tenantId == resource.data.tenantId.
+
+Writes allowed if the user’s role is appropriate:
+
+guards: create checkins/incidents they authored.
+
+supervisors/admins: CRUD on sites/routes/patrolPoints/shifts/incidents/alerts within their tenant.
+
+clients: read-only to reports/incidents for their tenant.
+
+MVP Features (build these now)
+
+Role-aware routing
+
+Guard → Guard Home (current shift, nearest patrol point).
+
+Supervisor → Live Dashboard (map + activity feed).
+
+Client → Reports page.
+
+Admin → Admin pages (Tenants, Users, Sites).
+
+Sites & Patrol Points CRUD (supervisor/admin)
+
+Create sites (name + geofence via draw-on-map or center+radius).
+
+Create patrol points (GPS + optional QR string; auto-generate printable QR).
+
+Patrol Check-ins (guard)
+
+Check-in allowed if: within radius OR QR scanned.
+
+Capture timestamp, GPS, battery %, optional photo, method (geo/qr).
+
+Incident Logging (guard & supervisor)
+
+Quick categories (Suspicious, Break-in, Medical, Fire, Maintenance).
+
+Severity, text, photos, location auto-fill, status workflow (Open → In Progress → Resolved).
+
+Assign to user; comment thread/activity log.
+
+Live Dashboard (supervisor)
+
+Map with last-known guard locations & recent check-ins.
+
+Activity feed (check-ins, incidents).
+
+Simple SLA widgets: patrol compliance % (check-ins achieved / scheduled), open incidents count.
+
+SOS / Alerts (guard)
+
+Long-press SOS triggers alert with current location; notify on-duty supervisors via FCM (and in-app banner).
+
+Basic Reporting (client & supervisor)
+
+Date range report: patrol compliance %, list of check-ins & incidents.
+
+Export to PDF/CSV.
+
+Nice-to-haves (stub or TODO)
+
+Shift scheduling roster (basic CRUD + assign guard to site/time).
+
+Offline support for guard check-ins and incident drafts (sync when online).
+
+Push notifications for incident assignment and status changes.
+
+UI Screens (minimum)
+
+Public: Login, Magic Link.
+
+Guard PWA: Home (shift), Patrol Route list, Check-in screen (QR + GPS), New Incident, SOS button (sticky).
+
+Supervisor Web: Live Dashboard (map + feed), Incidents Board (kanban by status), Sites & Patrol Points CRUD, Reports.
+
+Client: Reports dashboard + exports.
+
+Admin: Tenants, Users (invite via email, set roles), Feature flags placeholder.
+
+Implementation Notes
+
+Add a reusable Map component with markers for guards, sites, patrol points.
+
+QR generation: serverless function to create static QR PNG per patrol point.
+
+Store images in Firebase Storage; store URLs in Firestore.
+
+Cloud Functions:
+
+onCheckinCreate: validate radius if method=geo; enrich doc; update compliance counters.
+
+createIncident: sanitize payload, store photos, notify supervisors.
+
+createSOS: write alerts, send FCM to supervisors.
+
+getDashboardSummary(siteId, from, to): aggregate counts/compliance.
+
+Seed script: create demo tenant, one site with 5 patrol points, one guard, one supervisor, one client, and sample data.
+
+Env & Config (create .env.example)
+
+VITE_FIREBASE_API_KEY=
+
+VITE_FIREBASE_AUTH_DOMAIN=
+
+VITE_FIREBASE_PROJECT_ID=
+
+VITE_FIREBASE_STORAGE_BUCKET=
+
+VITE_FIREBASE_MESSAGING_SENDER_ID=
+
+VITE_FIREBASE_APP_ID=
+
+VITE_MAPTILER_KEY= (optional for MapLibre tiles)
+
+For functions: service account JSON or emulator setup.
+
+Deliverables
+
+Running dev server with seed data and a demo login for each role.
+
+Clear README with: setup steps, commands, how to change roles/tenants, and how to deploy.
+
+Unit tests for role routing guards; basic integration test for check-in flow.
+
+Print-ready QR sheet (A4) for sample patrol points.
+
+Acceptance Criteria (must pass)
+
+I can log in as guard and successfully perform a QR and a GPS check-in, and file an incident with a photo.
+
+As supervisor, I see those events live on the dashboard map/feed and can change incident status and export a PDF report.
+
+As client, I can open the Reports page, filter by date, and export CSV.
+
+As admin, I can create a tenant, invite a user, set roles, and create a site with patrol points.
+
+Firestore rules prevent cross-tenant access; unauthorised role actions are denied.
+
+Generate the full codebase now with sensible file structure, placeholder UI using shadcn/ui, and mock tiles if map keys are missing. Include emulator configs for Firebase where possible.

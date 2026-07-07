@@ -1,0 +1,179 @@
+📣 Replit — info we need to implement the new quick-report flow
+0) What @RDM wants (context)
+
+On tapping any incident type button, open a small card (bottom sheet or modal) with:
+
+one optional short-text box
+
+one Submit button
+
+On Submit:
+
+get current GPS (HTML5 geolocation)
+
+pin the incident on the current map using the correct marker for that incident type
+
+(ideally) persist to backend and broadcast to other users (Socket.io), but first we’ll wire the UI.
+
+1) Files & components (please share paths + relevant exports)
+
+Incident buttons grid:
+
+IncidentButton component(s)
+
+parent page/route where the grid lives (e.g., /report, /incidents/new)
+
+The current modal/dialog that opens (so we can replace it with quick card):
+
+component name & location
+
+how it’s triggered today
+
+Map container & setup:
+
+MapLibre (or Google Maps) component file(s)
+
+where the map instance lives (ref, context, Zustand store)
+
+how markers are currently added (custom HTML markers vs symbol layers)
+
+any clustering or layers already defined
+
+2) State management
+
+Are we using Zustand? If yes, share the store slice(s) that handle:
+
+report draft / incident type selection
+
+map instance or map-related state
+
+If Redux/Context is used instead, share the relevant slices/providers.
+
+3) Incident type definitions & marker mapping
+
+The source of truth for incident types (enum or constant list) and their icons/colors.
+Example of what we need:
+
+// Where is this defined?
+export type IncidentType = "blocked_road" | "construction" | "heavy_traffic" | "lost_found" | "lost_pet" | "noise" | "police_stop";
+
+export const INCIDENT_MARKERS: Record<IncidentType, { icon: string; color: string; }>;
+
+
+If marker images/sprites exist, share their paths.
+
+4) Geolocation & permissions
+
+Do we already have a helper for getCurrentPosition (with permission handling & timeouts)?
+
+If yes, file path & function signature.
+
+If no, we’ll add one—confirm where you want it (e.g., lib/location.ts).
+
+5) API & persistence (so we can wire after UI)
+
+Express route for creating an incident (if present) or planned path:
+
+POST /api/incidents (file path, expected payload, auth requirements)
+
+Drizzle schema for incidents:
+
+table definition (columns for id, type, lat, lng, note, userId, createdAt, etc.)
+
+React Query setup (if used): the client and where mutations live.
+
+6) Realtime (optional, next step)
+
+Socket.io event names for incidents (if any), e.g. incident:new.
+
+Where socket client is initialized and used.
+
+7) UI kit
+
+Which shadcn/ui primitives are installed? (Dialog, Sheet, Drawer, Button, Textarea, etc.)
+
+Do you prefer Sheet (bottom sheet) or Dialog for the quick card?
+
+8) Proposed integration points (what we’ll add/change)
+
+We will add a minimal component and a store action; please confirm target locations:
+
+New component: components/report/QuickReportCard.tsx
+
+small UI: title, optional textarea, Submit
+
+opened by incident buttons via store: openQuickReport({ type })
+
+Store: add a tiny slice (Zustand) with:
+
+type QuickReportDraft = { type?: IncidentType; note?: string };
+openQuickReport({ type }: { type: IncidentType }): void;
+closeQuickReport(): void;
+setNote(note: string): void;
+submitQuickReport(): Promise<void>; // gets GPS, adds marker, (optionally) posts to API
+
+
+Map hook (needs your help): a function we can call to add a marker:
+
+// please expose something like this:
+addIncidentMarker({
+  id, // string
+  type, // IncidentType
+  lat,
+  lng,
+  note?, // optional
+}): void
+
+
+If you use symbol layers instead of HTML markers, provide the helper or the pattern you use.
+
+9) Minimal payload contract (confirm/adjust)
+
+When we later persist to the server, we’ll post:
+
+type CreateIncidentDTO = {
+  type: IncidentType;
+  lat: number;
+  lng: number;
+  note?: string;
+};
+
+10) Acceptance criteria (for this UI pass)
+
+Tapping any incident type shows quick card with optional text field + Submit.
+
+Pressing Submit:
+
+requests browser geolocation; on success:
+
+places a marker on the map using the correct icon/color for that incident
+
+(if backend is ready) calls POST /api/incidents and, on success, closes card and shows a toast
+
+on geolocation error: shows a small error toast + keeps card open.
+
+No regression to existing map/markers.
+
+11) How to respond (copy/paste checklist)
+
+Please reply with:
+
+ Framework + routing (Next.js? Vite? file paths)
+
+ Paths to Incident buttons grid and current modal/dialog
+
+ Paths to Map component, map instance access, and marker creation helper
+
+ State manager used (Zustand/Redux/Context) + relevant slices
+
+ Incident types definition + marker/icon mapping source
+
+ Any existing geolocation util (or confirm none)
+
+ API route (if exists) + Drizzle schema for incidents
+
+ Socket.io client setup (if used)
+
+ Preferred quick card container (Sheet vs Dialog)
+
+Once we have this, I’ll ship the exact QuickReportCard component + store slice + wiring PR.

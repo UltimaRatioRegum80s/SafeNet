@@ -1,0 +1,127 @@
+GPT → Replit
+
+i can’t see your console directly, but your debug hooks are perfect. here’s a fast decision tree + a small “can’t-regress” patch so Drop a pin always enters report mode even if the sheet’s close handler races it.
+
+what to look for (map your logs → fix)
+
+A. MOUSE DOWN + MOUSE UP but no DROP A PIN CLICKED
+→ click prevented (disabled, type="submit", or wrapper intercept).
+
+ensure the button is type="button" (you fixed) and not wrapped in DialogClose asChild.
+
+verify no parent onClick e.preventDefault().
+
+B. DROP A PIN CLICKED shows, but sheet stays open
+→ closeSheet() isn’t driving the controlled Sheet open prop (or something instantly reopens it).
+
+check <Sheet open={sheetOpen} onOpenChange={…}> path isn’t calling openSheet() after blur/focus.
+
+confirm no useEffect sets openSheet() on focus/route.
+
+C. DROP A PIN CLICKED + sheet closes, but no crosshair/overlay
+→ classic race: closeSheet() triggers an onOpenChange that also calls cancelReportMode(), which can overwrite your startReportMode() if both run same tick.
+✅ Fix below (“defer start”).
+
+D. Overlay shows, but clicking map doesn’t reopen sheet
+→ map click handler not attached while reportMode true or a backdrop is intercepting clicks.
+
+confirm map.on('click', …) effect depends on reportMode.
+
+inspect DOM for a stale portal/backdrop covering the map.
+
+race-proof “defer start” patch (recommended)
+
+Queue the intent to start report mode, close the sheet, then start once the sheet is confirmed closed. This avoids any ordering issues with onOpenChange or cancelReportMode().
+
+1) extend the store
+diff --git a/client/src/state/useQuickReportStore.ts b/client/src/state/useQuickReportStore.ts
+@@
+ type QuickReportState = {
+   sheetOpen: boolean;
+   categoryId?: string;
+   note: string;
+   location?: LatLng;
+   reportMode: boolean;
+   tempPin?: LatLng;
++  pendingReportMode: boolean; // NEW: queue start after sheet closes
+ };
+@@
+   confirmTempPin: (ll: LatLng) => void;
++  queueReportMode: () => void;     // NEW
++  consumePendingReportMode: () => void; // NEW
+ };
+@@
+ export const useQuickReportStore = create<QuickReportState & QuickReportActions>((set) => ({
+   sheetOpen: false,
+   note: "",
+   reportMode: false,
++  pendingReportMode: false,
+@@
+   confirmTempPin: (ll) =>
+     set({ tempPin: ll, location: ll, sheetOpen: true, reportMode: false }),
++  queueReportMode: () => set({ pendingReportMode: true }),
++  consumePendingReportMode: () => set({ pendingReportMode: false }),
+ }));
+
+2) change the button to queue → close
+diff --git a/client/src/features/report/QuickReportCard.tsx b/client/src/features/report/QuickReportCard.tsx
+@@
+- const { sheetOpen, openSheet, closeSheet, location, startReportMode } = useQuickReportStore();
++ const { sheetOpen, openSheet, closeSheet, location, queueReportMode } = useQuickReportStore();
+@@
+- <Button type="button" variant="secondary" onClick={() => { closeSheet(); startReportMode(); }}>
++ <Button
++   type="button"
++   variant="secondary"
++   onClick={() => { queueReportMode(); closeSheet(); }}
++ >
+   Drop a pin
+ </Button>
+
+3) start report mode after sheet closes
+
+Do this in a component that always lives with the map (e.g., Map.tsx).
+
+diff --git a/client/src/pages/community/Map.tsx b/client/src/pages/community/Map.tsx
+@@
+-  const {
+-    reportMode,
+-    confirmTempPin,
+-    cancelReportMode,
+-    openSheet,
+-    startReportMode,
+-  } = useQuickReportStore();
++  const {
++    sheetOpen,
++    reportMode,
++    pendingReportMode,
++    confirmTempPin,
++    cancelReportMode,
++    consumePendingReportMode,
++    openSheet,
++    startReportMode,
++  } = useQuickReportStore();
+@@
++  // when user queued "Drop a pin", wait until the sheet is closed, then enter report mode
++  useEffect(() => {
++    if (!sheetOpen && pendingReportMode) {
++      startReportMode();
++      consumePendingReportMode();
++    }
++  }, [sheetOpen, pendingReportMode, startReportMode, consumePendingReportMode]);
+
+
+If you also added our earlier optional onOpenChange that calls cancelReportMode() on close, keep it — the queued start will fire after close and win.
+
+what i expect to see in your console now
+
+Click 🔴 Drop a pin DEBUG
+MOUSE DOWN → MOUSE UP → DROP A PIN CLICKED →
+state before (sheetOpen: true, reportMode: false, pendingReportMode: false) →
+state after (sheetOpen: false, reportMode: false, pendingReportMode: true)
+
+After close completes (next tick):
+effect runs → startReportMode() → overlay appears →
+state becomes (sheetOpen: false, reportMode: true, pendingReportMode: false)
+
+Map click: confirmTempPin() logs → sheet opens right → coords shown.

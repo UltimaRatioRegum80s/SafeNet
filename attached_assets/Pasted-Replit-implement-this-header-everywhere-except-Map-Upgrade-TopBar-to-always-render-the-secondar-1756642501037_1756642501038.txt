@@ -1,0 +1,174 @@
+Replit — implement this header everywhere (except Map)
+
+Upgrade TopBar to always render the secondary nav row using a shared GlobalNavLinks component.
+
+Use TopBar on all non-map routes; keep Map page outside AppLayout.
+
+Remove any legacy in-page nav pills/rows so the header is the only nav.
+
+Drop-in code
+components/layout/GlobalNavLinks.tsx
+import { Link, useLocation } from "wouter";
+import {
+  Home, Camera, MapPin, MessageSquare, BarChart3
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+const items = [
+  { href: "/", label: "Home", icon: Home },
+  { href: "/report", label: "Report", icon: Camera },
+  { href: "/map", label: "Map", icon: MapPin },
+  { href: "/feed", label: "Feed", icon: MessageSquare },
+  { href: "/stats", label: "Stats", icon: BarChart3 },
+];
+
+export default function GlobalNavLinks() {
+  const [location] = useLocation();
+  return (
+    <nav className="flex items-center gap-4 text-sm">
+      {items.map(({ href, label, icon: Icon }) => {
+        const active = location === href;
+        return (
+          <Link key={href} href={href}>
+            <a
+              className={cn(
+                "inline-flex items-center gap-2 py-2",
+                active ? "text-foreground font-semibold" : "text-muted-foreground hover:text-foreground"
+              )}
+              aria-current={active ? "page" : undefined}
+            >
+              <Icon className={cn("h-4 w-4", active && "text-foreground")} />
+              <span>{label}</span>
+            </a>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+components/layout/TopBar.tsx (two rows, compact)
+import * as React from "react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Share2, Search, Bell, Moon, Home as HomeIcon } from "lucide-react";
+import GlobalNavLinks from "./GlobalNavLinks";
+
+type Action = { key: string; aria: string; onClick?: () => void; icon?: React.ReactNode; render?: () => React.ReactNode; };
+
+export interface TopBarProps {
+  title: string;
+  actions?: Action[];
+  className?: string;
+}
+
+export function TopBar({ title, actions, className }: TopBarProps) {
+  const defaults: Action[] = [
+    { key: "share", aria: "Share", icon: <Share2 className="h-5 w-5" /> },
+    { key: "search", aria: "Search", icon: <Search className="h-5 w-5" /> },
+    { key: "bell", aria: "Notifications", icon: <Bell className="h-5 w-5" /> },
+    { key: "theme", aria: "Theme", icon: <Moon className="h-5 w-5" /> },
+  ];
+  const items = actions ?? defaults;
+
+  return (
+    <header className={cn(
+      "sticky top-0 z-40 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60",
+      className
+    )}>
+      {/* Row 1: icon + title (left), compact actions (right) */}
+      <div className="mx-auto w-full max-w-screen-md h-14 px-3 md:px-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <a href="/" aria-label="Home"><HomeIcon className="h-5 w-5" /></a>
+          <div className="text-lg font-semibold tracking-[-0.01em]">{title}</div>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {items.map(a =>
+            a.render ? (
+              <div key={a.key}>{a.render()}</div>
+            ) : (
+              <Button key={a.key} variant="ghost" size="icon" className="h-8 w-8" aria-label={a.aria}>
+                {a.icon}
+              </Button>
+            )
+          )}
+        </div>
+      </div>
+
+      {/* Row 2: Global nav links with icons + labels */}
+      <div className="border-t">
+        <div className="mx-auto w-full max-w-screen-md px-3 md:px-4">
+          <GlobalNavLinks />
+        </div>
+      </div>
+    </header>
+  );
+}
+
+components/layout/AppLayout.tsx
+import * as React from "react";
+import { TopBar } from "./TopBar";
+
+export default function AppLayout({
+  title,
+  actions,
+  children,
+}: { title: string; actions?: any; children: React.ReactNode; }) {
+  return (
+    <div className="min-h-dvh bg-background text-foreground">
+      <TopBar title={title} actions={actions} />
+      <main className="mx-auto w-full max-w-screen-md px-3 md:px-4 py-3">{children}</main>
+    </div>
+  );
+}
+
+App.tsx — use on all non-map routes
+import { Route, Switch } from "wouter";
+import AppLayout from "@/components/layout/AppLayout";
+import Dashboard from "@/pages/Dashboard";
+import Chat from "@/pages/Chat";
+import ReportIncident from "@/pages/report/ReportIncident";
+import Statistics from "@/pages/Statistics";
+import Map from "@/pages/community/Map";
+
+export default function App() {
+  return (
+    <Switch>
+      <Route path="/map" component={Map} /> {/* Map excluded */}
+
+      <Route path="/report">
+        <AppLayout title="Report Incident">
+          <ReportIncident />
+        </AppLayout>
+      </Route>
+
+      <Route path="/chat">
+        <AppLayout title="Chat">
+          <Chat />
+        </AppLayout>
+      </Route>
+
+      <Route path="/stats">
+        <AppLayout title="Statistics">
+          <Statistics />
+        </AppLayout>
+      </Route>
+
+      <Route path="/">
+        <AppLayout title="Dashboard">
+          <Dashboard />
+        </AppLayout>
+      </Route>
+    </Switch>
+  );
+}
+
+Clean-up (important)
+
+Remove any floating pill or old header JSX from page files (Dashboard, Report, Statistics, Chat).
+
+Do not pass footer/secondary to the layout; navigation lives in the two header rows only.
+
+Map page remains unchanged.
+
+this will produce exactly the header you showed—top row with home icon + page title + compact actions, second row with Home / Report / Map / Feed / Stats icon+labels—applied to all pages except Map.

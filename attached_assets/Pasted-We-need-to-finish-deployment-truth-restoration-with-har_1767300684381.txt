@@ -1,0 +1,49 @@
+We need to finish “deployment truth restoration” with hard verification.
+
+You already:
+- Disabled SW (unregister + clear caches, no new registration)
+- Added /api/version (Cache-Control: no-store)
+- Added raw HTML magenta banner in index.html (pre-React)
+
+Now please do TWO things:
+
+A) Add NO-STORE on the HTML shell (this is the missing critical piece if /api/version updates but the banner doesn’t):
+- Ensure requests to “/” and “/index.html” return:
+  Cache-Control: no-store, max-age=0
+  Pragma: no-cache
+  Expires: 0
+Implement this at the server/static layer (middleware BEFORE express.static, or express.static setHeaders for index.html). Do NOT rely on SW logic.
+
+Example (Express):
+app.use((req,res,next)=>{
+  if(req.path==="/"||req.path==="/index.html"){
+    res.setHeader("Cache-Control","no-store, max-age=0");
+    res.setHeader("Pragma","no-cache");
+    res.setHeader("Expires","0");
+  }
+  next();
+});
+app.use(express.static("dist",{
+  setHeaders:(res,path)=>{
+    if(path.endsWith("index.html")){
+      res.setHeader("Cache-Control","no-store, max-age=0");
+      res.setHeader("Pragma","no-cache");
+      res.setHeader("Expires","0");
+    }
+  }
+}));
+
+B) After republish, run this exact verification on Android Chrome INCOGNITO:
+1) Open https://safe-ly.replit.app/api/version
+   Expect: version v2.1.1 + current timestamp (changes on republish)
+2) Open https://safe-ly.replit.app/
+   Expect: magenta HTML banner “HTML v2.1.1 … SW DISABLED” visible on first paint
+3) (Optional definitive) Remote debug via chrome://inspect → Application:
+   Expect: no Service Worker registered; Cache Storage empty
+
+If /api/version updates but the magenta HTML banner does NOT, then the HTML shell is still cached upstream (CDN/edge) or wrong artifact path is being served.
+If /api/version also does NOT update, then the production URL is not pointing to the deployment you’re republishing (deployment target mismatch / infra issue).
+
+Please reply with ONLY:
+- what /api/version shows
+- whether the magenta HTML banner appears on /

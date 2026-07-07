@@ -1,0 +1,329 @@
+love the refinements — they fit your stack perfectly. let’s implement Milestone 8 step-by-step, starting with DB, then routes, heuristics, client UI, and tiny visibility tweaks. Everything below is copy-paste ready and low-risk.
+
+1) DB migrations (SQL-first, matches your varchar+check style)
+
+migrations/XXXX_moderation.sql
+
+-- enable trigram for similarity() if not already
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- shadow visibility (additive, safe default)
+ALTER TABLE incidents
+  ADD COLUMN IF NOT EXISTS is_shadow_hidden boolean NOT NULL DEFAULT false;
+
+-- abuse reports table (aligned to your style)
+CREATE TABLE IF NOT EXISTS abuse_reports (
+  id                  varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+  incident_id         varchar NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+  reporter_user_id    varchar REFERENCES users(id) ON DELETE SET NULL,
+  reason              varchar NOT NULL CHECK (reason IN ('spam', 'harassment', 'misinfo', 'other')),
+  note                text,
+  created_at          timestamp DEFAULT now()
+);
+
+-- supporting indexes
+CREATE INDEX IF NOT EXISTS idx_abuse_reports_incident ON abuse_reports(incident_id);
+CREATE INDEX IF NOT EXISTS idx_incidents_shadow ON incidents(is_shadow_hidden);
+-- if you use text similarity in heuristics
+CREATE INDEX IF NOT EXISTS idx_incidents_desc_trgm ON incidents USING gin (description gin_trgm_ops);
+
+
+If you drive schema via Drizzle as well, keep SQL migration as source of truth and add the TypeScript mapping (next).
+
+2) Drizzle schema mapping (additive)
+
+server/db/schema_abuse.ts
+
+import { pgTable, varchar, text, timestamp } from "drizzle-orm/pg-core";
+
+export const abuse_reports = pgTable("abuse_reports", {
+  id: varchar("id").primaryKey(),
+  incidentId: varchar("incident_id").notNull(),
+  reporterUserId: varchar("reporter_user_id"),
+  reason: varchar("reason").notNull(), // enforce allowed values in route
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+
+In your existing incidents schema type, add is_shadow_hidden?: boolean if not inferred automatically.
+
+3) Server routes — abuse report (rate-limited) & moderation actions
+
+Use your existing rate limiter helper for consistency.
+
+server/routes/moderation.ts
+
+import { Router } from "express";
+import { db } from "../db";
+import { abuse_reports } from "../db/schema_abuse";
+import { requireAuthOptional, requireModerator } from "../middleware/auth";
+import { checkRateLimit } from "../services/incidentDatabase"; // your existing limiter
+import { sql, desc } from "drizzle-orm";
+
+const router = Router();
+
+router.post("/api/incidents/:id/abuse-report", requireAuthOptional, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { reason, note } = (req.body ?? {}) as { reason?: string; note?: string };
+    const userId = (req.session as any)?.userId ?? null;
+    const ip = req.headers["x-forwarded-for"]?.toString() ?? req.socket.remoteAddress ?? "0.0.0.0";
+
+    // per your limiter style: 6 abuse reports / minute per identity
+    await checkRateLimit({ key: `abuse:${userId ?? ip}`, windowMs: 60_000, max: 6 });
+
+    if (!["spam","harassment","misinfo","other"].includes(reason || "")) {
+      return res.status(400).json({ ok:false, error:"Invalid reason" });
+    }
+
+    await db.insert(abuse_reports).values({
+      id: crypto.randomUUID(),
+      incidentId: id,
+      reporterUserId: userId ?? null,
+      reason,
+      note: (note ?? "").slice(0, 500),
+    });
+
+    // Optional: soft auto-shadow threshold via count in last N minutes
+    // (We’ll also do creation-time heuristics.)
+    return res.status(201).json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+router.get("/api/moderation/queue", requireModerator, async (req, res, next) => {
+  try {
+    // queue: shadowed OR reported ≥ 2
+    const rows = await db.execute(sql`
+      SELECT i.*,
+             COALESCE(ar.cnt, 0) AS report_count
+      FROM incidents i
+      LEFT JOIN (
+        SELECT incident_id, COUNT(*)::int cnt
+        FROM abuse_reports
+        GROUP BY incident_id
+      ) ar ON ar.incident_id = i.id
+      WHERE i.is_shadow_hidden = true OR COALESCE(ar.cnt, 0) >= 2
+      ORDER BY i.created_at DESC
+      LIMIT 200
+    `);
+    // you already have toApiIncident for admin
+    const out = rows.rows.map((r: any) => toApiIncident(r, /*isAdmin*/ true));
+    return res.json({ ok: true, items: out });
+  } catch (e) { next(e); }
+});
+
+router.post("/api/moderation/incidents/:id/action", requireModerator, async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { action } = (req.body ?? {}) as { action?: "approve"|"reject" };
+    if (!action || !["approve","reject"].includes(action)) {
+      return res.status(400).json({ ok:false, error:"Invalid action" });
+    }
+
+    if (action === "approve") {
+      await db.execute(sql`UPDATE incidents SET is_shadow_hidden = false WHERE id = ${id}`);
+    } else {
+      await db.execute(sql`UPDATE incidents SET is_shadow_hidden = true WHERE id = ${id}`);
+      // optional: also set state to 'rejected' if you surface that in admin UI
+    }
+
+    const io = req.app.get("io");
+    io?.to("moderators").emit("incident:moderated", { id, action });
+
+    return res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+export default router;
+
+
+Mount it (non-disruptive):
+
+// server/index.ts (or routes.ts if that’s your central place)
+import moderationRouter from "./routes/moderation";
+app.use(moderationRouter);
+
+4) Heuristics — hook into incident creation (creation-time shadowing)
+
+Inside your existing POST /api/incidents after validations and before broadcasting:
+
+// pseudocode in your existing route
+const userId = (req.session as any)?.userId ?? null;
+let is_shadow_hidden = false;
+
+// Velocity heuristic using your limiter (3 in 120s)
+try {
+  await checkRateLimit({ key: `burst:${userId ?? ip}`, windowMs: 120_000, max: 3 });
+} catch {
+  is_shadow_hidden = true;
+}
+
+// Near-duplicate heuristic (reuse your current duplicate guard)
+// If your duplicate detection already returns a “duplicate within distance/time”, mark hidden:
+if (duplicateLikely) {
+  is_shadow_hidden = true;
+}
+
+// Optional text similarity (needs pg_trgm + index)
+if (!duplicateLikely && (description ?? "").length >= 10) {
+  const sim = await db.execute(sql`
+    SELECT 1
+    FROM incidents
+    WHERE created_at > NOW() - INTERVAL '5 minutes'
+      AND similarity(description, ${description}) > 0.5
+    LIMIT 1
+  `);
+  if (sim.rowCount && sim.rowCount > 0) is_shadow_hidden = true;
+}
+
+// Persist the flag on insert
+const incidentRow = { /*...existing fields...,*/ is_shadow_hidden };
+// insert ...
+
+// Emit sockets
+const nhRoom = `nh:${city}:${neighbourhood}`;
+io.to(nhRoom).emit("incident:created", toApiIncident(rowForPublic, false));
+
+// Notify staff if shadowed (neighborhood-scoped staff room + global moderators room)
+if (is_shadow_hidden) {
+  io.to(`${nhRoom}:staff`).emit("incident:flagged", { id: newId });
+  io.to("moderators").emit("incident:flagged", { id: newId });
+}
+
+
+Keep toApiIncident unchanged; public consumers will naturally hide shadowed incidents via query filters (next).
+
+5) Visibility rule — one-liner in your listing queries
+
+Where you fetch incidents for non-admin/non-reporter:
+
+-- add to WHERE clause:
+(is_shadow_hidden = false)
+OR (created_by = $currentUserId)
+OR ($currentUserRole IN ('moderator','admin'))
+
+
+This preserves reporter visibility, protects the community, and gives staff oversight.
+
+6) Socket rooms (tiny addition)
+
+On connection:
+
+io.on("connection", (socket) => {
+  const sess: any = socket.request?.session ?? {};
+  const { role, city, neighbourhood } = sess;
+  if (role === "moderator" || role === "admin") socket.join("moderators");
+  if (city && neighbourhood && (role === "moderator" || role === "admin")) {
+    socket.join(`nh:${city}:${neighbourhood}:staff`);
+  }
+});
+
+7) Client: “Report abuse” dialog + queue page
+
+client/src/lib/apiModeration.ts
+
+export async function reportIncidentAbuse(id: string, body: { reason: "spam"|"harassment"|"misinfo"|"other"; note?: string }) {
+  const r = await fetch(`/api/incidents/${id}/abuse-report`, {
+    method: "POST", credentials: "include",
+    headers: { "Content-Type":"application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+
+client/src/components/ReportAbuseDialog.tsx (shadcn)
+
+import { useState } from "react";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { reportIncidentAbuse } from "@/lib/apiModeration";
+import { useToast } from "@/components/ui/use-toast";
+
+export default function ReportAbuseDialog({ open, onOpenChange, incidentId }:{
+  open:boolean; onOpenChange:(v:boolean)=>void; incidentId:string;
+}) {
+  const { toast } = useToast();
+  const [reason, setReason] = useState<"spam"|"harassment"|"misinfo"|"other">("spam");
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit() {
+    try {
+      setSubmitting(true);
+      await reportIncidentAbuse(incidentId, { reason, note: note.trim() || undefined });
+      toast({ title: "Thanks for the report" });
+      onOpenChange(false);
+    } catch (e:any) {
+      toast({ variant:"destructive", title:"Could not submit", description:e.message });
+    } finally { setSubmitting(false); }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="glass-card rounded-2xl">
+        <DialogHeader><DialogTitle>Report abuse</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <select
+            value={reason}
+            onChange={(e)=>setReason(e.target.value as any)}
+            className="w-full rounded-md bg-slate-900/40 border border-slate-700 p-2"
+          >
+            <option value="spam">Spam / advertising</option>
+            <option value="harassment">Harassment / hate</option>
+            <option value="misinfo">Misleading / false</option>
+            <option value="other">Other</option>
+          </select>
+          <Textarea placeholder="Optional note (max 500 chars)" value={note} onChange={(e)=>setNote(e.target.value)} maxLength={500} />
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={()=>onOpenChange(false)}>Cancel</Button>
+          <Button onClick={submit} disabled={submitting}>{submitting ? "Sending…" : "Submit"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
+Add trigger buttons (list card & map popover):
+
+// e.g., in IncidentList item actions
+const [abuseOpen, setAbuseOpen] = useState(false);
+<Button variant="ghost" size="sm" onClick={()=>setAbuseOpen(true)}>Report</Button>
+<ReportAbuseDialog open={abuseOpen} onOpenChange={setAbuseOpen} incidentId={incident.id} />
+
+
+Minimal moderator queue page (from previous message) — plug at /admin/moderation.
+
+Client sockets:
+
+socket.on("incident:flagged", ({ id }) => { /* show small toast for staff, refetch queue */ });
+socket.on("incident:moderated", ({ id, action }) => { /* update local list or refetch */ });
+
+8) Analytics (3 events)
+
+abuse_reported { reason, has_note }
+
+incident_shadowed { rule: "velocity" | "duplicate" | "similarity" }
+
+moderation_action { action, time_to_action_ms }
+
+9) QA script (8–10 min)
+
+Report abuse → 201; cooldown enforced; no server spam.
+
+Create suspicious (rapid / duped) incident → shadowed; public users don’t see; reporter & staff do.
+
+Staff receive incident:flagged; queue shows item with report_count.
+
+Approve → public now sees item; incident:moderated fires.
+
+Reject → remains hidden; no public visibility.
+
+Anonymous flows work (report abuse + incident creation).
+
+Performance: feed queries unaffected; indexes in place.

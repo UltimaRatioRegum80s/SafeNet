@@ -1,0 +1,89 @@
+perfect — let’s lock this down without risking desktop.
+
+@Replit, please run this single paste with ?NN_FIX_MOBILE_MARKERS=1 after the map loads. It won’t change code; it just reports state.
+
+// NN mobile markers diagnostic — paste in Console (flag = 1)
+(() => {
+  const out = {};
+  out.ua = navigator.userAgent;
+  out.flagParam = new URL(location.href).searchParams.get('NN_FIX_MOBILE_MARKERS');
+  out.flagLS = localStorage.getItem('NN_FIX_MOBILE_MARKERS');
+  out.isLikelyMobile =
+    /Android|iPhone|iPad|iPod|Mobile|Silk/.test(out.ua) || ('ontouchstart' in window);
+
+  const pane = document.querySelector('.leaflet-marker-pane');
+  out.divIconWrappers = document.querySelectorAll('.nn-divicon-wrapper').length;
+  out.clusterEls = document.querySelectorAll('.marker-cluster').length;
+  out.markerPaneChildren = pane ? pane.children.length : 0;
+  out.markerPaneDisplay = pane ? getComputedStyle(pane).display : 'none';
+
+  const cluster = (window.clusterRef && window.clusterRef.current) || window._cluster;
+  out.hasCluster = !!cluster;
+  out.clusterLayerCount = cluster ? cluster.getLayers().length : 0;
+  out.first5Types = cluster
+    ? cluster.getLayers().slice(0, 5).map(l => ({
+        ctor: l?.constructor?.name,
+        isMarker: l instanceof L.Marker,
+        isCircle: l instanceof L.CircleMarker,
+      }))
+    : [];
+
+  // MarkerCluster CSS presence (best-effort)
+  out.hasMCStyles =
+    [...document.querySelectorAll('link[href],style')].some(el =>
+      (el.href || '').toLowerCase().includes('markercluster')
+    ) ||
+    (() => {
+      try {
+        return [...document.styleSheets].some(s =>
+          [...(s.cssRules || [])].some(r =>
+            (r.selectorText || '').includes('.marker-cluster')
+          )
+        );
+      } catch {
+        return false;
+      }
+    })();
+
+  // Map layer mix (optional)
+  const map = window._map || window.map;
+  out.mapLayerCounts = map && map.eachLayer
+    ? (() => {
+        const c = { Marker: 0, CircleMarker: 0, Other: 0 };
+        map.eachLayer(l => {
+          if (l instanceof L.Marker) c.Marker++;
+          else if (l instanceof L.CircleMarker) c.CircleMarker++;
+          else c.Other++;
+        });
+        return c;
+      })()
+    : null;
+
+  console.table(out);
+  window.__nnDiagOut = out; // easy copy
+  return out;
+})();
+
+How to read it (what I’m expecting)
+
+If isLikelyMobile = false, divIconWrappers = 0, first5Types show isCircle: true → the mobile gate blocked our fallback and we’re still creating L.circleMarker (ignored by markercluster).
+
+If isLikelyMobile = true but divIconWrappers = 0 and clusterLayerCount = 0 → the fallback didn’t run or layers aren’t being added.
+
+If clusterLayerCount > 0 and first5Types.*isMarker = true but clusterEls = 0 and hasMCStyles = false → MarkerCluster CSS missing in the PWA chunk, so clusters render but are invisible.
+
+What we’ll do next based on the output (Progress Law–safe)
+
+Gate is the issue: we’ll remove the UA gate and rely only on the flag (still desktop-safe because desktop uses real icons). Minimal diff.
+
+CSS is missing: we’ll add a single import in the app entry:
+
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
+
+
+(This won’t alter desktop visuals; it just ensures cluster styles exist in the PWA build.)
+
+Layers = 0: we’ll add a tiny try/catch+log around clusterRef.current.addLayer(layer) to capture any thrown errors (one-line change).
+
+Please paste the console table output (window.__nnDiagOut) here. I’ll translate that directly into the smallest possible patch, still behind the flag, so we cannot regress desktop.

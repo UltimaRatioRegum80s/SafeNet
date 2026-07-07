@@ -1,0 +1,272 @@
+Replit → GPT: what I need to know about the current page
+
+Please answer these so I don’t break your wiring:
+
+What buttons already exist and their actions
+
+Which buttons/controls are currently on the “Report Incident” page (mobile & tablet)?
+e.g., Low / Medium / High, “Continue”, “Back”, any FABs, etc.
+
+For each one, what happens on press? (navigate where? open a sheet? set local/Zustand state?)
+
+State management
+
+Is severity stored anywhere today (local useState, Zustand store like reportDraft.severity, URL params, or not yet)?
+
+If Zustand exists, what’s the store slice name + setter?
+
+Routing
+
+What route should trigger after choosing a severity? (e.g., /report/new/details, /report/form, etc.)
+
+Do we keep the user on the same page until they hit “Continue”, or navigate immediately on selection?
+
+Design/theming constraints
+
+Tailwind + shadcn confirmed; any existing color tokens (e.g., --nn-yellow, --nn-amber), or should I stick to Tailwind palette?
+
+Any global padding helpers for safe-area insets already defined?
+
+Accessibility/analytics
+
+Do we already emit analytics (e.g., analytics.track), or should I stub a function?
+
+Any requirement for haptic feedback on mobile (via navigator.vibrate)?
+
+Tablet layout
+
+On tablet, do you want the vertical stack centered or left-aligned with helper text?
+
+Reply with whatever you know; if something’s unknown, I’ll proceed with safe defaults.
+
+Implementation plan (based on your attached vision)
+
+Below is the plan I’ll execute once I have the answers. If any point conflicts with your setup, Replit can flag it and I’ll adapt.
+
+Goals
+
+Replace the small “chip” row with a vertical stack of large, high-contrast, rounded buttons: Low, Medium, High, Critical.
+
+Big tap targets (≥ 48px), clear focus rings, WCAG-friendly contrast on dark UI.
+
+Mobile: centered stack; Tablet: left-aligned with helper text.
+
+Selection stores severity and either (A) navigates immediately or (B) enables a “Continue” button—your call.
+
+Components & structure
+
+SeverityButtons (new, reusable)
+
+Props: value, onChange, layout?: 'vertical'|'horizontal', immediateNav?: boolean.
+
+Renders four buttons with the styles in your mock (neutral fill + colored ring by level; Critical as filled).
+
+A11y: role="radiogroup" with each button role="radio", keyboardable, ARIA checked state.
+
+ReportIncidentPage
+
+Holds severity state (or reads/writes Zustand).
+
+On select: persist severity, optionally vibrate, optionally navigate.
+
+Safe-area padding & responsive layout.
+
+(Optional) useReportDraft store (if not present)
+
+{ severity: 'low'|'medium'|'high'|'critical'|null, setSeverity }.
+
+Styling rules (quick spec)
+
+Low: neutral fill bg-slate-200/85 text-slate-900, ring ring-2 ring-yellow-400.
+
+Medium: neutral fill bg-slate-200/85 text-slate-900, ring ring-2 ring-amber-600.
+
+High: neutral fill bg-slate-200/85 text-slate-900, ring ring-2 ring-red-500.
+
+Critical: solid fill bg-red-700 text-white, subtle shadow, stronger focus ring.
+
+All: height h-14, radius rounded-full, font font-semibold, spacing space-y-4.
+
+Focus: focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950.
+
+Copy-paste components (safe defaults; adapt once you answer)
+
+src/components/SeverityButtons.tsx
+
+import clsx from "clsx";
+import { useId } from "react";
+
+export type Severity = "low" | "medium" | "high" | "critical";
+
+type Props = {
+  value: Severity | null;
+  onChange: (v: Severity) => void;
+  className?: string;
+  immediateNav?: boolean; // if true, we’ll call onChange and expect page to navigate
+};
+
+const baseNeutral =
+  "h-14 w-full rounded-full font-semibold text-base transition-all " +
+  "bg-slate-200/85 text-slate-900 shadow-sm " +
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950";
+
+export default function SeverityButtons({
+  value,
+  onChange,
+  className,
+  immediateNav = false,
+}: Props) {
+  const id = useId();
+  const handle = (v: Severity) => {
+    if (navigator.vibrate) navigator.vibrate(8);
+    onChange(v);
+  };
+
+  return (
+    <div
+      role="radiogroup"
+      aria-labelledby={`${id}-label`}
+      className={clsx("w-full max-w-sm space-y-4", className)}
+    >
+      <button
+        role="radio"
+        aria-checked={value === "low"}
+        className={clsx(baseNeutral, "ring-2 ring-yellow-400")}
+        onClick={() => handle("low")}
+      >
+        Low
+      </button>
+
+      <button
+        role="radio"
+        aria-checked={value === "medium"}
+        className={clsx(baseNeutral, "ring-2 ring-amber-600")}
+        onClick={() => handle("medium")}
+      >
+        Medium
+      </button>
+
+      <button
+        role="radio"
+        aria-checked={value === "high"}
+        className={clsx(baseNeutral, "ring-2 ring-red-500")}
+        onClick={() => handle("high")}
+      >
+        High
+      </button>
+
+      <button
+        role="radio"
+        aria-checked={value === "critical"}
+        className={clsx(
+          "h-14 w-full rounded-full font-semibold text-base transition-all",
+          "bg-red-700 text-white shadow-md",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400",
+          "focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+        )}
+        onClick={() => handle("critical")}
+      >
+        Critical
+      </button>
+    </div>
+  );
+}
+
+
+src/pages/ReportIncident.tsx (sane default wiring)
+
+import { useState } from "react";
+// If you have Zustand, replace with store getters/setters
+import SeverityButtons, { Severity } from "@/components/SeverityButtons";
+// import { useNavigate } from "react-router-dom";
+
+export default function ReportIncidentPage() {
+  const [severity, setSeverity] = useState<Severity | null>(null);
+  // const navigate = useNavigate();
+
+  const handleSelect = (v: Severity) => {
+    setSeverity(v);
+    // If your flow wants immediate navigation, uncomment:
+    // navigate(`/report/details?severity=${v}`);
+  };
+
+  return (
+    <div className="min-h-[100dvh] bg-slate-950 text-slate-100">
+      <main className="mx-auto max-w-screen-md px-4 sm:px-6 pt-6 pb-[calc(env(safe-area-inset-bottom)+24px)]">
+        <section className="mt-16 md:mt-10 grid place-items-center md:place-items-start gap-6">
+          <header className="text-center md:text-left">
+            <h1 className="text-xl md:text-2xl font-bold">Report Incident</h1>
+            <p className="mt-2 text-sm text-slate-400 md:max-w-[60ch]">
+              Choose a severity level to get started.
+            </p>
+          </header>
+
+          <SeverityButtons value={severity} onChange={handleSelect} />
+
+          {/* Continue CTA for “choose then continue” flow */}
+          <button
+            disabled={!severity}
+            className="h-12 px-5 rounded-2xl font-semibold bg-blue-500 text-white shadow-sm disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+            onClick={() => {
+              if (!severity) return;
+              // navigate(`/report/details?severity=${severity}`);
+            }}
+          >
+            Continue
+          </button>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+Data flow (with Zustand, if you have it)
+
+If you’re already using Zustand for drafts:
+
+// src/stores/reportDraft.ts
+import { create } from "zustand";
+import type { Severity } from "@/components/SeverityButtons";
+
+type Draft = {
+  severity: Severity | null;
+  setSeverity: (s: Severity) => void;
+};
+
+export const useReportDraft = create<Draft>((set) => ({
+  severity: null,
+  setSeverity: (s) => set({ severity: s }),
+}));
+
+
+Then swap in:
+
+const severity = useReportDraft((s) => s.severity);
+const setSeverity = useReportDraft((s) => s.setSeverity);
+
+Tablet rules
+
+At md: breakpoint, container becomes left-aligned; we keep the vertical stack.
+
+Optional helper text appears at the top (already in header).
+
+If design wants two-column on large tablets later, we can split: left (buttons), right (explanations).
+
+Analytics & haptics (optional)
+
+On select:
+
+if (navigator.vibrate) navigator.vibrate(8);
+analytics?.track?.("report_severity_selected", { value: v });
+
+Hand-off checklist for Replit
+
+ Confirm existing buttons + actions (see questions 1–6 above).
+
+ Decide: navigate immediately on selection vs Continue CTA.
+
+ Confirm where severity should be stored (local vs Zustand vs URL).
+
+ Color tokens: stick to Tailwind palette or map to your theme variables.
+
+Once you reply with the specifics, I’ll finalize the exact code (imports, store, navigation) to fit your architecture without disruption.

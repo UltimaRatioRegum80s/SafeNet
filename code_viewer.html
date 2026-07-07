@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NaborNet - Complete Code Viewer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            line-height: 1.4;
+        }
+        
+        .header {
+            background: #2d2d2d;
+            padding: 20px;
+            border-bottom: 2px solid #444;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        .header h1 {
+            color: #4a9eff;
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+        
+        .header p {
+            color: #888;
+            font-size: 14px;
+        }
+        
+        .navigation {
+            background: #333;
+            padding: 15px 20px;
+            border-bottom: 1px solid #555;
+            position: sticky;
+            top: 70px;
+            z-index: 99;
+        }
+        
+        .nav-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .nav-btn {
+            background: #444;
+            color: #e0e0e0;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+        
+        .nav-btn:hover {
+            background: #555;
+        }
+        
+        .content {
+            padding: 20px;
+            max-width: 100%;
+            overflow-x: auto;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+        }
+        
+        .section-title {
+            background: linear-gradient(135deg, #4a9eff, #7c3aed);
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px 8px 0 0;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        
+        .file-container {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 0 0 8px 8px;
+            margin-bottom: 20px;
+        }
+        
+        .file-header {
+            background: #333;
+            padding: 10px 15px;
+            border-bottom: 1px solid #444;
+            font-weight: bold;
+            color: #4a9eff;
+            font-size: 14px;
+        }
+        
+        .file-content {
+            padding: 15px;
+            white-space: pre-wrap;
+            font-size: 12px;
+            overflow-x: auto;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        
+        .keyword {
+            color: #ff6b9d;
+        }
+        
+        .string {
+            color: #4ecdc4;
+        }
+        
+        .comment {
+            color: #888;
+            font-style: italic;
+        }
+        
+        .function {
+            color: #95e1d3;
+        }
+        
+        .copy-btn {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            background: #4a9eff;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 11px;
+        }
+        
+        .copy-btn:hover {
+            background: #3a8eef;
+        }
+        
+        .file-container {
+            position: relative;
+        }
+        
+        .stats {
+            background: #2d2d2d;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-left: 4px solid #4a9eff;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .stats h3 {
+            color: #4a9eff;
+            margin-bottom: 10px;
+        }
+        
+        .stat-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .stat-item {
+            background: #333;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        
+        .stat-item strong {
+            color: #95e1d3;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📱 NaborNet - Complete Source Code</h1>
+        <p>Progressive Web Application for Neighborhood Safety & Community Reporting</p>
+    </div>
+    
+    <div class="navigation">
+        <div class="nav-buttons">
+            <button class="nav-btn" onclick="scrollToSection('config')">⚙️ Config</button>
+            <button class="nav-btn" onclick="scrollToSection('shared')">🗄️ Shared</button>
+            <button class="nav-btn" onclick="scrollToSection('server')">🖥️ Server</button>
+            <button class="nav-btn" onclick="scrollToSection('client-main')">📱 Client Main</button>
+            <button class="nav-btn" onclick="scrollToSection('pages')">📄 Pages</button>
+            <button class="nav-btn" onclick="scrollToSection('components')">🧩 Components</button>
+            <button class="nav-btn" onclick="scrollToSection('ui')">🎨 UI Components</button>
+            <button class="nav-btn" onclick="scrollToSection('hooks')">🔧 Hooks & Utils</button>
+            <button class="nav-btn" onclick="scrollToSection('stores')">🏪 Stores</button>
+        </div>
+    </div>
+    
+    <div class="content">
+        <div class="stats">
+            <h3>📊 Project Statistics</h3>
+            <div class="stat-grid">
+                <div class="stat-item">
+                    <strong>Total Files:</strong> 95+ TypeScript/React files
+                </div>
+                <div class="stat-item">
+                    <strong>Frontend:</strong> React + TypeScript + Vite
+                </div>
+                <div class="stat-item">
+                    <strong>Backend:</strong> Express + Node.js + PostgreSQL
+                </div>
+                <div class="stat-item">
+                    <strong>UI Library:</strong> shadcn/ui + Tailwind CSS
+                </div>
+                <div class="stat-item">
+                    <strong>Database:</strong> Drizzle ORM + PostgreSQL
+                </div>
+                <div class="stat-item">
+                    <strong>Features:</strong> Auth, Maps, Real-time, PWA
+                </div>
+            </div>
+        </div>
+        
+        <div id="loading" style="text-align: center; padding: 40px; color: #888;">
+            🔄 Loading all source code files...
+        </div>
+        
+        <div id="code-sections" style="display: none;"></div>
+    </div>
+    
+    <script>
+        function scrollToSection(sectionId) {
+            document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        function copyToClipboard(text, btnElement) {
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = btnElement.textContent;
+                btnElement.textContent = '✅ Copied!';
+                btnElement.style.background = '#28a745';
+                setTimeout(() => {
+                    btnElement.textContent = originalText;
+                    btnElement.style.background = '#4a9eff';
+                }, 2000);
+            });
+        }
+        
+        // This will be populated by the next step
+        window.addEventListener('load', () => {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('code-sections').style.display = 'block';
+        });
+    </script>
+</body>
+</html>

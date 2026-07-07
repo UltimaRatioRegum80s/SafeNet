@@ -1,0 +1,117 @@
+Hi Replit 👋
+
+Thanks for the technical audit — we accept your assessment that NaborNet is currently Early Alpha.
+
+We are now locking in a reverse-engineered path to Beta, and I want you to lead implementation decisions from here.
+
+🔒 Agreed operating model
+
+You (Replit) = Coding Lead / Technical Authority (final say on implementation & feasibility)
+
+ChatGPT = Systems, legal, safety, and product-risk assistant
+
+Me (human) = Product owner & final business decision-maker
+
+🎯 Immediate priorities (in order)
+
+Please treat the following as directives, not suggestions.
+
+Phase 0 — Legal + Branding (FIRST)
+
+Goal: reduce legal and reputational risk immediately.
+
+Add Terms of Service page
+
+Add Privacy Policy page
+
+Add in-app consent gate (must accept before use)
+
+Add clear disclaimers:
+
+Not emergency services
+
+Not police
+
+Information may be unverified
+
+Update manifest.json:
+
+Rename from SafeLy → NaborNet
+
+Fix icons and branding
+
+Disable / hide chat feature until moderation tooling is production-ready
+
+👉 Please propose:
+
+File locations
+
+Minimal UI approach
+
+Any architectural concerns
+
+Phase 1 — Auth Hardening
+
+Goal: prevent abuse and support issues.
+
+Email verification flow
+
+Password reset flow
+
+Remove whitelist signup OR make it admin-configurable
+
+Basic anti-abuse measures (rate limits, throttles, suspicious signup handling)
+
+👉 Tell me:
+
+Whether session-based auth is still acceptable here
+
+If you recommend any auth refactor now vs later
+
+Phase 2 — PWA Foundation (CORE)
+
+Goal: make this a real safety-grade PWA.
+
+Implement service worker
+
+Implement offline incident queue (IndexedDB)
+
+Allow report creation while offline
+
+Auto-sync when connection returns
+
+App-shell caching strategy
+
+Install prompt handling
+
+Confirm iOS PWA install path works
+
+👉 This phase is critical — please:
+
+Propose the exact service worker strategy
+
+Flag any risks or edge cases
+
+🧭 What I want back from you next
+
+Please respond with:
+
+A proposed task breakdown for Phases 0–2
+
+Any red flags you believe we’re underestimating
+
+Whether you agree chat should stay disabled until moderation is complete
+
+Your honest estimate of effort (rough days, not optimism)
+
+Be blunt. Correctness beats speed.
+
+Once you reply, I’ll paste your response back into ChatGPT so we can:
+
+Align legal/safety wording
+
+Lock the Beta definition
+
+Prevent scope creep
+
+Thanks — let’s build this properly.

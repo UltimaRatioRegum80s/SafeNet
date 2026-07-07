@@ -1,0 +1,200 @@
+Hi Replit,
+
+We are initiating a formal stock-take phase of the project before any further beta expansion, feature development, refactors, or UX/UI changes.
+
+The objective is to produce a clear, shared, evidence-based snapshot of the system as it exists today — at the page, route, data-flow, and architectural level — so that all subsequent decisions are grounded in reality rather than assumption, memory, or inferred intent.
+
+This is explicitly not a request to improve, refactor, or modify anything.
+This phase is strictly: observe, enumerate, and describe current behavior.
+
+Where helpful, you may use technical language, implementation details, and internal abstractions. Accuracy and completeness take priority over simplicity.
+
+Part 1: Page-by-Page Assessment (Required)
+
+Generate a report for each page / screen / major view in the application (i.e. each user-reachable UI surface).
+
+For each page, provide the following:
+
+1. Purpose
+
+The functional intent of the page
+
+What user or system requirement it fulfills
+
+Whether it is core, supporting, transitional, or administrative
+
+2. Functionality
+
+What the page actually does today (not what it was intended to do)
+
+Core behaviors, side effects, and constraints
+
+Any implicit assumptions encoded in the logic
+
+3. Buttons & Controls
+
+All interactive elements (buttons, toggles, icons, gestures)
+
+What each control triggers (events, state changes, API calls)
+
+Disabled, conditional, or gated states
+
+4. Links & Navigation
+
+Internal navigation paths (routes pushed/replaced)
+
+External links (if any)
+
+Entry points to the page and exit paths from it
+
+5. Layout
+
+Structural layout (sections, panels, ordering, composition)
+
+Responsive behavior (desktop vs mobile differences)
+
+Any conditional rendering that affects layout
+
+6. Current UX & UI State
+
+What currently works well
+
+What is awkward, unclear, brittle, or inconsistent
+
+Known UX compromises or trade-offs caused by technical constraints
+
+Part 2: Deeper Technical Context (Attach to Each Page)
+
+For each page, also include the following implementation-level context:
+
+7. Data & State Flow (Page → API → DB)
+
+Data read/write operations initiated by the page
+
+API endpoints called (HTTP method + route)
+
+Database tables and queries involved
+
+Distinction between:
+
+client-side state
+
+server-derived state
+
+cached or persisted local state
+
+Polling, refresh intervals, or subscription-like behavior
+
+8. Permissions & Gating
+
+Authentication requirements
+
+Verification / whitelist / admin gating
+
+Enforcement location (client-side, server-side, or both)
+
+Runtime behavior when access is denied (redirect, disabled UI, error, silent fail)
+
+9. Offline & Sync Behavior
+
+Whether the page renders or functions offline
+
+Local persistence used (IndexedDB, localStorage, memory)
+
+Sync behavior on reconnect (ordering, retries, backoff, failure modes)
+
+What data is purged on logout or session invalidation
+
+10. Error & Edge-Case Handling
+
+Expected failure modes and how they surface in UI
+
+Empty states (no data, no network, no permission)
+
+Rate-limit, idempotency, or conflict handling
+
+Known fragile or undefined edge cases
+
+11. Performance, Stability & Regression Risk
+
+Heavy renders, remount risks, or state resets
+
+Known hotspots (maps, feeds, refresh loops, observers)
+
+Patterns that could plausibly reintroduce prior bugs or regressions
+
+Part 3: Global System Wiring Report (Separate Section)
+
+Provide a system-level snapshot independent of individual pages:
+
+A. Route Map
+
+All frontend routes/pages
+
+All backend API endpoints
+
+Explicit mapping: which pages call which endpoints
+
+B. Data Model Snapshot
+
+All database tables with concise purpose descriptions
+
+Key relationships, constraints, and uniqueness rules
+
+Identification of high-risk / critical tables (e.g. incidents, users, legal consent, reactions)
+
+C. Background & Passive Behavior Inventory
+
+Service worker behavior and lifecycle
+
+Polling intervals and triggers
+
+Offline sync queue mechanics
+
+Any background, scheduled, or implicit processes
+
+D. Safety Controls & Kill Switches
+
+All kill switches and feature flags
+
+Where enforcement occurs (server middleware vs UI)
+
+Confirmation that safety-critical controls are enforced server-side
+
+E. Deployment & Version Truth
+
+Where runtime version truth is defined (e.g. /api/version, build stamps)
+
+Cache behavior for HTML shell and assets
+
+Service worker update strategy and known edge cases
+
+F. Known Debt & Risk Inventory
+
+Known technical debt items ranked by risk, not convenience
+
+Areas with weak or missing test coverage
+
+Explicit “should revisit later” notes (without acting on them now)
+
+Objective of This Exercise
+
+Establish a single, accurate snapshot of the current system
+
+Eliminate ambiguity between implemented behavior and assumed behavior
+
+Create a stable baseline before proposing changes
+
+Enable page-by-page upgrade decisions with full architectural context
+
+Reduce risk of scope creep, regressions, and assumption-driven work
+
+Once this assessment is complete, we will:
+
+Review pages and system areas methodically
+
+Define desired changes or upgrades per page
+
+Decide what advances into the next beta phase
+
+Thank you — this documentation will materially improve alignment, safety, and decision quality going forward.

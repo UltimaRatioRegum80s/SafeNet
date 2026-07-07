@@ -1,0 +1,218 @@
+here’s a clear sync message for Replit so you’re back on track in the milestone flow:
+
+Hey Replit 👋 — quick milestone recap so you know exactly where we are:
+
+Milestone 1 ✅ Backend foundation
+Status aliasing (state → status), neighborhood rooms for Socket.IO, anonymous privacy handling.
+→ Completed and working.
+
+Milestone 2 ✅ Shared ReportPanel
+Zustand-powered global panel, glass aesthetic, floating Report button on Map.
+→ Completed and working.
+
+Milestone 3 ✅ Entry points parity & polish
+Deep-linking with ?type=, safe-area FABs, analytics hooks, centralized incident types.
+→ Completed and working.
+
+Milestone 4 ✅ Location refinement UX
+Ghost pin, overlay, grid snapping, Esc/Enter confirm/cancel, safe integration into Map via modular hook.
+→ Completed and working.
+
+Milestone 5 🚧 Current
+We’re now hardening the media pipeline:
+
+Client-side compression (WebP/JPEG)
+
+Server-side Sharp pipeline with EXIF strip + validation
+
+Rate limiting + static serving
+
+Uploads router is already operational
+Next steps are about QA testing + small polish (headers, file size ceiling, progress UI, analytics), not rebuilding infra.
+
+So Replit: your task now is to validate the existing upload flow end-to-end and apply the small polish items GPT suggested (progress UI, cancel, protective headers, optional thumbnails).
+
+We’re not recovering broken routes or redoing uploads — the infrastructure is solid. We’re in Milestone 5 polish/QC mode.
+
+👉 Would you like me to draft a short checklist of tests + tiny server/client diffs so you can implement the polish in one safe sweep?
+
+You said:
+
+👉 Would you like me to draft a **short checklist of tests + tiny server/client diffs** so you can implement the polish in one safe sweep?
+
+yes
+NN Builder & Coder said:
+
+awesome — here’s a tight QA checklist + tiny diffs so Replit can land Milestone 5 polish in one sweep.
+
+QA smoke tests (10–12 mins)
+
+HEIC (iOS): upload 1–2 large photos → correct orientation; EXIF stripped; returns webp/jpg.
+
+Large JPEG (Android) on 3G throttle → total upload <~2MB; optimistic incident shows; no UI freeze.
+
+>2 files: UI blocks 3rd; server enforces 2.
+
+Anonymous + photos: incident created; socket event hides userId.
+
+Bad type (SVG/PSD): 415 + friendly toast.
+
+Rate limit: 20+ uploads/5m → 429 + clear message.
+
+Cancel mid-upload: abort works; form state preserved.
+
+Retry after failure: single retry succeeds without duplicate incident.
+
+Tiny server diffs
+1) Protective headers for /uploads/*
+
+server/index.ts
+
+import path from "path";
+import express from "express";
+
+// add this small middleware BEFORE express.static
+app.use("/uploads", (req, res, next) => {
+  res.setHeader("Referrer-Policy", "same-origin");
+  res.setHeader("X-Robots-Tag", "noindex");
+  next();
+});
+
+app.use("/uploads",
+  express.static(path.join(process.cwd(), "public/uploads"), {
+    immutable: true,
+    maxAge: "365d",
+  })
+);
+
+2) Output size ceiling (one-pass shrink, else 413)
+
+server/routes/uploads.ts (inside the loop, after you produce data)
+
+// after: let data = await pipeline.clone().webp({ quality: 78 }).toBuffer();
+// OR after jpeg fallback — place once, right before writing file
+
+const MAX_OUT = 800 * 1024; // 800 KB
+if (data.length > MAX_OUT) {
+  const smaller = await sharp(data).webp({ quality: 70 }).toBuffer();
+  if (smaller.length < data.length) data = smaller;
+  if (data.length > MAX_OUT) {
+    return res.status(413).json({
+      ok: false,
+      error: "Image too large after compression. Try a smaller photo.",
+    });
+  }
+}
+
+3) (Optional) Thumbnails (thumb + medium)
+
+server/routes/uploads.ts (after saving full)
+
+const baseId = webpId ?? jpgId;
+const basePath = path.join(outDir, baseId); // without extension
+
+async function writeVariant(buf: Buffer, w: number, suffix: string) {
+  const out = await sharp(buf).resize({ width: w, fit: "inside" }).webp({ quality: 75 }).toBuffer();
+  await fs.writeFile(`${basePath}_${suffix}.webp`, out);
+  return { url: `/uploads/${baseId}_${suffix}.webp`, variant: suffix };
+}
+
+// after pushing the full result:
+const medium = await writeVariant(data, 1024, "1024");
+const thumb  = await writeVariant(data, 320,  "320");
+
+// include in response:
+results.push({ ...medium }, { ...thumb });
+
+Tiny client diffs
+1) Upload progress/cancel + disable Submit
+
+client/src/features/report/ReportPanel.tsx
+
+const controllerRef = useRef<AbortController|null>(null);
+const [uploading, setUploading] = useState(false);
+
+async function prepareAndUploadWithUi(files: File[]) {
+  controllerRef.current = new AbortController();
+  setUploading(true);
+  try {
+    return await prepareAndUpload(files, controllerRef.current.signal);
+  } finally {
+    setUploading(false);
+  }
+}
+
+function cancelUpload() {
+  controllerRef.current?.abort();
+}
+
+<Button
+  onClick={handleSubmit}
+  disabled={mutation.isPending || cooldownActive || !hasCoords || uploading}
+>
+  {uploading ? "Uploading…" : mutation.isPending ? "Submitting…" : cooldownActive ? `Wait ${secondsLeft}s` : "Submit"}
+</Button>
+
+{/* optional cancel control when uploading */}
+{uploading && (
+  <button className="text-xs underline opacity-80" onClick={cancelUpload}>
+    Cancel upload
+  </button>
+)}
+
+
+Then in handleSubmit:
+
+const urls = photosFiles.length ? await prepareAndUploadWithUi(photosFiles) : [];
+mutation.mutate({ /* ... , */ photos: urls });
+
+2) Friendly error toasts
+catch (err: any) {
+  const message =
+    err?.name === "AbortError" ? "Upload canceled." :
+    err?.message?.includes("413") ? "Photo is too large after compression." :
+    err?.message || "Upload failed. Please try again.";
+  toast({ variant: "destructive", title: "Upload issue", description: message });
+}
+
+3) Analytics hooks
+
+client/src/lib/analytics.ts – already added track(). Call:
+
+track("upload_start", { files: photosFiles.length });
+const t0 = performance.now();
+const urls = await prepareAndUploadWithUi(photosFiles);
+track("upload_done", { files: urls.length, ms: Math.round(performance.now() - t0) });
+
+track("report_submit", {
+  type: selected?.id, anon: isAnonymous, has_photos: urls.length > 0
+});
+
+4) (Optional) Use thumbnails in list/map
+
+If server returns { variant: "320" | "1024" | "full" }, pick smallest suitable:
+
+function pickBestImage(files, target = 400) {
+  const byVar = Object.fromEntries(files.map(f => [f.variant, f]));
+  return target <= 400 ? byVar["320"]?.url ?? byVar["1024"]?.url ?? byVar.full?.url
+       : target <= 1024 ? byVar["1024"]?.url ?? byVar.full?.url
+       : byVar.full?.url;
+}
+
+Rollback & safety
+
+All changes are additive. If any server change misbehaves, comment out the size ceiling and thumbnail block; uploads continue to work.
+
+Client falls back gracefully: if upload fails, we keep the form state, show toast, and let users retry.
+
+Done criteria
+
+E2E matrix passes.
+
+Submit button blocks during upload; cancel works.
+
+Headers present on /uploads/* responses.
+
+Optional: feed/map show thumbs; tapping opens full image.
+
+Ping when you’ve run the QA matrix; if anything fails, tell me which case + error and I’ll adjust the patches.

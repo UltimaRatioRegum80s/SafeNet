@@ -1,0 +1,122 @@
+awesome — the screenshots help a ton. Here’s the quick read:
+
+The green “2” cluster near Cape Town = our sanity markers.
+
+Your real incidents (e.g. lat:-22.55,lng:17.07 near Windhoek) aren’t being counted because they’re not being added to the same MarkerClusterGroup the counter watches.
+
+The right panel says “No incidents” while the “In View” filter is on and you’re centered far from Windhoek — that’s expected if incidents are off-screen.
+
+Let’s fix the cluster mismatch now and add one-click debug to prove it.
+
+🟣 GPT → Replit (drop-in, low-risk patches)
+1) Create a singleton cluster so every marker goes to the same place
+
+client/src/lib/cluster.ts
+
+import L from "leaflet";
+import type "leaflet.markercluster";
+
+let _cluster: L.MarkerClusterGroup | null = null;
+
+export function ensureCluster(map: L.Map) {
+  if (!_cluster) {
+    _cluster = L.markerClusterGroup({
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+      disableClusteringAtZoom: 17,
+    });
+    map.addLayer(_cluster);
+    (window as any).__nnCluster = _cluster;
+  }
+  return _cluster;
+}
+
+export function getCluster() {
+  return _cluster;
+}
+
+2) Use the singleton in your map init
+
+In MapView.tsx (after you create the map):
+
+import { ensureCluster } from "@/lib/cluster";
+// ...
+const cluster = ensureCluster(map);
+clusterRef.current = cluster;
+
+3) Route all marker creation through the cluster
+
+Wherever createIncidentMarker() currently does marker.addTo(map) or adds to another group, change to:
+
+import { getIncidentIcon } from "@/lib/incidentIcons";
+import { getCluster } from "@/lib/cluster";
+
+export function createIncidentMarker(inc: {
+  id: string; type: string; latitude?: number; longitude?: number; lat?: number; lng?: number; title?: string;
+}) {
+  const lat = Number(inc.lat ?? inc.latitude);
+  const lng = Number(inc.lng ?? inc.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  const ll = Math.abs(lat) > 90 && Math.abs(lng) <= 90 ? L.latLng(lng, lat) : L.latLng(lat, lng);
+  const icon = getIncidentIcon(inc.type) ?? undefined;
+
+  const m = icon ? L.marker(ll, { icon, title: inc.title ?? inc.type }) 
+                 : L.circleMarker(ll, { radius: 7, color: "#2563eb", weight: 2, fillOpacity: 0.9 }) as unknown as L.Marker;
+
+  const cluster = getCluster();
+  if (!cluster) { console.warn("[NN] cluster missing at marker add"); return null; }
+  cluster.addLayer(m);
+  (m as any).incidentId = inc.id;
+  return m;
+}
+
+
+Replace all other addTo(map) / addTo(layerGroup) calls for incidents with createIncidentMarker(incident).
+
+4) Make the debug counter watch the real cluster
+
+In MapView.tsx, after clusterRef.current = cluster:
+
+const updateCount = () => {
+  const el = document.getElementById("nn-debug-count");
+  if (el) el.textContent = `markers: ${cluster.getLayers().length}`;
+};
+
+cluster.on("layeradd", updateCount);
+cluster.on("layerremove", updateCount);
+updateCount();
+
+5) Add a quick mismatch scanner (temporary debug)
+
+Paste this once in MapView.tsx after map+cluster are ready:
+
+(window as any).__nnScan = () => {
+  const cluster = clusterRef.current!;
+  const orphans: any[] = [];
+  map.eachLayer((l: any) => {
+    if (l instanceof L.Marker && !cluster.hasLayer(l)) orphans.push(l);
+  });
+  console.log("[NN] cluster count:", cluster.getLayers().length, "orphans:", orphans.length, orphans);
+};
+
+
+Run __nnScan() in the console — any “orphans” are markers added outside the cluster.
+
+6) One-click fly to last incident for @RDM
+
+Add this helper so you can jump to Windhoek from console:
+
+(window as any).__nnFly = (lat:number, lng:number, z=14) => __nnMap?.setView([lat, lng], z);
+
+
+Then run:
+__nnFly(-22.55, 17.07, 14)
+
+🟠 Replit → GPT (what to confirm back)
+
+createIncidentMarker() now adds to getCluster() (no direct map.addLayer for incidents).
+
+__nnScan() shows 0 orphans after creating an incident.
+
+The top-left counter now reflects the true number after you add one.

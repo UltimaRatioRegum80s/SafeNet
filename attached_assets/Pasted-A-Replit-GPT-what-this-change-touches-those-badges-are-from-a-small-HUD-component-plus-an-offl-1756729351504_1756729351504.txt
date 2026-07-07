@@ -1,0 +1,158 @@
+A) Replit → GPT (what this change touches)
+
+those badges are from a small HUD component plus an offline-queue (and maybe service worker background-sync).
+
+safe removal means:
+
+stop rendering the HUD,
+
+make all “save offline / retry later” code paths no-ops,
+
+prevent the service worker from retrying/announcing anything.
+
+no changes to: report modal, map, sockets, cluster, auth.
+
+B) GPT → Replit (exact steps — minimal, reversible)
+0) quick repo search (to locate code)
+
+Run these in Replit’s shell:
+
+rg -n "Submitting\.\.\.|Saved offline|OfflineBadge|SubmitHud|NetHUD|offlineQueue|background sync|idb|workbox|enqueueIncident|processQueue|registerServiceWorker"
+
+
+You’ll see the HUD component and the queue helpers. Apply the edits below.
+
+1) Kill the HUD visually (return null)
+
+In the HUD component (e.g., client/src/components/SubmitHud.tsx or similar):
+
+// HARD DISABLE
+export default function SubmitHud() {
+  return null;
+}
+
+
+or, if it exports multiple bits:
+
+export const HUD_ENABLED = false;
+export default function SubmitHud() {
+  if (!HUD_ENABLED) return null;
+  // (existing JSX left intact for future)
+}
+
+
+Where it’s mounted (likely App.tsx or MapView.tsx), guard the usage:
+
+// BEFORE
+<SubmitHud />
+
+// AFTER
+{false && <SubmitHud />}
+
+
+This removes the bubbles from the UI without affecting anything else.
+
+2) Make the offline-queue a no-op
+
+In your queue helper (e.g., client/src/lib/offlineQueue.ts, queueService.ts, or smartHttp.ts):
+
+export const OFFLINE_QUEUE_DISABLED = true;
+
+export async function enqueueIncident(_payload: any) {
+  if (OFFLINE_QUEUE_DISABLED) return; // no-op
+  // old enqueue logic stays for future use
+}
+
+export async function processQueue() {
+  if (OFFLINE_QUEUE_DISABLED) return; // no-op
+  // old processing logic
+}
+
+
+If your POST wrapper auto-enqueues on failure, neuter that path:
+
+// client/src/lib/http.ts (or wherever postJSON lives)
+export async function postJSON(url: string, body: any, opts: RequestInit = {}) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    ...opts,
+  });
+  if (!res.ok) {
+    // was: await enqueueIncident(body)
+    throw new Error(await res.text().catch(()=>"Request failed"));
+  }
+  return res.json();
+}
+
+
+Remove “Saved offline” toasts anywhere they’re shown:
+
+// find: "Saved offline"
+if (false) toast.success("Saved offline"); // disabled
+
+3) Stop SW background-sync / retries (if present)
+
+In sw.js / sw.ts (service worker file):
+
+const OFFLINE_RETRY_DISABLED = true;
+
+self.addEventListener('sync', event => {
+  if (OFFLINE_RETRY_DISABLED) return; // ignore background sync
+  // old logic kept for future
+});
+
+self.addEventListener('fetch', event => {
+  // if you special-case /api/incidents here, bail out:
+  if (OFFLINE_RETRY_DISABLED) return; // network goes straight through
+  // old caching code
+});
+
+
+Force clients to update SW:
+
+bump a version constant in the SW file, e.g. const SW_VERSION = "v11-nooffline";
+
+ensure your registration code calls registration.update() once after load, or just reload after deploy.
+
+4) Make submit path simple & synchronous
+
+Where your submit action lives (modal submit), keep it straightforward:
+
+try {
+  await postJSON("/api/incidents", payload, { credentials: "include" });
+  toast.success("Incident reported");
+  // (keep your existing local event to show/pan a dot immediately, if present)
+} catch (e:any) {
+  toast.error("Couldn't submit");
+}
+
+
+No HUD, no queue, no “saved offline”. If the network fails, we see the error and fix it — nothing hidden.
+
+5) Optional cleanup (safe to do later)
+
+Delete the HUD component and its import lines.
+
+Delete queue storage (IndexedDB/localStorage) keys if you used them (one-off console: indexedDB.deleteDatabase('nn-offline-queue')).
+
+Remove SW background-sync code entirely once you’re confident.
+
+Quick test for @RDM
+
+Reload the app (hard refresh).
+
+The bottom-right bubbles should be gone.
+
+Submit an incident:
+
+Success toast shows.
+
+Your map shows the dot/marker (the rest of UI unchanged).
+
+Switch the device offline and submit:
+
+You should get a straight “Couldn’t submit” error (no “Saved offline” text).
+
+Go back online and submit again — should succeed.

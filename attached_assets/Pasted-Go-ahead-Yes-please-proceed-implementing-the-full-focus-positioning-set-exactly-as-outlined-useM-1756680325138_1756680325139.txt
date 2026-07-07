@@ -1,0 +1,98 @@
+Go-ahead
+
+Yes, please proceed implementing the full focus/positioning set exactly as outlined:
+
+useMobileLocation.ts
+
+useSubmitIncident.ts (Wouter redirect with lat,lng,z,highlight)
+
+Map focus (URL params + pulse + localStorage fallback)
+
+Optimistic marker normalization
+
+Pulse color
+
+Default to brand-primary if you have a CSS var (e.g., --brand), else use the current red #ef4444. Here’s a tiny tweak so it auto-adapts:
+
+:root { --nn-pulse: var(--brand, #ef4444); }
+.nn-pulse { animation: nn-pulse 1s ease-out infinite; }
+@keyframes nn-pulse {
+  0% { transform: scale(0.8); opacity: 0.7; stroke: var(--nn-pulse); }
+  100% { transform: scale(1.2); opacity: 0.1; stroke: var(--nn-pulse); }
+}
+
+
+And in Leaflet:
+
+L.circleMarker([lat,lng], {
+  radius: 16,
+  color: getComputedStyle(document.documentElement).getPropertyValue("--nn-pulse") || "#ef4444",
+  fillColor: getComputedStyle(document.documentElement).getPropertyValue("--nn-pulse") || "#ef4444",
+  fillOpacity: 0.25,
+  weight: 2,
+  className: "nn-pulse",
+})
+
+2 micro-patches to make this rock-solid
+(A) Wouter + querystring reactivity
+
+window.location.search isn’t reactive by itself. Add a tiny hook so the map re-reads params whenever query changes (push/replace/pop).
+
+// client/src/router/useSearchParamsWouter.ts
+import { useEffect, useState } from "react";
+
+export function useSearchParamsWouter() {
+  const [search, setSearch] = useState(window.location.search);
+
+  useEffect(() => {
+    const update = () => setSearch(window.location.search);
+
+    // Monkey-patch pushState/replaceState to catch SPA navigations
+    const origPush = history.pushState;
+    const origReplace = history.replaceState;
+    (history as any).pushState = function(...args: any[]) {
+      origPush.apply(this, args); update();
+    };
+    (history as any).replaceState = function(...args: any[]) {
+      origReplace.apply(this, args); update();
+    };
+
+    window.addEventListener("popstate", update);
+    return () => {
+      history.pushState = origPush;
+      history.replaceState = origReplace;
+      window.removeEventListener("popstate", update);
+    };
+  }, []);
+
+  return new URLSearchParams(search);
+}
+
+
+Use it in MapView:
+
+const sp = useSearchParamsWouter();
+const lat = Number(sp.get("lat"));
+const lng = Number(sp.get("lng"));
+
+(B) Don’t let fit/cluster logic override focus
+
+If you still run a “fit to incidents” on load, skip it when a focus param is present, otherwise the map may pan away right after we center.
+
+const hasFocus = Number.isFinite(lat) && Number.isFinite(lng);
+// ...
+if (!hasFocus) {
+  // your existing fitBounds-on-first-load code (or none)
+}
+
+Quick test after implementation (real phone)
+
+Report incident → URL becomes /community/map?lat=…&lng=…&z=17&highlight=1.
+
+Map animates to location; red (or brand) pulse shows ~4s.
+
+Optimistic marker visible immediately, then persists after socket/fetch.
+
+Background app 15s → return: marker still there; no pan away.
+
+Share link with params to another device → opens centered with pulse.

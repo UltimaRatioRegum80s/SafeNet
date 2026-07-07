@@ -1,0 +1,96 @@
+here’s a drop-in Leaflet “incident icon set” you can paste into Replit. It’s designed to use your existing incident categories and color/style, with mini (20–24px) icons. Swap the file names for your own assets and you’re done.
+
+1) Put your tiny icons in your project
+
+Place 20–24px PNG/SVG files here (or similar):
+
+/public/icons/            (Vite/Next/Static)
+/static/icons/            (Flask)
+/icons/                   (plain Express/public)
+
+
+Name them something like:
+
+lost-pet.png, lost-found.png, car-accident.png, burglary.png, suspicious.png,
+traffic.png, construction.png, alarm.png, fire.png, sos.png, violence.png, hitrun.png
+
+2) Create incidentIcons.js (or add to your main JS)
+// incidentIcons.js
+// Miniature Leaflet icons for each incident type.
+// Keep sizes small; adjust iconSize if you want even tinier markers.
+
+const basePath = '/icons'; // change if your static path is different
+
+function mkIcon(filename) {
+  return L.icon({
+    iconUrl: `${basePath}/${filename}`,
+    iconSize: [22, 22],      // miniature size (20–24px works well)
+    iconAnchor: [11, 22],    // bottom-center sits on lat/lng point
+    popupAnchor: [0, -20],   // popup above the icon
+    // shadowUrl: `${basePath}/shadow.png`,
+    // shadowSize: [24, 24],
+    // shadowAnchor: [12, 24],
+  });
+}
+
+// Define icons per category (match your app’s categories exactly)
+export const INCIDENT_ICONS = {
+  'lost_pet':         mkIcon('lost-pet.png'),
+  'lost_found':       mkIcon('lost-found.png'),
+  'car_accident':     mkIcon('car-accident.png'),
+  'burglary':         mkIcon('burglary.png'),          // Break-in / Burglary
+  'suspicious':       mkIcon('suspicious.png'),
+  'traffic':          mkIcon('traffic.png'),
+  'construction':     mkIcon('construction.png'),
+  'alarm':            mkIcon('alarm.png'),             // Emergency alarm
+  'fire':             mkIcon('fire.png'),
+  'sos':              mkIcon('sos.png'),               // SOS / Need Help
+  'violence':         mkIcon('violence.png'),          // Violence / Fight
+  'hit_run':          mkIcon('hitrun.png'),
+};
+
+// Helper: get an icon safely, with a sensible fallback
+export function getIncidentIcon(type) {
+  return INCIDENT_ICONS[type] || mkIcon('default.png'); // provide a tiny default.png
+}
+
+3) Use it when rendering markers
+// Example usage when you add incidents to the map:
+import { getIncidentIcon } from './incidentIcons.js';
+
+function addIncidentMarker(incident) {
+  const { lat, lng, type, title } = incident; // type must match keys above
+  const marker = L.marker([lat, lng], { icon: getIncidentIcon(type) }).addTo(map);
+
+  // Optional: show accuracy circle if you store accuracy_m
+  if (incident.accuracy_m) {
+    L.circle([lat, lng], {
+      radius: incident.accuracy_m,
+      weight: 1,
+      opacity: 0.4,
+      fillOpacity: 0.08
+    }).addTo(map);
+  }
+
+  marker.bindPopup(`
+    <strong>${title || type.replace('_',' ')}</strong><br/>
+    ${incident.description ? incident.description : ''}
+  `);
+
+  return marker;
+}
+
+4) Recommended type values (match your “Report” cards)
+
+Use these type strings when posting incidents so the correct icon appears:
+
+lost_pet, lost_found, car_accident, burglary, suspicious,
+traffic, construction, alarm, fire, sos, violence, hit_run
+
+Notes & tips
+
+Keep icons crisp at small sizes. If your current UI icons are larger, export a 2× version and set iconSize: [22, 22] (browser will downscale cleanly).
+
+For retina sharpness, you can also add iconRetinaUrl pointing to a 2× asset.
+
+If you want category-colored halos (tiny circles under the icon), let me know—I’ll give you a small DivIcon variant that keeps your palette without changing the icon art.

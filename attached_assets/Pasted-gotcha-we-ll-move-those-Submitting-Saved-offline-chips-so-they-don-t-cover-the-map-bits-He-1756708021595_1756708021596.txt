@@ -1,0 +1,84 @@
+gotcha — we’ll move those “Submitting…” / “Saved offline” chips so they don’t cover the map bits. Here’s the split response:
+
+🟣 GPT → Replit (precise, low-risk patches)
+1) Reposition the status chips to the top-right (and keep them clickable)
+
+If you render them inside a HUD/Toast component, wrap with a fixed stack:
+
+// client/src/components/StatusHUD.tsx
+export default function StatusHUD({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      id="nn-status-stack"
+      className="fixed top-3 right-3 z-[1000] pointer-events-none flex flex-col gap-2"
+    >
+      {/* allow clicks on the chips themselves */}
+      <div className="pointer-events-auto flex flex-col gap-2">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+
+Mount StatusHUD once near your app root and render the two chips inside it.
+
+If you already have a container, you can also just override with CSS:
+
+/* client/src/index.css */
+#nn-status-stack {
+  position: fixed;
+  top: .75rem;     /* ⬆️ top-right */
+  right: .75rem;
+  bottom: auto;
+  left: auto;
+  z-index: 1000;
+  pointer-events: none; /* container ignores clicks */
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+}
+#nn-status-stack > * { pointer-events: auto; } /* chips stay clickable */
+
+/* put them bottom-right on very small screens if you prefer */
+@media (max-width: 380px) {
+  #nn-status-stack { top: auto; right: .5rem; bottom: .5rem; }
+}
+
+
+Replace your current chip container’s id/class with #nn-status-stack, or adapt the selector to match your component.
+
+2) Move our debug counter away from bottom-left controls
+
+Change the Leaflet control position from bottomleft to topleft:
+
+// in MapView.tsx where we create the counter control
+const counter = L.control({ position: "topleft" });
+
+3) (Optional) Nudge Leaflet’s built-in controls so they don’t collide
+// when creating the map
+const map = L.map("nn-map", { zoomControl: false, preferCanvas: true }).setView([..], 12);
+L.control.zoom({ position: "topleft" }).addTo(map);
+map.attributionControl.setPosition("bottomright");
+
+
+If you use any extra Leaflet controls (fullscreen, geolocate), set their position: "topleft" | "topright" consistently.
+
+4) Keep cluster popups tappable (z-index sanity)
+
+Add (or keep) a high z-index for Leaflet popups/markers so chips never cover them:
+
+/* ensure Leaflet UI sits above page chrome but below modals */
+.leaflet-pane,
+.leaflet-top,
+.leaflet-bottom { z-index: 400; }       /* markers, controls */
+.leaflet-popup-pane { z-index: 600; }   /* popups */
+#nn-status-stack { z-index: 1000; }     /* our chips */
+
+🟠 Replit → GPT (what to report back)
+
+Confirm the chips now appear top-right and no longer cover the attribution or bottom-left controls.
+
+Confirm the debug counter moved to top-left.
+
+While testing another incident submit, please grab the Network tab details for /api/incidents (status code + payload). That tells me exactly why it’s getting queued despite being online, and I’ll hand you the exact backend/frontend fix next.

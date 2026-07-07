@@ -1,0 +1,178 @@
+Thanks for the screenshots — the error is clear:
+
+incidents is not defined in Map.tsx at the effect that runs when the map is ready:
+
+addIncidentsToMap(map, incidents);
+                       ^ not defined
+
+
+This happens because that effect references a variable named incidents that isn’t in scope (no local state, different name, or it lives in another store).
+
+Here’s a tiny, safe fix that also avoids using mapRef.current in a dependency array (which won’t retrigger). No UI/style changes.
+
+1) Create local state for incidents + a mapReady flag
+
+Put these near the top of Map.tsx:
+
+// Map.tsx
+import { useEffect, useRef, useState } from "react";
+import L from "leaflet";
+
+// shape it to what your API returns
+type Incident = {
+  id: string;
+  title: string;
+  lat: number;
+  lng: number;
+  createdAt: string;
+};
+
+const markersRef = new Map<string, L.Marker>();
+
+export default function CommunityMap() {
+  const mapRef = useRef<L.Map | null>(null);
+
+  // ✅ this is the "incidents" your effect expects
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+
+  // turn this on when the map is created
+  const [mapReady, setMapReady] = useState(false);
+
+
+And make sure your <MapContainer> sets both the ref and the ready flag:
+
+  return (
+    <MapContainer
+      whenCreated={(m) => {
+        mapRef.current = m;
+        setMapReady(true);
+      }}
+      // ...your existing props
+    >
+      {/* layers */}
+    </MapContainer>
+  );
+}
+
+2) Load incidents independent of the map (your current logic)
+
+Where you do the initial load (/api/incidents/live then fallback), assign into setIncidents(...):
+
+useEffect(() => {
+  let cancel = false;
+
+  (async () => {
+    try {
+      // keep your same order
+      let items: Incident[] = await (await fetch("/api/incidents/live")).json();
+
+      if (!items?.length) {
+        const resp = await fetch("/api/incidents?limit=50");
+        const data = await resp.json();
+        items = Array.isArray(data) ? data : data.items ?? [];
+      }
+
+      if (!cancel) setIncidents(items);
+    } catch (e) {
+      console.warn("Initial incidents load failed", e);
+    }
+  })();
+
+  return () => {
+    cancel = true;
+  };
+}, []);
+
+
+If you already have this, just ensure the final line is setIncidents(...).
+
+3) Replace the broken effect with a map-ready effect
+
+Remove the dependency array that used mapRef.current / _loaded, and use mapReady instead:
+
+useEffect(() => {
+  if (!mapReady || !mapRef.current) return;
+
+  const map = mapRef.current;
+  console.log("Map ready, adding", incidents.length, "incidents to map");
+  addIncidentsToMap(map, incidents);
+}, [mapReady, incidents]);
+
+
+This ensures the effect runs when:
+
+the map becomes ready, and/or
+
+new incidents arrive.
+
+4) Keep your bbox watchdog starting only after the map exists
+useEffect(() => {
+  if (!mapReady || !mapRef.current) return;
+
+  const map = mapRef.current;
+  let intervalId: number | null = null;
+
+  const tick = async () => {
+    const b = map.getBounds();
+    const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(",");
+    try {
+      const res = await fetch(`/api/incidents?bbox=${bbox}&sinceHours=72&limit=300`);
+      const data = await res.json();
+      const items: Incident[] = Array.isArray(data) ? data : data.items ?? [];
+      if (items.length) {
+        setIncidents((prev) => dedupeById([...items, ...prev]));
+      }
+    } catch (e) {
+      console.warn("Watchdog fetch failed", e);
+    }
+  };
+
+  tick();
+  map.on("moveend", tick);
+  intervalId = window.setInterval(tick, 20_000);
+
+  return () => {
+    map.off("moveend", tick);
+    if (intervalId) clearInterval(intervalId);
+  };
+}, [mapReady]);
+
+5) Helpers (plug in your existing marker/icon logic)
+function addIncidentsToMap(map: L.Map, items: Incident[]) {
+  for (const it of items) {
+    if (markersRef.has(it.id)) continue;
+    const marker = L.marker([it.lat, it.lng]); // replace with your custom icon/cluster if you have it
+    marker.bindPopup(`<strong>${escapeHtml(it.title)}</strong>`);
+    marker.addTo(map);
+    markersRef.set(it.id, marker);
+  }
+}
+
+function dedupeById(items: Incident[]) {
+  const seen = new Set<string>();
+  const out: Incident[] = [];
+  for (const i of items) if (!seen.has(i.id)) { seen.add(i.id); out.push(i); }
+  return out;
+}
+
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+}
+
+Why this fixes your exact error
+
+You now define incidents in the component scope with useState, so the effect can read it.
+
+You no longer depend on mapRef.current in the deps array (which doesn’t change identity), but on a stable mapReady flag → the effect actually fires.
+
+Quick checklist
+
+ const [incidents, setIncidents] = useState<Incident[]>([]) exists in Map.tsx
+
+ All data loaders end with setIncidents(...)
+
+ The adding-markers effect depends on [mapReady, incidents]
+
+ whenCreated sets both the ref and setMapReady(true)
+
+If any piece of your current file is structured differently (e.g., incidents come from a Zustand store under incidentStore.list), swap incidents with that value, or setIncidents with your store setter—keeping the same effect pattern.

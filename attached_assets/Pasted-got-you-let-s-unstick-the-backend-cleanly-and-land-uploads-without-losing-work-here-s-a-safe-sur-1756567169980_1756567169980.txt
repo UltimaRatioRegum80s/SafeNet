@@ -1,0 +1,139 @@
+got you — let’s unstick the backend cleanly and land uploads without losing work. here’s a safe, surgical recovery plan with copy-paste patches.
+
+Step 0 — Pick a recovery path
+
+Recommended (fastest & least risky):
+
+A) Restore server/routes.ts from Replit History/checkpoint (you mentioned you had a recent checkpoint).
+
+Restore just that one file to the last good version.
+
+Then proceed to Step 2 (mount uploads in index.ts) so we avoid touching routes.ts again.
+
+If history restore isn’t available right now:
+
+B) Bypass routes.ts temporarily and keep the rest compiling.
+
+Create a tiny shim so index.ts doesn’t import the corrupted file.
+
+You can swap back later once you restore routes.ts.
+
+I’ll give you both A and B; use A if you can.
+
+Step 1B — (Only if needed) Create a shim to bypass the corrupted routes
+
+Create a new file:
+
+server/routes-shim.ts
+
+// Minimal no-op shim to keep the app compiling while routes.ts is being restored.
+import type { Express } from "express";
+
+export async function registerRoutes(app: Express): Promise<void> {
+  // Intentionally empty – real routes mounted elsewhere (e.g., index.ts).
+  // Swap back to ./routes once you restore it.
+}
+
+
+In server/index.ts, change the import just for now:
+
+// Before:
+// import { registerRoutes } from "./routes";
+
+// After:
+import { registerRoutes } from "./routes-shim";
+
+
+Leave the rest of index.ts intact. This gets you compiling again so you can mount uploads without relying on the corrupted file.
+
+Later, once routes.ts is restored, revert the import back to ./routes.
+
+Step 2 — Mount uploads in index.ts (safest place)
+
+This avoids further edits to routes.ts and keeps uploads nicely isolated.
+
+In server/index.ts:
+
+Ensure static hosting (you said you added it, keep it):
+
+import path from "path";
+// ...
+app.use(
+  "/uploads",
+  express.static(path.join(process.cwd(), "public/uploads"), {
+    immutable: true,
+    maxAge: "365d",
+  })
+);
+
+
+Mount the uploads router with rate limiting and optional auth:
+
+import uploadsRouter from "./routes/uploads";
+import { limitUploads } from "./middleware/rateLimitUploads";
+// If you have it under a different path, adjust:
+import { requireAuthOptional } from "./middleware/auth"; 
+
+// Mount before your general 404/error handlers:
+app.use("/api/uploads", limitUploads, requireAuthOptional, uploadsRouter);
+
+
+That’s it — uploads are now live, completely independent of routes.ts.
+
+Step 3 — Verify server compiles
+
+Run TypeScript check / start the server. If you used the shim, the app will boot; if you restored routes.ts, even better.
+
+Step 4 — Client wiring (you already added most)
+
+client/src/lib/image.ts (compress)
+
+client/src/lib/upload.ts (multipart POST to /api/uploads)
+
+In ReportPanel, on submit:
+
+compress → uploadImages() → receive URLs
+
+call /api/incidents with photos: string[] (the URLs)
+
+Disable Submit while uploading and show a toast on failure — you’ve got this wired.
+
+Step 5 — Nice-to-have server hardening (quick)
+
+In server/routes/uploads.ts, you already have:
+
+multer.memoryStorage()
+
+magic-byte validation (file-type)
+
+sharp().rotate().resize().webp() (strips EXIF)
+
+fallback to JPEG
+
+limits.files = 2, limits.fileSize = 8MB
+
+You can add an output size cap if desired:
+
+if (data.length > 800 * 1024) {
+  // optional: recompress lower quality or reject with 413
+}
+
+Step 6 — Sanity QA
+
+iOS HEIC → uploads → returns .webp/.jpg, no EXIF, correct orientation.
+
+Huge JPEG → client compresses; server accepts; total <~1–2MB.
+
+Anonymous + photo → incident created; broadcast hides userId.
+
+.svg → 415 Unsupported.
+
+Rate limit → 429 JSON.
+
+TL;DR
+
+Best: restore old routes.ts, then mount uploads in index.ts.
+
+Else: use routes-shim.ts so the app compiles, mount uploads in index.ts, restore routes.ts later and flip the import back.
+
+Ping me once you’ve restored or shimmed — I’ll help verify boot + a quick end-to-end photo upload test in the panel.

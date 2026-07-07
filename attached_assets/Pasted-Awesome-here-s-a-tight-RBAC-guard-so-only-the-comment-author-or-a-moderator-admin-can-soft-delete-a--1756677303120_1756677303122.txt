@@ -1,0 +1,125 @@
+Awesome—here’s a tight RBAC guard so only the comment author or a moderator/admin can soft-delete a comment. It fits your single-file server/routes.ts, uses your existing req.user, and keeps the rest of the flow unchanged.
+
+1) Small helper (role checks)
+// server/auth/rbac.ts
+export type UserLike = { id: string; role?: string | null };
+
+export function isModeratorOrAdmin(user?: UserLike): boolean {
+  if (!user) return false;
+  const role = (user.role ?? "").toLowerCase();
+  return role === "moderator" || role === "admin";
+}
+
+
+If your roles are numeric/enum, tweak the comparison accordingly.
+
+2) Guarded soft-delete route
+
+Replace your previous DELETE handler with this version. It:
+
+Fetches the comment’s author,
+
+Allows delete if author or moderator/admin,
+
+Performs a soft delete (deletedAt),
+
+Emits the same Socket.IO event as before.
+
+// server/routes.ts
+import { and, eq, isNull } from "drizzle-orm";
+import { incidentComments } from "@/shared/schema";
+import { isModeratorOrAdmin } from "./auth/rbac";
+
+// …
+
+router.delete(
+  "/api/incidents/:incidentId/comments/:commentId",
+  async (req: any, res) => {
+    if (!req.user) return res.status(401).end();
+
+    const { incidentId, commentId } = req.params;
+    // 1) Load comment to check ownership (and ensure it belongs to the incident)
+    const comment = await db.query.incidentComments.findFirst({
+      columns: { id: true, userId: true, incidentId: true, deletedAt: true },
+      where: and(
+        eq(incidentComments.id, commentId),
+        eq(incidentComments.incidentId, incidentId)
+      ),
+    });
+
+    if (!comment) return res.status(404).json({ error: "Comment not found" });
+    if (comment.deletedAt) return res.status(204).end(); // already deleted
+
+    const isOwner = comment.userId === req.user.id;
+    const isMod   = isModeratorOrAdmin(req.user);
+
+    if (!isOwner && !isMod) {
+      return res.status(403).json({ error: "Not allowed" });
+    }
+
+    // 2) Soft delete
+    await db
+      .update(incidentComments)
+      .set({ deletedAt: new Date() })
+      .where(eq(incidentComments.id, commentId));
+
+    // 3) Notify room
+    req.io?.to(`incident:${incidentId}`).emit("incident:comment:deleted", {
+      incidentId,
+      commentId,
+    });
+
+    return res.status(204).end();
+  }
+);
+
+3) Optional: centralize an requireAuth middleware (if you want)
+// server/auth/requireAuth.ts
+import type { Request, Response, NextFunction } from "express";
+
+export function requireAuth(req: any, res: Response, next: NextFunction) {
+  if (!req.user) return res.status(401).end();
+  next();
+}
+
+
+Use it in routes:
+
+import { requireAuth } from "./auth/requireAuth";
+// …
+router.delete("/api/incidents/:incidentId/comments/:commentId", requireAuth, async (req: any, res) => {
+  // …same as above
+});
+
+4) (Optional) Surface “can delete” to the client (no UI change required)
+
+If you want to conditionally show a small “delete” icon in the comments panel only for allowed users, extend the GET comments to include a boolean:
+
+// server/routes.ts (GET /comments)
+const userId = req.user?.id;
+const items = await db.query.incidentComments.findMany({
+  where: and(
+    eq(incidentComments.incidentId, id),
+    isNull(incidentComments.deletedAt)
+  ),
+  orderBy: (t, { desc }) => [desc(t.createdAt)],
+  // you can select all columns if you prefer
+});
+const isMod = isModeratorOrAdmin(req.user);
+res.json({
+  items: items.map((c) => ({
+    ...c,
+    canDelete: isMod || c.userId === userId,
+  })),
+});
+
+
+Your current UI doesn’t expose a delete control, but this makes it trivial to add later without another backend change.
+
+Notes for Replit
+
+Uses existing req.user shape; expects a role field. If your role lives elsewhere (e.g., req.user.roles: string[]), swap isModeratorOrAdmin accordingly.
+
+Query is fast; incident_comments.user_id and incident_id are already indexed in your schema.
+
+No UI or design changes—this only gates the existing DELETE behavior.

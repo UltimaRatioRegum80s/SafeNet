@@ -1,0 +1,75 @@
+great q, @RDM — yes, markers can end up “under” tiles if z-index/panes got overridden. By default Leaflet prevents this (tile-pane z=200; marker-pane z=600), so if they’re hidden it’s almost always custom CSS.
+
+@Replit, let’s verify (read-only) and, if needed, prove it with a high-z test.
+
+1) Check pane stacking (console, no code changes)
+// Compare pane z-index/visibility
+(() => {
+  const panes = ['tile','overlay','shadow','marker','tooltip','popup'];
+  const res = {};
+  panes.forEach(k => {
+    const el = document.querySelector(`.leaflet-${k}-pane`);
+    res[k] = el ? {
+      exists: true,
+      z: getComputedStyle(el).zIndex,
+      display: getComputedStyle(el).display,
+      opacity: getComputedStyle(el).opacity
+    } : { exists:false };
+  });
+  console.table(res); return res;
+})();
+
+
+Expect: tile≈200, overlay≈400, marker≈600, tooltip≈650, popup≈700, all display:block, opacity:1.
+
+2) Force markers above everything (temporary CSS inject)
+// Temporary test styles to rule out "behind tiles"
+(() => {
+  const css = `
+  .leaflet-marker-pane{ z-index:999999!important; display:block!important; opacity:1!important; }
+  .marker-cluster, .nn-divicon-wrapper > div{
+    outline:2px solid #fff!important; background:#ff00ff!important; border-color:#fff!important;
+  }`;
+  const style=document.createElement('style'); style.id='nn-highz-test'; style.textContent=css;
+  document.head.appendChild(style); console.log('Injected #nn-highz-test');
+})();
+
+
+Now zoom a bit; if markers/clusters suddenly appear magenta → they were behind/hidden by CSS.
+
+3) Control probe (ensures we’d see one if visible)
+// Add one marker directly to map (bypassing cluster)
+(() => {
+  const map = window._map || window.map; if(!map) return console.warn('no map');
+  const icon = L.divIcon({ className:'nn-divicon-wrapper',
+    html:'<div style="width:16px;height:16px;border-radius:9999px;background:#ff00ff;border:2px solid #fff"></div>',
+    iconSize:[16,16], iconAnchor:[8,8] });
+  L.marker(map.getCenter(), { icon, title:'probe' }).addTo(map);
+  console.log('Added DIRECT probe marker');
+})();
+
+
+If this shows, but clustered markers don’t → cluster path issue.
+
+If this doesn’t show even with high-z CSS → pane is hidden or a global style is suppressing it.
+
+If “behind tiles” is confirmed
+
+We’ll add a flag-gated CSS fix (progress-safe):
+
+/* only when NN_FIX_MOBILE_MARKERS=1 */
+.leaflet-marker-pane{ z-index: 600 !important; display:block !important; opacity:1 !important; }
+.leaflet-popup-pane{  z-index: 700 !important; }
+
+
+We’d inject this in the mobile/flag stylesheet so desktop remains untouched.
+
+Post back:
+
+the table from step 1,
+
+whether the magenta markers appear after step 2,
+
+and whether the direct probe in step 3 is visible.
+
+That will tell us in seconds if layering is the culprit or if we still need to chase the cluster/marker creation path.

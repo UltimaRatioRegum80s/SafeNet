@@ -1,0 +1,183 @@
+Love it—big step forward. Let’s keep the architecture exactly as-is and do a light, tasteful UI pass on the Map page’s “Recent Incidents” panel + fix the no-scroll bug.
+
+What I’m proposing (zero-architecture change)
+
+Fix scrolling
+
+Enable vertical scroll in the panel without affecting the map.
+
+Handle the common flexbox trap (min-h-0) so overflow actually works.
+
+Polish the list items (purely visual):
+
+Subtle hover/active states, softer shadows, cleaner spacing.
+
+Tightened typography (title weight, secondary meta dimmed).
+
+Severity pill colors consistent with your theme.
+
+Thin, nice-looking scrollbars.
+
+Keep header fixed (sticky) so filters stay visible if you add them later.
+
+No new deps. Pure Tailwind utilities + a tiny CSS utility for scrollbars.
+
+Minimal patches
+A) Layout fix to allow scroll (Map page)
+
+Make the right column allow its child to control overflow.
+
+// client/src/pages/community/Map.tsx
+// ...inside the return grid
+<div className="col-span-5 flex flex-col min-h-0">  {/* <- min-h-0 unlocks child overflow */}
+  <RecentIncidentsPanel />                          {/* unchanged component name */}
+</div>
+
+B) Panel: sticky header + scrollable list
+
+Keep your current component name/structure; add only classes.
+
+// client/src/features/map/RecentIncidentsPanel.tsx
+// (or wherever the panel lives)
+
+export default function RecentIncidentsPanel() {
+  const { incidents } = useFeedIncidents();
+
+  return (
+    <section className="card h-full overflow-hidden"> {/* contain everything */}
+      {/* Sticky header */}
+      <header className="sticky top-0 z-10 card-header/ghost bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <h3 className="text-lg font-semibold flex items-center gap-2">
+          <span className="i-lucide-eye w-4 h-4" />
+          Recent Incidents
+        </h3>
+      </header>
+
+      {/* Scrollable content */}
+      <div className="card-content p-3 pt-2 h-full overflow-y-auto pr-2 custom-scroll">
+        {!incidents?.length ? (
+          <div className="text-muted-foreground text-sm">No incidents.</div>
+        ) : (
+          <ul className="space-y-2">
+            {incidents.slice(0, 50).map((i) => (
+              <li key={i.id}>
+                <article
+                  className="rounded-2xl border border-white/5 bg-white/[.02]
+                             hover:bg-white/[.04] hover:shadow-md
+                             transition-colors duration-200
+                             p-3"
+                >
+                  <div className="flex items-center gap-3">
+                    {/* status dot */}
+                    <span
+                      className="size-2.5 rounded-full"
+                      style={{ backgroundColor: severityDot(i.severity) }}
+                      aria-hidden
+                    />
+                    {/* severity pill */}
+                    <span
+                      className={
+                        "text-[10px] font-semibold px-2 py-0.5 rounded-full " +
+                        severityPill(i.severity)
+                      }
+                    >
+                      {i.severity}
+                    </span>
+
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {timeAgo(i.createdAt)}
+                    </span>
+                  </div>
+
+                  {i.title ? (
+                    <h4 className="mt-2 text-sm font-medium leading-snug">
+                      {i.title}
+                    </h4>
+                  ) : null}
+
+                  {i.subtitle ? (
+                    <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
+                      {i.subtitle}
+                    </p>
+                  ) : null}
+                </article>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/* tiny helpers — keep local to file or move to a utils file */
+function timeAgo(iso: string) {
+  const d = new Date(iso);
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 60) return `${Math.floor(diff)}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return d.toLocaleDateString();
+}
+function severityDot(s: string) {
+  switch (s) {
+    case "CRITICAL": return "#ef4444"; // red-500
+    case "HIGH":     return "#f59e0b"; // amber-500
+    case "MEDIUM":   return "#facc15"; // yellow-400
+    default:         return "#22c55e"; // green-500
+  }
+}
+function severityPill(s: string) {
+  switch (s) {
+    case "CRITICAL": return "bg-red-500/15 text-red-400 ring-1 ring-red-500/20";
+    case "HIGH":     return "bg-orange-500/15 text-orange-400 ring-1 ring-orange-500/20";
+    case "MEDIUM":   return "bg-yellow-500/15 text-yellow-400 ring-1 ring-yellow-500/20";
+    default:         return "bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/20";
+  }
+}
+
+C) Thin, modern scrollbars (one utility)
+/* client/src/styles/globals.css (or wherever Tailwind base is imported) */
+.custom-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,.25) transparent;
+}
+.custom-scroll::-webkit-scrollbar { width: 8px; }
+.custom-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(to bottom, rgba(255,255,255,.18), rgba(255,255,255,.06));
+  border-radius: 999px;
+}
+.custom-scroll::-webkit-scrollbar-track { background: transparent; }
+
+
+If you don’t have a global file, you can add those rules to any global CSS that’s already loaded.
+
+Replit 🔧 — handoff checklist
+
+Map page right column: add flex flex-col min-h-0 (A).
+
+Panel content wrapper: ensure it has h-full overflow-y-auto custom-scroll (B).
+
+No behavioral changes: all data still comes from useFeedIncidents(); markers untouched.
+
+Confirm there’s no nested <button> inside the panel (we previously fixed this pattern).
+
+If you prefer to keep your existing list markup, you can just adopt the scrolling fix:
+
+Parent column: min-h-0
+
+Panel root: h-full overflow-hidden
+
+Panel body: h-full overflow-y-auto pr-2 custom-scroll
+
+…and skip the item styling changes for now.
+
+@RDM — what you’ll see
+
+The right panel scrolls smoothly.
+
+Rows have a subtle hover and better visual hierarchy.
+
+Header stays pinned as you scroll.
+
+No change to data, performance, or backend; just easier-on-the-eye polish.

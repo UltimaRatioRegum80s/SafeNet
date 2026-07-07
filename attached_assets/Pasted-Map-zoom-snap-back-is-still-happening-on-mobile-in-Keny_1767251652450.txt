@@ -1,0 +1,72 @@
+Map zoom snap-back is still happening on mobile in Kenya even after the recent MapView guards.
+
+Symptom:
+- I zoom in/out or pan on the map
+- shortly after, the map snaps back to a “preferred” zoom/viewport (looks like auto-fit / setView)
+- This makes the map unusable. I need ZERO snap-back behavior for Kenya testing, Southern Africa beta, and future production users.
+
+We need a deep root-cause trace and then a hard fix.
+
+PLEASE DO THIS INVESTIGATION:
+
+1) Identify every code path that can change viewport
+Search MapView.tsx / Map.tsx / map helpers for ALL calls to:
+- map.fitBounds
+- map.setView
+- map.flyTo / flyToBounds
+- map.invalidateSize (if it triggers a follow-up fit)
+Also check any logic that runs on:
+- incidents refetch
+- location update
+- focus param
+- localStorage fallback
+- map resize / container resize
+List each one with file+line and when it runs.
+
+2) Confirm whether user interaction is being detected on my device
+You used dragstart/zoomstart to set hasUserInteracted=true (when isProgrammaticMove is false).
+But if snap-back still happens, one of these is true:
+- zoomstart/dragstart not firing reliably on mobile pinch zoom
+- hasUserInteracted is never set
+- isProgrammaticMove stays true too long or is mis-set
+- another effect ignores hasUserInteracted and still calls fitBounds
+
+Add TEMP logging (dev only) for:
+- “USER_INTERACTION” events: zoomstart, movestart, dragstart, touchstart
+- every PROGRAMMATIC move: setView/fitBounds caller label + stack/marker
+- current values of: hasUserInteracted, isProgrammaticMove, didInitialAutoFit, hasAppliedLocalStorageFallback
+
+I want you to be able to say: “this exact effect is firing X seconds after you pinch zoom and calling fitBounds.”
+
+3) Check for “refetch interval” or “location watcher” triggering recenters
+Even if auto-fit is one-shot, something may still run when:
+- incidents array changes by reference on refetch
+- location updates (watchPosition) triggers center prop update
+- focus param is present/cleared
+- localStorage fallback runs again
+
+Confirm whether any of these events are causing the snap-back.
+
+HARD FIX REQUIREMENT (what ‘done’ means):
+- Once the user has interacted with the map (any zoom/pan), NOTHING is allowed to change viewport automatically.
+- Only two allowed exceptions:
+  A) initial load before user interaction (one-shot)
+  B) explicit user action (e.g., user clicks “recenter” button or navigates with ?focus=<id>)
+
+IMPLEMENTATION DIRECTION (safe + future-proof):
+- Expand interaction detection beyond zoomstart/dragstart:
+  include movestart and touchstart (mobile pinch sometimes triggers move without dragstart)
+- Replace time-based isProgrammaticMove reset (100ms) with a safer pattern:
+  set isProgrammaticMove=true before fit/set, then set false on map “moveend/zoomend” events.
+  (Timers are brittle on slower devices.)
+- Ensure ANY effect that calls setView/fitBounds checks:
+  if (hasUserInteracted.current) return;
+- Ensure focus-based centering is one-shot per focus id:
+  keep lastFocusedIdRef, and only center when focus changes.
+
+Please report back with:
+- the exact root cause (which caller is snapping it back)
+- the exact patch (files/lines)
+- how you validated on mobile pinch zoom specifically
+
+Then implement and I’ll re-test immediately.

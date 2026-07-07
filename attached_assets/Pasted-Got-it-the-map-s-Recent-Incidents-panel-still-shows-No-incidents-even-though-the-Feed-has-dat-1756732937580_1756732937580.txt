@@ -1,0 +1,175 @@
+Got it — the map’s “Recent Incidents” panel still shows “No incidents.” even though the Feed has data. Given your setup, the most likely culprit now is response-shape mismatch:
+
+/api/incidents?bbox=... → returns an array
+
+/api/incidents (no bbox) → returns a paginated object { items: [], total, ... }
+
+If your initial load uses /api/incidents?limit=50 and you do setIncidents(data) you’ll end up with an object, not an array → length = 0 in the panel.
+
+Below is a surgical, UI-safe fix: normalize both shapes to an array, wire it in both initial load and watchdog, and add a couple of logs to verify counts.
+
+1) Add a tiny normalizer (one file)
+// src/lib/incidentsApi.ts
+export type Incident = {
+  id: string;
+  title: string;
+  createdAt: string;
+  lat: number;
+  lng: number;
+  // ...other fields you use
+};
+
+type Paginated<T> = { items: T[]; total?: number; nextCursor?: string };
+
+export async function fetchIncidentsAny(url: string): Promise<Incident[]> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Fetch ${url} failed: ${res.status}`);
+  const data = await res.json();
+  if (Array.isArray(data)) return data as Incident[];
+  if (data && Array.isArray((data as Paginated<Incident>).items)) {
+    return (data as Paginated<Incident>).items;
+  }
+  console.warn("Unexpected incidents payload shape from", url, data);
+  return [];
+}
+
+2) Use the normalizer in Map.tsx (initial load + watchdog)
+// Map.tsx
+import { useEffect, useRef, useState } from "react";
+import L from "leaflet";
+import { fetchIncidentsAny, Incident } from "@/lib/incidentsApi";
+
+export default function CommunityMap() {
+  const mapRef = useRef<L.Map | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const intervalRef = useRef<number | null>(null);
+
+  // 1) Initial load – independent of map readiness
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        let items = await fetchIncidentsAny("/api/incidents/live");
+        if (!items.length) {
+          items = await fetchIncidentsAny("/api/incidents?limit=50");
+        }
+        if (!cancelled) {
+          console.log("[Map] Initial incidents:", items.length);
+          setIncidents(items);
+        }
+      } catch (e) {
+        console.warn("[Map] Initial incidents load failed", e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // 2) Add markers when map is ready or incidents change
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+    addIncidentsToMap(mapRef.current, incidents);
+  }, [mapReady, incidents]);
+
+  // 3) Watchdog – starts only after map exists
+  useEffect(() => {
+    if (!mapReady || !mapRef.current) return;
+
+    const map = mapRef.current;
+
+    const tick = async () => {
+      const b = map.getBounds();
+      const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(",");
+      const url = `/api/incidents?bbox=${bbox}&sinceHours=72&limit=300`;
+      try {
+        const items = await fetchIncidentsAny(url);
+        if (items.length) {
+          console.log("[Map] Watchdog fetched:", items.length);
+          setIncidents(prev => dedupeById([...items, ...prev]));
+        }
+      } catch (e) {
+        console.warn("[Map] Watchdog fetch failed", e);
+      }
+    };
+
+    tick();
+    map.on("moveend", tick);
+    intervalRef.current = window.setInterval(tick, 20_000);
+
+    return () => {
+      map.off("moveend", tick);
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    };
+  }, [mapReady]);
+
+  return (
+    <>
+      {/* your existing layout / styles unchanged */}
+      <MapContainer whenCreated={(m) => { mapRef.current = m; setMapReady(true); }}>
+        {/* existing layers/controls unchanged */}
+      </MapContainer>
+
+      {/* Pass the same incidents array to the side panel */}
+      <RecentIncidentsBox incidents={incidents} />
+    </>
+  );
+}
+
+// helpers
+const markerBag = new Map<string, L.Marker>();
+function addIncidentsToMap(map: L.Map, items: Incident[]) {
+  for (const it of items) {
+    if (markerBag.has(it.id)) continue;
+    const marker = L.marker([it.lat, it.lng]); // keep your custom icon/cluster if any
+    marker.addTo(map);
+    markerBag.set(it.id, marker);
+  }
+}
+function dedupeById(items: Incident[]) {
+  const seen = new Set<string>();
+  const out: Incident[] = [];
+  for (const i of items) if (!seen.has(i.id)) { seen.add(i.id); out.push(i); }
+  return out;
+}
+
+3) Ensure the panel actually uses the incidents prop
+
+If your panel still declares its own fetch or reads from a different store, it will ignore the array above. Make sure it’s purely presentational:
+
+// RecentIncidentsBox.tsx
+export function RecentIncidentsBox({ incidents }: { incidents: Incident[] }) {
+  if (!incidents || incidents.length === 0) return <div className="card"><div className="card-body">No incidents.</div></div>;
+  return (
+    <div className="card">
+      <div className="card-body space-y-2">
+        {incidents.slice(0, 20).map(i => (
+          <div key={i.id} className="rounded-xl bg-neutral-800 p-3">
+            <div className="font-medium">{i.title}</div>
+            <div className="text-xs opacity-70">
+              {new Date(i.createdAt).toLocaleTimeString()}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+Quick verification checklist
+
+Open DevTools → Network:
+
+/api/incidents?limit=50 returns { items: [...] } (not []) ✔
+
+Console:
+
+Should show [Map] Initial incidents: <N> with N > 0 ✔
+
+If N = 0, check /api/incidents/live and the fallback call logs
+
+UI:
+
+Panel should now list incidents (same as Feed) without any style change ✔
+
+If the console shows counts > 0 but the panel still says “No incidents.”, it means the panel isn’t receiving the incidents prop (or it shadows it with its own fetch). In that case, remove the panel’s internal fetch and pass the prop as above.

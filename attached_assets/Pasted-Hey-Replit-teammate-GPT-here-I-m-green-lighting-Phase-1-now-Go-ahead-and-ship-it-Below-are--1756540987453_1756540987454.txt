@@ -1,0 +1,118 @@
+Hey Replit teammate 👋 — GPT here.
+
+I’m green-lighting Phase 1 now. Go ahead and ship it. Below are copy-paste patches aligned to your schema (position.lat/lng, created_at) and without touching Leaflet, tiles, or data flow. I’m also giving you exact integration points for Phase 2 so you can slot them in right after.
+
+Phase 1 (ship now)
+A) Replace timeAgo in utils.ts
+// client/src/lib/utils.ts  (or keep in this file if that's where timeAgo lives)
+export function timeAgo(iso?: string) {
+  if (!iso) return "Just now";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "Unknown time";
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const days = Math.floor(h / 24);
+  return `${days}d ago`;
+}
+
+Usage (wherever you render cards)
+import { timeAgo } from "@/lib/utils"; // adjust path if needed
+// ...
+<span className="text-xs text-white/60">{timeAgo(incident.created_at)}</span>
+
+B) Centralize severity tokens
+
+If you prefer not to add a new file, drop these into utils.ts. Otherwise create lib/severity.ts.
+
+// client/src/lib/severity.ts
+export type Severity = "low" | "medium" | "high" | "emergency";
+
+// If your API already has severity, map directly; otherwise adapt from priority/level/tags:
+export function toSeverity(input: string | number | undefined): Severity {
+  if (typeof input === "number") {
+    if (input >= 90) return "emergency";
+    if (input >= 60) return "high";
+    if (input >= 30) return "medium";
+    return "low";
+  }
+  const s = String(input ?? "").toLowerCase();
+  if (["emergency", "critical", "red"].includes(s)) return "emergency";
+  if (["high", "urgent", "orange"].includes(s)) return "high";
+  if (["medium", "warn", "amber"].includes(s)) return "medium";
+  return "low";
+}
+
+export const severityColor = (s: Severity) =>
+  ({ low: "bg-emerald-500", medium: "bg-amber-500", high: "bg-orange-500", emergency: "bg-red-600" }[s]);
+
+export const severityHex = (s: Severity) =>
+  ({ low: "#10b981", medium: "#f59e0b", high: "#f97316", emergency: "#ef4444" }[s]);
+
+export const severityLabel = (s: Severity) => s.toUpperCase();
+
+C) Adapter for your incident shape → UI
+
+(So cards & chips can consume a consistent structure without touching your network layer.)
+
+// client/src/lib/adapters.ts
+import { Severity, toSeverity } from "@/lib/severity";
+
+export type IncidentUI = {
+  id: string;
+  title: string;
+  description?: string;
+  severity: Severity;
+  createdAt: string;        // ISO
+  lat: number;
+  lng: number;
+};
+
+// Example adapter from your current API/Socket payload
+export function adaptIncident(row: any): IncidentUI {
+  return {
+    id: String(row.id ?? row._id),
+    title: row.title ?? row.name ?? "Incident",
+    description: row.description ?? row.summary ?? "",
+    severity: toSeverity(row.severity ?? row.priority ?? row.level),
+    createdAt: row.created_at ?? row.createdAt ?? new Date().toISOString(),
+    lat: row.position?.lat ?? row.lat ?? 0,
+    lng: row.position?.lng ?? row.lng ?? 0,
+  };
+}
+
+
+You can keep using your existing React Query and Socket.IO; when you map to render, do adaptIncident(row).
+
+Phase 2 (small, targeted polish)
+1) Shared UI atoms
+// client/src/components/SeverityUI.tsx
+import { AlertTriangle, MapPin, Siren, HandHelping } from "lucide-react";
+import type { Severity } from "@/lib/severity";
+
+export function SeverityChip({ sev }: { sev: Severity }) {
+  return (
+    <span className="px-2 py-0.5 rounded-full bg-white/10 border border-white/10 text-[10px] font-semibold">
+      {sev.toUpperCase()}
+    </span>
+  );
+}
+
+export function SeverityIcon({ sev, className="w-4 h-4 text-white/80" }:{ sev: Severity; className?: string }) {
+  switch (sev) {
+    case "emergency": return <Siren className={className} />;
+    case "high": return <AlertTriangle className={className} />;
+    case "medium": return <MapPin className={className} />;
+    default: return <HandHelping className={className} />;
+  }
+}
+
+2) Drop-in card row
+
+Use this inside your existing IncidentSheet.tsx (vaul drawer). It only changes markup, not state/data.
+
+// inside IncidentSheet.tsx
+import { timeAgo }

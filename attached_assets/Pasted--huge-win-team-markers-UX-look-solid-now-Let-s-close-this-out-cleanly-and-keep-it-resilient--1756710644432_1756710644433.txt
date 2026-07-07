@@ -1,0 +1,106 @@
+🔥 huge win, team — markers + UX look solid now. Let’s close this out cleanly and keep it resilient.
+
+🟣 GPT → Replit (quick wrap-up checklist)
+
+Service Worker bump
+
+Update your SW cache key (e.g. NN_CACHE_v9), self.skipWaiting() on activate, clients.claim() to ensure all devices pick up the new assets, CSS resets, and HUD position.
+
+Singleton cluster & dedup
+
+Confirm all incident adds (initial fetch, optimistic, socket) call the same helper and cluster:
+
+createIncidentMarker() → getCluster().addLayer(...)
+
+seenIds guard is in place.
+
+Network path
+
+/api/ping returns { ok: true }.
+
+/api/incidents returns 201 on create, 422 on bad coords (UI shows validation, not “offline”).
+
+CORS credentials:true matches the front-end credentials:"same-origin".
+
+In-View fetch
+
+Camera move triggers GET /api/incidents?bbox=...&sinceHours=72.
+
+“No incidents in view” → graceful fallback to All incidents.
+
+HUD
+
+Chips render via portal or fixed override (top-right), z-index above map, below modals you want on top.
+
+🟠 Replit → GPT (tiny code guards you can drop in)
+A) Prevent memory leaks (cluster listeners)
+useEffect(() => {
+  const cluster = ensureCluster(map);
+  const updateCount = () => { /*...*/ };
+  cluster.on("layeradd", updateCount);
+  cluster.on("layerremove", updateCount);
+  return () => {
+    cluster.off("layeradd", updateCount);
+    cluster.off("layerremove", updateCount);
+  };
+}, [map]);
+
+B) Socket de-dup (avoid double emits)
+socket.on("incident:created", inc => {
+  if (seenIds.current.has(inc.id)) return;  // already added by optimistic or fetch
+  addIncidentToCluster(inc);
+});
+
+✅ @RDM — acceptance criteria (owner-friendly)
+
+Create an incident → marker appears immediately (icon or blue circle), HUD shows Submitting… → completes with no “Saved offline.”
+
+Reload the app (no ?debug=1) → map is clean; with ?debug=1 → counter + tools appear.
+
+Pan the map: In View shows incidents within camera; All incidents shows the full set.
+
+Network tab: create = 201; invalid coords = 422 with clear UI copy; no lingering CORS or (failed) entries.
+
+(Optional) quick Vitest unit tests
+client/src/lib/coords.test.ts
+import { describe, it, expect } from "vitest";
+import { toLatLng } from "@/components/MapView"; // or wherever it lives
+
+describe("toLatLng", () => {
+  it("accepts lat/lng numbers", () => {
+    const ll = toLatLng({ lat: -33.9, lng: 18.4 })!;
+    expect(ll.lat).toBeCloseTo(-33.9); expect(ll.lng).toBeCloseTo(18.4);
+  });
+  it("accepts latitude/longitude strings", () => {
+    const ll = toLatLng({ latitude: "-33.9", longitude: "18.4" })!;
+    expect(ll.lat).toBeCloseTo(-33.9); expect(ll.lng).toBeCloseTo(18.4);
+  });
+  it("swaps when lat is out of range", () => {
+    const ll = toLatLng({ lat: 120, lng: -22 }); // swapped in
+    expect(ll.lat).toBeCloseTo(-22);
+    expect(ll.lng).toBeCloseTo(120);
+  });
+});
+
+client/src/lib/dedupe.test.ts
+import { describe, it, expect } from "vitest";
+
+it("dedups by id", () => {
+  const seen = new Set<string>();
+  const add = (id: string) => { if (seen.has(id)) return false; seen.add(id); return true; };
+  expect(add("a")).toBe(true);
+  expect(add("a")).toBe(false);
+  expect(add("b")).toBe(true);
+});
+
+Nice next wins (fast polish)
+
+Severity-aware cluster colors (low/med/high → green/amber/red circles).
+
+“Last 24h / 7d” filter → maps to sinceHours.
+
+Sentry for frontend+backend to catch any regression in submit/coords.
+
+DB index on (latitude, longitude) and created_at for faster bbox + time filters.
+
+If anything still looks off (tiles, HUD layering, or a submit response), paste the Network entry for /api/incidents and we’ll tweak on the spot.

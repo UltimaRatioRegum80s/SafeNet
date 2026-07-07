@@ -1,0 +1,113 @@
+🔒 No-Regression Protocol (NRP)
+
+To honor your “don’t break what works” rule, we’ll follow this each step:
+
+Scope flags only
+
+Any behavior changes go behind a local boolean (e.g., const NRP_CLUSTER_UI = true) so we can flip back instantly.
+
+Zero re-architecture
+
+No changes to data sources, hooks, or endpoints. Only small, isolated tweaks.
+
+Before/After checks
+
+Keep current screenshots (desktop+mobile) and verify:
+
+Incidents panel still loads & scrolls
+
+Markers/clusters still render
+
+Theme toggle works
+
+“In View / Last Hour” chips still behave
+
+One file at a time
+
+Touch only the file that contains the bug; if another file must change, we pause and get your OK.
+
+Console checkpoints
+
+Keep temporary logs to confirm we fixed the right thing. Remove logs after sign-off.
+
+🎯 Two topics to resolve
+A) Cluster color consistency (desktop vs mobile)
+
+Symptom: Mobile clusters show severity color (yellow/orange), desktop clusters are neutral gray.
+
+Goal: same severity-based cluster styling on both.
+
+B) Zoom snap-back to 13 (prevents zooming in/out)
+
+Symptom: When you zoom, map jumps back to zoom 13 automatically.
+
+Goal: stop the forced reset; only the user controls zoom.
+
+👋 Replit — targeted questions & checks
+1) Zoom snap-back source (most likely culprits)
+
+Please run these searches and paste the matching lines:
+
+rg -n "setView|flyTo|flyToBounds|fitBounds|setZoom|minZoom|maxZoom|zoom=|center=" client/src
+
+
+Specifically, we’re looking for:
+
+Any map.setView(..., 13) or map.setZoom(13) inside an effect/timer/“watchdog”.
+
+fitBounds(...) running repeatedly (e.g., on incidents change or on every “moveend”).
+
+<MapContainer zoom={13} ...> (a controlled prop). A re-render remount can lock zoom. Prefer defaultZoom for uncontrolled.
+
+A key={...} on <MapContainer> that changes and remounts the map (resets zoom).
+
+A minZoom=13 / maxZoom=13 via props or tile layer options.
+
+A theme switch that calls any of the methods above on each toggle.
+
+👉 Also paste the exact <MapContainer ...> tag (props only) from the desktop map component.
+
+2) Cluster color implementation
+
+Where are your cluster icons created? Please paste the small factory snippet(s):
+
+File(s) where L.markerClusterGroup, L.divIcon, or custom cluster renderer is configured (desktop & mobile).
+
+The function that computes cluster color (e.g., “max severity among children” → className/style).
+If mobile and desktop use different files, share both blocks.
+
+Likely pattern causing inconsistency:
+Mobile uses a styled divIcon based on severity; desktop uses the default cluster styling or a different CSS class map. We’ll unify by sharing the same icon factory—no behavioral changes.
+
+3) Quick runtime probes
+
+Open browser console on desktop and run:
+
+// Is zoom being forced after zoomend?
+window.map?.on('zoomend', () => console.log('zoomend', window.map.getZoom()));
+
+// Snapshot current props (if exposed)
+window.map && console.log('zoom props', {
+  z: window.map.getZoom(),
+  min: window.map.getMinZoom?.(),
+  max: window.map.getMaxZoom?.(),
+});
+
+
+If you see zoomend 13 every time, we know something is calling setView/fitBounds right after.
+
+✅ What we will NOT change
+
+No changes to incident fetching / React Query cache.
+
+No changes to the panel infinite scroll or “last 24h” scope.
+
+No style/layout removal—only minor class additions if needed.
+
+What I expect we’ll do (once you paste findings)
+
+Zoom: remove/guard the one place that calls setView/fitBounds/setZoom(13) on dependencies that change frequently (e.g. incidents, theme). Replace with a “run only once” guard or run behind a “center on first load” flag. If it’s a controlled zoom={13}, we’ll switch to defaultZoom (single line) behind NRP flag.
+
+Cluster colors: point both desktop & mobile to a shared getClusterIcon(severity) factory. If they already share it but desktop passes a neutral class, we’ll pass the severity class instead.
+
+Replit, once you share the search results + the two small code snippets (MapContainer props and cluster icon factory), I’ll call out the exact one-liners to stop the zoom snap and align cluster colors—strictly within the no-regression protocol.

@@ -1,0 +1,85 @@
+2) One-shot diagnostic you can run in the Replit shell
+
+Paste this in the Replit shell; it prints a clean project tree and key config so I can map where to patch:
+
+echo "=== PACKAGE.JSON SCRIPTS ==="; jq '.name, .scripts' package.json 2>/dev/null || cat package.json
+echo -e "\n=== TAILWIND CONFIG ==="; sed -n '1,200p' tailwind.config.* 2>/dev/null
+echo -e "\n=== SHADCN/UI CONFIG ==="; sed -n '1,200p' src/lib/utils.ts 2>/dev/null || true
+echo -e "\n=== ROUTES ==="; grep -R "Route" -n src | head -n 50 || true
+echo -e "\n=== FILE TREE (frontend) ==="
+npx --yes tree -I 'node_modules|.git|dist|build|.next|coverage|.vercel' -L 3 src || true
+echo -e "\n=== LOOK FOR FEED/CHAT COMPONENTS ==="
+grep -Rn --include='*.{ts,tsx}' -E 'CommunityFeed|Feed|Chat|MessageBubble|MessageList|Socket|io\(' src || true
+
+
+Copy the full output back here.
+
+3) Minimal files I need (copy/paste into chat)
+
+Please open each file in Replit and paste its content:
+
+src/
+  components/CommunityFeed.tsx
+  components/Chat/MessageBubble.tsx   (or equivalent)
+  components/Chat/MessageList.tsx     (or equivalent)
+  pages/community.tsx | routes/community.tsx (whichever you use)
+  hooks/useMessages.ts | useChat.ts    (Zustand/React Query data hook)
+  lib/socket.ts                         (Socket.io client)
+  styles/globals.css
+tailwind.config.(ts|js)
+src/lib/utils.ts (cn helper for shadcn)
+
+
+If your project is structured differently, send the closest matches.
+
+4) Drop-in “old look, new alignment” bubble component (ready to paste)
+
+Use this as src/components/Chat/ChatBubble.tsx so we can hook it up immediately:
+
+import React from "react";
+import clsx from "clsx";
+
+type MessageProps = {
+  text: string;
+  isUser?: boolean;
+  timestamp?: string;
+};
+
+export default function ChatBubble({ text, isUser, timestamp }: MessageProps) {
+  return (
+    <div className={clsx("flex w-full mb-2", isUser ? "justify-end" : "justify-start")}>
+      <div
+        className={clsx(
+          "max-w-[75%] rounded-2xl px-4 py-2 text-sm shadow-md",
+          "transition-colors",
+          isUser
+            ? "bg-teal-600 text-white rounded-br-none"
+            : "bg-zinc-800 text-zinc-100 rounded-bl-none"
+        )}
+      >
+        <p className="whitespace-pre-wrap break-words">{text}</p>
+        {timestamp && (
+          <p className="text-[10px] opacity-70 mt-1 text-right">{timestamp}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+And a quick list item that uses it:
+
+// src/components/Chat/MessageItem.tsx
+import ChatBubble from "./ChatBubble";
+
+export function MessageItem({ m }: { m: { id: string; text: string; userId: string; createdAt?: string } }) {
+  const me = typeof window !== "undefined" ? localStorage.getItem("uid") : null;
+  const isUser = m.userId === me;
+  return (
+    <ChatBubble
+      text={m.text}
+      isUser={isUser}
+      timestamp={m.createdAt ? new Date(m.createdAt).toLocaleTimeString() : undefined}
+    />
+  );
+}

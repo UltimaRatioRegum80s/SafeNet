@@ -1,0 +1,204 @@
+are drop-in patches that:
+
+add RBAC for moderation & verification,
+
+sanitize incident text on HTTP routes,
+
+add a server-side rate limit to /api/incidents, and
+
+make coordinate checks robust,
+…all staying inside your Replit (no external services or infrastructure).
+
+I’ve cited your current code where the gaps exist so you can verify before/after.
+
+1) server/routes.ts — add RBAC, sanitize, rate-limit, stronger guards
+A. Add these helpers near the top of routes.ts
+// add near top of file
+import type { Request, Response, NextFunction } from "express";
+
+// Minimal sanitizer (keeps plain text; trims control chars; limits length)
+function sanitizeText(s?: string) {
+  if (typeof s !== "string") return s;
+  return s.replace(/<[^>]*>?/gm, "").replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, 2000);
+}
+
+// RBAC helpers using your existing user storage
+const MODERATOR_TYPES = new Set(["police","municipal","security","fire","medical","ngo"]);
+
+async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const uid = (req.session as any)?.userId || (req.headers["x-user-id"] as string);
+  if (!uid) return res.status(401).json({ error: "Auth required" });
+  (req as any).authUserId = uid;
+  next();
+}
+
+async function requireModerator(req: Request, res: Response, next: NextFunction) {
+  const uid = (req.session as any)?.userId || (req.headers["x-user-id"] as string);
+  if (!uid) return res.status(401).json({ error: "Auth required" });
+
+  const me = await storage.getUser(uid);
+  if (!me) return res.status(401).json({ error: "User not found" });
+  // Gate on verification + allowed type
+  if (!(me.isVerified && me.verifiedType && MODERATOR_TYPES.has(String(me.verifiedType)))) {
+    return res.status(403).json({ error: "Moderator privileges required" });
+  }
+  (req as any).authUserId = uid;
+  next();
+}
+
+B. Harden /api/incidents (sanitize + rate-limit + consistent userId)
+
+Replace your current handler with this version:
+
+// CREATE incident (HTTP)
+// - sanitizes title/description
+// - applies rate limiting (in-memory; Replit-friendly)
+// - uses session/x-user-id consistently
+import { checkRateLimit } from "./incidentDatabase"; // you already have this helper
+
+app.post("/api/incidents", async (req, res) => {
+  try {
+    const incidentData = insertIncidentSchema.parse(req.body);
+
+    // Sanitize risky text fields
+    const clean = {
+      ...incidentData,
+      title: sanitizeText(incidentData.title),
+      description: sanitizeText(incidentData.description),
+    };
+
+    // Rate limit based on session user, header, or IP fallback
+    const key =
+      ((req.session as any)?.userId as string) ||
+      ((req.headers["x-user-id"] as string) || `ip:${req.ip}`);
+
+    if (!checkRateLimit(key)) {
+      return res.status(429).json({ error: "Too many reports, slow down." });
+    }
+
+    const userId = key.startsWith("ip:") ? "anonymous" : key;
+    const incident = await storage.createIncident({ ...clean, userId });
+    res.json(incident);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+
+Why: the HTTP route previously accepted unsanitized title/description and had no rate limit, even though you already have checkRateLimit for sockets. 
+ 
+
+C. Protect moderation and verification routes (RBAC)
+// Verify user (admin/mod only) — add RBAC guard
+app.post("/api/users/:id/verify", requireModerator, async (req, res) => {
+  try {
+    const { type, badge } = req.body;
+    const user = await storage.verifyUser(req.params.id, type, badge);
+    res.json(user);
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+// Moderation — add RBAC guard
+app.post("/api/incidents/:id/moderate", requireModerator, async (req, res) => {
+  try {
+    const moderatorId = (req as any).authUserId; // from middleware
+    const { reason } = req.body;
+    await storage.moderateIncident(req.params.id, moderatorId, reason);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
+
+Why: today anyone setting x-user-id can moderate or verify a user — there’s no role check. 
+ 
+
+D. Stronger coordinate guards for “nearby”
+
+Replace the nearby guard to avoid rejecting valid zeroes and to parse safely:
+
+app.get("/api/incidents/nearby", async (req, res) => {
+  try {
+    const { latitude, longitude, radius = 1000 } = req.query;
+    const lat = Number(latitude), lng = Number(longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ error: "Latitude and longitude required" });
+    }
+    const rad = Number(radius);
+    const safeRadius = Number.isFinite(rad) ? rad : 1000;
+
+    const incidents = await storage.getIncidentsNearby(lat, lng, safeRadius);
+    res.json(incidents);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+Why: the current if (!latitude || !longitude) will misfire and the parsing is not validated before use. 
+ 
+
+Optional: you can also add requireAuth to routes like /follow, /unfollow, /report so they no longer trust a bare x-user-id. 
+
+2) server/index.ts — safer session + error handler (Replit-friendly)
+
+Make two tiny edits:
+
+A. Fail fast if SESSION_SECRET is missing in production
+Right before app.use(session(...)), add:
+
+if (process.env.NODE_ENV === "production" && !process.env.SESSION_SECRET) {
+  throw new Error("SESSION_SECRET is required in production");
+}
+
+
+Your current code falls back to a hardcoded secret. 
+
+B. Don’t re-throw after responding in the global error handler
+Change:
+
+res.status(status).json({ message });
+throw err;
+
+
+to:
+
+res.status(status).json({ message });
+// do not re-throw (prevents process crash in Replit)
+
+
+Right now you send a response then throw, risking crashes. 
+
+3) (Optional) Relax accuracy by category (for tower/Wi-Fi fixes)
+
+If you want non-GPS (coarser) locations to pass for low-risk categories, adjust your validator (or add a small gate in the route) so accuracy up to 500–1000 m is allowed for “info/low”. The current validator hard-fails when accuracy_m > 100. 
+
+Why these changes matter (quick recap)
+
+RBAC closes the hole where any client could moderate/verify via x-user-id. 
+
+Sanitization prevents stored XSS via HTTP incident creation (your WebSocket path was stricter, HTTP wasn’t).
+
+Rate limiting on HTTP aligns with your socket path’s limiter and reduces spam bursts. 
+
+Coordinate guards avoid false 400s and ensure numeric safety. 
+
+Session secret + error handler make production safer and Replit more stable. 
+ 
+
+How to apply on Replit (quick)
+
+Open your Replit, edit server/routes.ts and server/index.ts with the snippets above.
+
+No new services, no external infra; this is pure code.
+
+Run your repl; exercise:
+
+POST /api/incidents with/without x-user-id → see 429 after rapid repeats (rate limit).
+
+POST /api/incidents/:id/moderate without a verified moderator → now 403.
+
+GET /api/incidents/nearby?latitude=-22.65&longitude=14.53 → works with numeric guards.

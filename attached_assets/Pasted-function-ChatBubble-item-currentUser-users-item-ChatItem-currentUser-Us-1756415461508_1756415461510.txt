@@ -1,0 +1,74 @@
+function ChatBubble({
+  item,
+  currentUser,
+  users,
+}: {
+  item: ChatItem;
+  currentUser: User | null;
+  users: Record<string, User>;
+}) {
+  // "Mine" only if userId exists and matches current user
+  const mine = Boolean(item.userId) && item.userId === currentUser?.id;
+  const messageUser = users[item.userId] || { id: item.userId, name: "User" };
+  const displayName = getUserDisplayName(messageUser);
+
+  return (
+    <div className="px-2 w-full mb-2">
+      {/* Column wraps bubble row + timestamp and anchors as a unit */}
+      <div
+        className={`max-w-[92%] flex flex-col ${
+          mine ? "ml-auto items-end" : "items-start"
+        }`}
+      >
+        {/* Row: avatar + bubble */}
+        <div className="flex items-end gap-2">
+          {/* Avatar on the left for others */}
+          {!mine && (
+            <Avatar className="h-7 w-7 shrink-0">
+              {messageUser.avatarUrl ? (
+                <AvatarImage src={messageUser.avatarUrl} alt={displayName} />
+              ) : (
+                <AvatarFallback className="bg-zinc-700 text-white text-[10px]">
+                  {nameToInitials(displayName)}
+                </AvatarFallback>
+              )}
+            </Avatar>
+          )}
+
+          {/* Bubble */}
+          <div
+            className={`rounded-2xl px-3 py-2 text-sm leading-snug whitespace-pre-wrap break-words ${
+              mine
+                ? "bg-blue-600 text-white rounded-br-sm"
+                : "bg-zinc-800 text-zinc-100 rounded-bl-sm"
+            }`}
+          >
+            {item.message}
+          </div>
+
+          {/* Avatar on the right for mine */}
+          {mine && (
+            <Avatar className="h-7 w-7 shrink-0">
+              {messageUser.avatarUrl ? (
+                <AvatarImage src={messageUser.avatarUrl} alt={displayName} />
+              ) : (
+                <AvatarFallback className="bg-blue-600 text-white text-[10px]">
+                  {nameToInitials(displayName)}
+                </AvatarFallback>
+              )}
+            </Avatar>
+          )}
+        </div>
+
+        {/* Timestamp tucked under the bubble group */}
+        <div
+          className={`mt-1 text-[10px] ${
+            mine ? "text-right text-blue-300" : "text-left text-zinc-400"
+          }`}
+        >
+          {timeShort(item.createdAt)}
+        </div>
+      </div>
+    </div>
+  );
+}

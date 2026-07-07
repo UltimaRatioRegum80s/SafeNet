@@ -1,0 +1,303 @@
+awesome—Path A is a go. Here’s a clean, copy-paste Media Pipeline Hardening that slots into your current stack without changing your incident flow:
+
+Client: compress to WebP (~1600px, q≈0.78), fallback to JPEG if needed, 2 files max, progress & errors.
+
+Server: accept uploads via /api/uploads (multipart), strip EXIF, validate MIME by magic bytes, resize, convert to WebP (or JPEG fallback), safe static hosting.
+
+1) Server — secure upload endpoint
+a) Install
+npm i multer sharp file-type uuid
+
+b) Static hosting (once)
+// server/index.ts
+import path from "path";
+app.use("/uploads",
+  express.static(path.join(process.cwd(), "public/uploads"), {
+    immutable: true, maxAge: "365d",
+  })
+);
+
+c) Upload route (memory → sharp → disk)
+// server/routes/uploads.ts
+import { Router } from "express";
+import multer from "multer";
+import sharp from "sharp";
+import { fileTypeFromBuffer } from "file-type";
+import { randomUUID } from "crypto";
+import fs from "fs/promises";
+import path from "path";
+
+const router = Router();
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    files: 2,
+    fileSize: 8 * 1024 * 1024, // 8MB input cap (pre-compress)
+  },
+});
+
+const ALLOWED_MIME = new Set([
+  "image/jpeg","image/png","image/webp","image/avif","image/heic","image/heif",
+]);
+
+router.post("/", upload.array("files", 2), async (req, res, next) => {
+  try {
+    const files = (req.files as Express.Multer.File[]) || [];
+    if (!files.length) return res.status(400).json({ ok: false, error: "No files" });
+
+    const outDir = path.join(process.cwd(), "public/uploads");
+    await fs.mkdir(outDir, { recursive: true });
+
+    const results = [];
+    for (const f of files) {
+      // Validate by magic bytes (never trust Content-Type)
+      const ft = await fileTypeFromBuffer(f.buffer);
+      const mime = ft?.mime || f.mimetype;
+      if (!mime || !ALLOWED_MIME.has(mime)) {
+        return res.status(415).json({ ok: false, error: `Unsupported file type: ${mime || "unknown"}` });
+      }
+
+      // Process: strip metadata, honor EXIF orientation, resize, convert to webp (fallback jpeg)
+      const base = sharp(f.buffer, { failOnError: false }).rotate(); // auto-orient, strips EXIF by default if we don't .withMetadata()
+
+      const pipeline = base.resize({
+        width: 1600, height: 1600, fit: "inside", withoutEnlargement: true,
+      });
+
+      // Try WebP first
+      const webpId = randomUUID();
+      const webpPath = path.join(outDir, `${webpId}.webp`);
+      let data: Buffer | null = null;
+      try {
+        data = await pipeline.clone().webp({ quality: 78 }).toBuffer();
+        await fs.writeFile(webpPath, data);
+        const { width, height } = await sharp(data).metadata();
+        results.push({
+          url: `/uploads/${webpId}.webp`,
+          width, height, size: data.length, format: "webp",
+        });
+        continue;
+      } catch {
+        // fall through to jpeg
+      }
+
+      // JPEG fallback
+      const jpgId = randomUUID();
+      const jpgPath = path.join(outDir, `${jpgId}.jpg`);
+      const jpgData = await pipeline.jpeg({ quality: 82, mozjpeg: true }).toBuffer();
+      await fs.writeFile(jpgPath, jpgData);
+      const { width, height } = await sharp(jpgData).metadata();
+      results.push({
+        url: `/uploads/${jpgId}.jpg`,
+        width, height, size: jpgData.length, format: "jpeg",
+      });
+    }
+
+    return res.status(201).json({ ok: true, files: results });
+  } catch (e) {
+    next(e);
+  }
+});
+
+export default router;
+
+d) Wire the route
+// server/routes.ts or server/index.ts
+import uploadsRouter from "./routes/uploads";
+app.use("/api/uploads", requireAuthOptional, uploadsRouter);
+
+
+Notes
+
+No EXIF retained (privacy). sharp().rotate() honors EXIF orientation and strips metadata by default.
+
+Only raster types allowed; no SVG (script risk).
+
+Output cached under /uploads/* with long cache headers.
+
+2) Client — compress before upload + use the new endpoint
+a) Utility: compress in-browser (WebP → fallback JPEG)
+// client/src/lib/image.ts
+export async function compressImage(file: File, opts?: {
+  maxEdge?: number; quality?: number; preferWebP?: boolean;
+}): Promise<Blob> {
+  const maxEdge = opts?.maxEdge ?? 1600;
+  const quality = opts?.quality ?? 0.78;
+  const preferWebP = opts?.preferWebP ?? true;
+
+  const bitmap = await createImageBitmap(file).catch(() => null);
+  if (!bitmap) return file; // cannot decode (e.g., HEIC in some browsers), let server handle
+
+  const { width, height } = bitmap;
+  const scale = Math.min(1, maxEdge / Math.max(width, height));
+  const outW = Math.max(1, Math.round(width * scale));
+  const outH = Math.max(1, Math.round(height * scale));
+
+  // Prefer OffscreenCanvas when available (perf), fallback to Canvas
+  const canvas: any = "OffscreenCanvas" in globalThis
+    ? new (globalThis as any).OffscreenCanvas(outW, outH)
+    : Object.assign(document.createElement("canvas"), { width: outW, height: outH });
+
+  if (!("OffscreenCanvas" in globalThis)) {
+    const c = canvas as HTMLCanvasElement;
+    c.width = outW; c.height = outH;
+  }
+
+  const ctx = canvas.getContext("2d", { alpha: false })!;
+  ctx.drawImage(bitmap, 0, 0, outW, outH);
+
+  const type = preferWebP && "image/webp" ? "image/webp" : "image/jpeg";
+  const blob: Blob = await (canvas.convertToBlob
+    ? canvas.convertToBlob({ type, quality })
+    : new Promise((resolve) => (canvas as HTMLCanvasElement).toBlob(b => resolve(b!), type, quality))
+  );
+
+  try { (bitmap as any).close?.(); } catch {}
+  return blob;
+}
+
+export function toFile(blob: Blob, original: File, ext = "webp") {
+  return new File([blob], replaceExt(original.name, ext), { type: blob.type });
+}
+function replaceExt(name: string, ext: string) {
+  const i = name.lastIndexOf(".");
+  return (i > 0 ? name.slice(0, i) : name) + "." + ext.replace(/^\./, "");
+}
+
+b) Upload helper (multipart → /api/uploads)
+// client/src/lib/upload.ts
+export async function uploadImages(files: File[], signal?: AbortSignal) {
+  const form = new FormData();
+  for (const f of files) form.append("files", f);
+  const res = await fetch("/api/uploads", {
+    method: "POST",
+    body: form,
+    credentials: "include",
+    signal,
+  });
+  if (!res.ok) throw new Error("Upload failed");
+  const json = await res.json();
+  return json.files as Array<{ url: string; width?: number; height?: number; size?: number; format?: string }>;
+}
+
+c) Wire into ReportPanel (pre-upload → POST incident)
+
+Replace your current “photos as strings” with upload first → get URLs → include in incident POST.
+
+// client/src/features/report/ReportPanel.tsx (relevant parts)
+import { compressImage, toFile } from "@/lib/image";
+import { uploadImages } from "@/lib/upload";
+import { useToast } from "@/components/ui/use-toast";
+
+const MAX_FILES = 2;
+const MAX_TOTAL_UPLOAD_MB = 5; // client guard (pre-compress)
+
+async function prepareAndUpload(files: File[], abort: AbortSignal) {
+  // Pre-filter count
+  const picked = files.slice(0, MAX_FILES);
+
+  // Pre-compress + size check
+  const compressed: File[] = [];
+  let runningBytes = 0;
+
+  for (const f of picked) {
+    const blob = await compressImage(f).catch(() => f); // fallback: original
+    const ext = blob.type.includes("webp") ? "webp" : "jpg";
+    const cf = toFile(blob, f, ext);
+    runningBytes += cf.size;
+    if (runningBytes > MAX_TOTAL_UPLOAD_MB * 1024 * 1024) {
+      throw new Error(`Uploads exceed ${MAX_TOTAL_UPLOAD_MB}MB total after compression`);
+    }
+    compressed.push(cf);
+  }
+
+  // Upload
+  const uploaded = await uploadImages(compressed, abort);
+  return uploaded.map(u => u.url);
+}
+
+
+Hook into your submit:
+
+const controllerRef = useRef<AbortController | null>(null);
+
+function handleSubmit() {
+  if (!selected || cooldownActive || !hasCoords) return;
+
+  controllerRef.current = new AbortController();
+  const abort = controllerRef.current.signal;
+
+  (async () => {
+    try {
+      // If your ImageUpload currently stores File[] in `photos`, use that here:
+      const urls = photosFiles.length
+        ? await prepareAndUpload(photosFiles, abort)
+        : [];
+
+      mutation.mutate({
+        type: selected.id,
+        severity: selected.severity,
+        description: description.trim() || undefined,
+        isAnonymous,
+        lat: chosenCoords?.lat,
+        lng: chosenCoords?.lng,
+        photos: urls, // <-- URLs from /api/uploads
+      });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Upload failed", description: err?.message ?? "Please try again." });
+    }
+  })();
+}
+
+
+(If your ImageUpload gives you URLs already, skip compression and just pass through; otherwise keep a parallel photosFiles: File[] in state.)
+
+Add a cancel on unmount:
+
+useEffect(() => () => controllerRef.current?.abort(), []);
+
+3) Client UI tweaks (optional but nice)
+
+Show small per-file progress (“Compressing…”, “Uploading…”). If you want true per-file progress, switch fetch → XMLHttpRequest and update a progress bar.
+
+Disable Submit while uploading; re-enable on error/cancel.
+
+const [uploading, setUploading] = useState(false);
+// wrap prepareAndUpload call: setUploading(true) → finally setUploading(false)
+<Button disabled={mutation.isPending || cooldownActive || !hasCoords || uploading}>
+  {uploading ? "Uploading…" : /* existing labels */}
+</Button>
+
+4) Server hardening tips (already mostly covered)
+
+Magic-byte check (done).
+
+Strip metadata (done—don’t call .withMetadata()).
+
+Size caps: multer fileSize cap + you can reject outputs above, say, 700KB if you want:
+
+if (data.length > 700 * 1024) { /* recompress at lower quality or reject */ }
+
+
+Path traversal: never use user file names for storage (we don’t).
+
+SVG: disallowed.
+
+Rate limiting: you already have per-user cooldown; you can add a tiny IP-based limiter on /api/uploads if desired.
+
+5) E2E flow (manual QA)
+
+Pick 1–2 large photos (8–12MP) → client compresses; server strips EXIF → total upload < ~1–2MB.
+
+Submit on slow 3G → still feels snappy; optimistic incident shows; images resolve shortly.
+
+Inspect server file: no EXIF; orientation correct.
+
+Try HEIC from iOS:
+
+If Safari can’t decode, client sends original; server converts (if libvips supports it). If not supported, server 415 with friendly error.
+
+Refresh and view feed/map markers with attached thumbnails.
+
+If you want, I can also drop a tiny thumbnailing route (e.g., /img/:w/:h/...) backed by sharp for responsive images; but the static 1600px WebP usually hits the sweet spot for now.

@@ -1,0 +1,322 @@
+here’s everything Replit needs, ready to paste in.
+
+1) Add: src/components/SeveritySelect.tsx (vertical)
+import { useState } from "react";
+import clsx from "clsx";
+import { Smile, AlertTriangle, Flame, Zap } from "lucide-react";
+
+export type Severity = "low" | "medium" | "high" | "critical";
+
+type Props = {
+  onSelect: (v: Severity) => void;
+  /** "solid" = filled red, "ring" = neutral + thick red ring */
+  criticalStyle?: "solid" | "ring";
+  className?: string;
+  trackEvent?: boolean;
+  vibrate?: boolean;
+};
+
+export default function SeveritySelect({
+  onSelect,
+  criticalStyle = "solid",
+  className,
+  trackEvent = true,
+  vibrate = true,
+}: Props) {
+  const [selected, setSelected] = useState<Severity | null>(null);
+
+  const click = (v: Severity) => {
+    if (trackEvent) {
+      try { (window as any).track?.("severity_sheet_open", { severity: v }); } catch {}
+    }
+    if (vibrate && navigator.vibrate) navigator.vibrate(8);
+    setSelected(v);
+    onSelect(v);
+  };
+
+  const baseNeutral =
+    "h-14 w-full rounded-full font-semibold text-base transition-all shadow-sm " +
+    "bg-slate-200/90 text-slate-900 flex items-center justify-center gap-2 " +
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950";
+
+  return (
+    <div
+      className={clsx("w-full max-w-sm space-y-4", className)}
+      role="radiogroup"
+      aria-label="Choose incident severity"
+    >
+      <button
+        role="radio"
+        aria-checked={selected === "low"}
+        className={clsx(baseNeutral, "ring-2 ring-yellow-400")}
+        onClick={() => click("low")}
+      >
+        <Smile className="w-5 h-5" aria-hidden />
+        Low
+      </button>
+
+      <button
+        role="radio"
+        aria-checked={selected === "medium"}
+        className={clsx(baseNeutral, "ring-2 ring-amber-600")}
+        onClick={() => click("medium")}
+      >
+        <AlertTriangle className="w-5 h-5" aria-hidden />
+        Medium
+      </button>
+
+      <button
+        role="radio"
+        aria-checked={selected === "high"}
+        className={clsx(baseNeutral, "ring-2 ring-red-500")}
+        onClick={() => click("high")}
+      >
+        <Flame className="w-5 h-5" aria-hidden />
+        High
+      </button>
+
+      {criticalStyle === "solid" ? (
+        <button
+          role="radio"
+          aria-checked={selected === "critical"}
+          className={clsx(
+            "h-14 w-full rounded-full font-semibold text-base transition-all shadow-md",
+            "bg-red-700 text-white flex items-center justify-center gap-2",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400",
+            "focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+          )}
+          onClick={() => click("critical")}
+        >
+          <Zap className="w-5 h-5" aria-hidden />
+          Critical
+        </button>
+      ) : (
+        <button
+          role="radio"
+          aria-checked={selected === "critical"}
+          className={clsx(baseNeutral, "ring-4 ring-red-600")}
+          onClick={() => click("critical")}
+        >
+          <Zap className="w-5 h-5" aria-hidden />
+          Critical
+        </button>
+      )}
+    </div>
+  );
+}
+
+2) Add: src/components/SeveritySelectCompact.tsx (wraps to 2×2)
+import { useState } from "react";
+import clsx from "clsx";
+import { Smile, AlertTriangle, Flame, Zap } from "lucide-react";
+
+export type Severity = "low" | "medium" | "high" | "critical";
+
+type Props = {
+  onSelect: (v: Severity) => void;
+  criticalStyle?: "solid" | "ring";
+  className?: string;
+  trackEvent?: boolean;
+  vibrate?: boolean;
+};
+
+export default function SeveritySelectCompact({
+  onSelect,
+  criticalStyle = "solid",
+  className,
+  trackEvent = true,
+  vibrate = true,
+}: Props) {
+  const [selected, setSelected] = useState<Severity | null>(null);
+
+  const click = (v: Severity) => {
+    if (trackEvent) {
+      try { (window as any).track?.("severity_sheet_open", { severity: v }); } catch {}
+    }
+    if (vibrate && navigator.vibrate) navigator.vibrate(8);
+    setSelected(v);
+    onSelect(v);
+  };
+
+  const baseNeutral =
+    "h-12 rounded-full font-semibold text-sm transition-all shadow-sm " +
+    "bg-slate-200/90 text-slate-900 flex items-center justify-center gap-2 px-4 " +
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950";
+
+  const Item = ({
+    children, className, checked, onClick, ariaLabel,
+  }: {
+    children: React.ReactNode;
+    className?: string;
+    checked: boolean;
+    onClick: () => void;
+    ariaLabel: string;
+  }) => (
+    <button
+      role="radio"
+      aria-label={ariaLabel}
+      aria-checked={checked}
+      className={clsx("w-full", baseNeutral, className)}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Choose incident severity"
+      className={clsx("grid grid-cols-2 gap-3 sm:grid-cols-4 max-w-xl", className)}
+    >
+      <Item ariaLabel="Low severity" checked={selected === "low"} onClick={() => click("low")} className="ring-2 ring-yellow-400">
+        <Smile className="w-5 h-5" aria-hidden />
+        <span>Low</span>
+      </Item>
+
+      <Item ariaLabel="Medium severity" checked={selected === "medium"} onClick={() => click("medium")} className="ring-2 ring-amber-600">
+        <AlertTriangle className="w-5 h-5" aria-hidden />
+        <span>Medium</span>
+      </Item>
+
+      <Item ariaLabel="High severity" checked={selected === "high"} onClick={() => click("high")} className="ring-2 ring-red-500">
+        <Flame className="w-5 h-5" aria-hidden />
+        <span>High</span>
+      </Item>
+
+      {criticalStyle === "solid" ? (
+        <Item ariaLabel="Critical severity" checked={selected === "critical"} onClick={() => click("critical")}
+          className={clsx("bg-red-700 text-white", "focus-visible:ring-red-400")}
+        >
+          <Zap className="w-5 h-5" aria-hidden />
+          <span>Critical</span>
+        </Item>
+      ) : (
+        <Item ariaLabel="Critical severity" checked={selected === "critical"} onClick={() => click("critical")} className="ring-4 ring-red-600">
+          <Zap className="w-5 h-5" aria-hidden />
+          <span>Critical</span>
+        </Item>
+      )}
+    </div>
+  );
+}
+
+3) Use it on the Report page (replace the 3 FABs)
+
+Find the component that currently renders the three severity FABs in the lg:hidden section and replace with:
+
+// adjust import paths to your project aliases
+import SeveritySelect from "@/components/SeveritySelect";
+import SeveritySelectCompact from "@/components/SeveritySelectCompact";
+import type { Severity } from "@/components/SeveritySelect";
+import { useIncidentStore } from "@/stores/useIncidentStore";
+// import { useCategorySheet } from "@/components/CategorySheet"; // example: if your openSheet comes from a hook
+
+export default function ReportIncidentEntry() {
+  const setSeverity = useIncidentStore((s) => s.setSeverity);
+  // Re-use the *same* openSheet the old FABs used:
+  const openSheet = /* import or inject your existing function */ (sev: Severity) => {
+    // example: useCategorySheet.getState().openSheet(sev)
+  };
+
+  const onSeverity = (sev: Severity) => {
+    setSeverity(sev);
+    openSheet(sev);
+  };
+
+  return (
+    <section className="lg:hidden px-4 sm:px-6 pt-10 pb-[calc(env(safe-area-inset-bottom)+24px)] grid place-items-center md:place-items-start">
+      <div className="w-full">
+        <h1 className="text-xl md:text-2xl font-bold text-center md:text-left">Report Incident</h1>
+        <p className="mt-2 text-sm text-slate-400 text-center md:text-left">
+          Choose a severity level. You’ll select the incident type next.
+        </p>
+
+        {/* Choose ONE of the two selectors below */}
+        <div className="mt-8">
+          {/* Vertical (thumb-friendly) */}
+          <SeveritySelect onSelect={onSeverity} criticalStyle="solid" />
+
+          {/* Compact (1x4 or 2x2) */}
+          {/* <SeveritySelectCompact onSelect={onSeverity} criticalStyle="solid" /> */}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+
+Keep the desktop grid section (lg:block) untouched.
+
+4) Ensure the drawer/grid filters by store severity
+
+In your incident type drawer/sheet where you render the grid:
+
+import { useIncidentStore } from "@/stores/useIncidentStore";
+
+type IncidentType = { id: string; label: string; severity: "low"|"medium"|"high"|"critical" };
+
+export function IncidentTypeGrid({ types }: { types: IncidentType[] }) {
+  const severity = useIncidentStore((s) => s.severity);
+  const setSeverity = useIncidentStore((s) => s.setSeverity);
+
+  const visibleTypes = severity === "all" ? types : types.filter(t => t.severity === severity);
+
+  if (!visibleTypes.length) {
+    return (
+      <div className="p-6 text-center text-slate-300">
+        <p className="mb-3">No Critical incident types yet.</p>
+        <button
+          onClick={() => setSeverity("all" as any)}
+          className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 h-10 font-medium text-slate-100
+                     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+        >
+          Show all types
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-3 gap-3">{/* existing card map here using visibleTypes */}</div>
+  );
+}
+
+
+Replace the placeholder message if your empty state should vary per severity.
+If you also show severity badges on cards, keep those as-is.
+
+5) (Optional) Barrel export for tidy imports
+
+src/components/index.ts
+
+export { default as SeveritySelect } from "./SeveritySelect";
+export { default as SeveritySelectCompact } from "./SeveritySelectCompact";
+export type { Severity } from "./SeveritySelect";
+
+
+Then:
+
+import { SeveritySelect } from "@/components";
+
+6) Quick a11y sanity (no extra code needed)
+
+Buttons already include visible focus rings (focus-visible:ring-2 ring-offset-2 ring-offset-slate-950).
+
+Icons have aria-hidden.
+
+Group has role="radiogroup" and each button role="radio" (vertical); compact uses radiogroup + radio as well.
+
+7) Acceptance checks (manual)
+
+Four buttons visible on mobile/tablet.
+
+Tap = haptic + analytics + opens drawer filtered by severity.
+
+Desktop view unchanged.
+
+Tab/Shift+Tab shows focus outline on each button.
+
+If no “critical” types exist, the empty-state appears with “Show all types”.
+
+that’s it—drop these files in, replace the old FABs with the new selector, and you’re done. If your openSheet lives in a hook or context, just swap the placeholder call for your real one.

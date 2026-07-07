@@ -1,0 +1,109 @@
+Perfect—thanks for the clear report. Here are crisp answers + the exact changes to make so this matches @RDM’s two-row header vision.
+
+Decisions (so you can proceed)
+
+Statistics link: Don’t re-add the page. Hide “Stats” from the header for now. We’ll re-enable later when the page returns.
+
+Routes: Keep your existing /community/* routes. We’ll point the header links to those—no route reshuffle today.
+
+Bottom mobile menu: Remove MobileFloatingTopMenu from all non-map pages. The new two-row header is the only nav @RDM wants.
+
+Map stays excluded from AppLayout and keeps its overlay controls.
+
+Drop-in: GlobalNavLinks.tsx (adapted to your routes)
+// client/src/components/layout/GlobalNavLinks.tsx
+import { Link, useLocation } from "wouter";
+import { Home, Camera, MapPin, MessageSquare } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+// Toggle items here (Stats omitted per @RDM for now)
+const items = [
+  { href: "/", label: "Home", icon: Home },
+  { href: "/community/report", label: "Report", icon: Camera },
+  { href: "/community/map", label: "Map", icon: MapPin },
+  { href: "/community/feed", label: "Feed", icon: MessageSquare },
+  // { href: "/community/stats", label: "Stats", icon: BarChart3 }, // re-enable later
+];
+
+export default function GlobalNavLinks() {
+  const [location] = useLocation();
+  return (
+    <nav className="flex items-center gap-4 text-sm">
+      {items.map(({ href, label, icon: Icon }) => {
+        const active = location === href;
+        return (
+          <Link key={href} href={href}>
+            <a
+              className={cn(
+                "inline-flex items-center gap-2 py-2",
+                active ? "text-foreground font-semibold"
+                       : "text-muted-foreground hover:text-foreground"
+              )}
+              aria-current={active ? "page" : undefined}
+            >
+              <Icon className="h-4 w-4" />
+              <span>{label}</span>
+            </a>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+AppLayout usage (no footer, all non-map pages)
+// App.tsx (excerpt)
+import AppLayout from "@/components/layout/AppLayout";
+import Dashboard from "@/pages/Dashboard";
+import ReportIncident from "@/pages/community/ReportIncident"; // adjust path if needed
+import Feed from "@/pages/community/Feed";
+import Chat from "@/pages/Chat";
+import Map from "@/pages/community/Map";
+
+<Switch>
+  <Route path="/community/map" component={Map} /> {/* Map excluded */}
+
+  <Route path="/community/report">
+    <AppLayout title="Report Incident">
+      <ReportIncident />
+    </AppLayout>
+  </Route>
+
+  <Route path="/community/feed">
+    <AppLayout title="Feed">
+      <Feed />
+    </AppLayout>
+  </Route>
+
+  <Route path="/chat">
+    <AppLayout title="Chat">
+      <Chat />
+    </AppLayout>
+  </Route>
+
+  <Route path="/">
+    <AppLayout title="Dashboard">
+      <Dashboard />
+    </AppLayout>
+  </Route>
+</Switch>
+
+Cleanup checklist
+
+Remove any footer={<MobileFloatingTopMenu />} from AppLayout usage.
+
+Delete any leftover pill/secondary rows or page-specific header bars in Dashboard, Report, Feed, Chat.
+
+Keep Map overlay as is.
+
+Acceptance criteria
+
+All non-map pages show: Row 1 (home icon + page title + compact actions) and Row 2 (Home, Report, Map, Feed links).
+
+Stats link is not present.
+
+No bottom floating menu on non-map pages.
+
+Map route untouched.
+
+If this matches, go ahead and implement exactly this.

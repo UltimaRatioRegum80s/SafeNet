@@ -1,0 +1,102 @@
+🔍 Things to verify in your code
+
+Toast provider: Ensure <Toaster /> is mounted once at app root.
+
+React Query key: Map side invalidates/queries ["incidents"] (same key as in the mutation).
+
+Socket hook: /map page is listening to incident:new and adds the marker (or you refetch on focus).
+
+🩹 Small patches to tighten things up
+1) Fix useToast usage
+
+In the card snippet I sent earlier I defensively used useToast?.() which isn’t needed. Use shadcn’s hook directly:
+
+// QuickReportCard.tsx
+import { useToast } from "@/components/ui/use-toast";
+
+const { toast } = useToast();
+
+2) Disable submit while locating/posting (race-proof)
+const [isLocating, setIsLocating] = React.useState(false);
+const isBusy = isLocating || createIncident.isPending;
+
+const onSubmit = async () => {
+  if (!type || !severity || isBusy) return;
+  try {
+    setIsLocating(true);
+    const { lat, lng } = await getCurrentPosition();
+    await createIncident.mutateAsync({
+      type, severity, latitude: lat, longitude: lng,
+      description: note?.trim() || undefined,
+    });
+    reset();
+    toast({ title: "Incident reported", description: "Redirecting to map…" });
+    setLocation("/map");
+  } catch (err: any) {
+    toast({
+      title: "Couldn’t get your location",
+      description: err?.message ?? "Please enable location and try again.",
+      variant: "destructive",
+    });
+  } finally {
+    setIsLocating(false);
+  }
+};
+
+// ...
+<Button onClick={onSubmit} disabled={isBusy || !type || !severity}>
+  {isBusy ? "Submitting…" : "Submit"}
+</Button>
+
+3) (Nice upgrade) Focus the new pin on the map
+
+If your server returns { id }, redirect with a query param so the map can center/flash the new marker:
+
+const result = await createIncident.mutateAsync({...});
+setLocation(`/map?focus=${encodeURIComponent(result.id)}`);
+
+
+Then in /map:
+
+// read focus param, panTo marker coordinates once it’s present
+
+4) (Optional) Optimistic marker before redirect
+
+If you want immediate visual feedback without waiting for socket:
+
+Emit a custom client event after the POST, or push into a local “pendingIncidents” store the map reads.
+
+Since you redirect instantly, this is optional.
+
+🧰 Debug checklist (console logs to add temporarily)
+
+In useCreateIncident.onSuccess:
+
+console.debug("[incident] created -> invalidating incidents");
+
+
+In the map’s socket handler:
+
+socket.on("incident:new", (inc) => {
+  console.debug("[socket] incident:new", inc.id, inc.type);
+  addIncidentMarker(inc);
+});
+
+
+In getCurrentPosition catch:
+
+console.warn("[geo] error", err.code, err.message);
+
+📣 Replit-side confirmation list
+
+When you run the above tests, please report back:
+
+ Toasts show up (root Toaster present)
+
+ /api/incidents receives { type, severity, latitude, longitude, description? }
+
+ Socket incident:new fires and adds a marker
+
+ Map centers or clearly shows the new marker
+
+ Double-submit is prevented

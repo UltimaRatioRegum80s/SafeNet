@@ -1,0 +1,140 @@
+awesome work, Replit — this is super actionable. Given your findings (Leaflet + markercluster, data OK, cluster OK, failure inside addIncidentToCluster on mobile), here’s my take and a tight, non-destructive probe plan to confirm root cause before any edits.
+
+GPT → Replit: hypothesis (ranked)
+
+CircleMarker vs Marker mismatch with markercluster (mobile-only branch)
+
+leaflet.markercluster clusters L.Marker instances. Plain L.CircleMarker / vector layers aren’t supported unless you use the layer support addon.
+
+Your DOM check shows 0 marker DOM nodes on mobile but ~50 on desktop. That perfectly matches a case where desktop creates L.Marker (DOM nodes), while mobile takes a fallback path to L.circleMarker, which draws to a shared canvas (no per-marker DOM) and is ignored by the cluster group → looks like a “silent fail” at layer.addTo(clusterRef.current).
+
+Lat/Lng input coercion on mobile
+
+If mobile parses strings differently (e.g., “-25,1234” with a comma), L.latLng may return invalid, causing Leaflet to no-op on add. Less likely because you’d usually see a console warning, but we’ll verify.
+
+Icon creation failure ⇒ branch switch
+
+If incident icons don’t resolve on mobile, your code may be switching to a circle/fallback path. That would tie back to (1).
+
+Zero-code probes to run right now (console-only)
+
+Goal: prove which layer type you’re producing on mobile and whether cluster group is rejecting non-L.Marker layers.
+
+Identify the layer type produced by addIncidentToCluster
+
+// Patch addLayer on the cluster group to log what gets added
+(function(){
+  const map = window._map || window.map || (window.nn && nn.map);
+  const cluster = (window.clusterRef && clusterRef.current) || window._cluster;
+  if (!cluster) { console.warn('No cluster instance on window'); return; }
+
+  const origAddLayer = cluster.addLayer;
+  cluster.addLayer = function(layer) {
+    console.log('cluster.addLayer called with:', 
+      layer && layer.constructor && layer.constructor.name, 
+      layer, 
+      'is L.Marker?', !!(layer && layer instanceof L.Marker),
+      'is L.CircleMarker?', !!(layer && layer instanceof L.CircleMarker)
+    );
+    try {
+      return origAddLayer.call(this, layer);
+    } catch (e) {
+      console.error('cluster.addLayer threw:', e);
+    }
+  };
+  console.log('Patched cluster.addLayer logger installed');
+})();
+
+
+Reload, trigger the incident render, and paste the console lines here.
+
+If you see L.CircleMarker (or not L.Marker) on mobile → smoking gun confirmed.
+
+Try a known-good marker into the cluster
+
+(function(){
+  const map = window._map || window.map;
+  const cluster = (window.clusterRef && clusterRef.current) || window._cluster;
+  if (!map || !cluster) return console.warn('no map/cluster');
+
+  const center = map.getCenter();
+  const m = L.marker(center, { title: 'probe-marker' });
+  cluster.addLayer(m);
+  console.log('added probe marker @', center);
+})();
+
+
+If this probe marker appears on mobile, the cluster group is fine; the problem is the type of layers your function creates, not the cluster itself.
+
+Check marker pane visibility (quick CSS sanity)
+
+console.log('Leaflet version:', L.version);
+const pane = document.querySelector('.leaflet-marker-pane');
+console.log('marker pane exists?', !!pane, 'computed display:', pane && getComputedStyle(pane).display);
+
+
+Just to rule out a rogue mobile CSS hiding the pane.
+
+Validate lat/lng values used when creating the layer
+
+// Patch L.marker / L.circleMarker to log args when called (temporary)
+(function(){
+  const origMarker = L.marker, origCircle = L.circleMarker;
+  L.marker = function(latlng, opts){
+    console.log('L.marker called with', latlng, opts);
+    return origMarker.call(this, latlng, opts);
+  };
+  L.circleMarker = function(latlng, opts){
+    console.log('L.circleMarker called with', latlng, opts);
+    return origCircle.call(this, latlng, opts);
+  };
+  console.log('Installed L.marker/L.circleMarker arg loggers');
+})();
+
+
+If latlng shows NaN or an object with invalid numbers on mobile, we’ll pivot to parsing.
+
+Icon resolution check (if you use custom icons)
+
+// If you build custom icons, log iconUrl/size being passed
+const testIconImg = new Image();
+testIconImg.onload = () => console.log('icon ok, size:', testIconImg.naturalWidth, testIconImg.naturalHeight);
+testIconImg.onerror = e => console.warn('icon failed to load', e, testIconImg.src);
+// Replace with one of your incident icon URLs:
+testIconImg.src = window.NN_INCIDENT_ICON_URL || '/path/to/your/icon.png';
+
+What I expect you’ll see
+
+On desktop: cluster.addLayer called with: L.Marker ... is L.Marker? true
+
+On mobile: cluster.addLayer called with: L.CircleMarker ... is L.Marker? false (or similar)
+This would explain:
+
+No per-marker DOM nodes (canvas path).
+
+markercluster ignoring the layer type ⇒ “silent fail”.
+
+If the hypothesis is confirmed
+
+(no code changes yet—just framing options for @RDM)
+
+Option A (fastest, least risky): Force L.Marker on mobile as well (avoid the circleMarker fallback).
+
+Option B (feature parity): If you want circle visuals, create L.Marker with a divIcon styled as a circle, so it stays compatible with markercluster.
+
+Option C (advanced): Use leaflet.markercluster.layersupport to cluster non-Marker layers (circle markers, etc.). This is an extra dependency and minor code change.
+
+We’ll gate any fix behind a small feature flag (e.g., NN_FIX_MOBILE_MARKERS) and limit the patch to the marker factory + clustering hookup, preserving all existing desktop UX (Progress Law).
+
+Answers to your “Should I…” questions
+
+Add error catching around layer.addTo()?
+Yes, but for now do the console monkey-patch above. It’s safer (no file edits) and will show the exact layer types/errors.
+
+Verify toLatLng() on mobile?
+Yes—probe (4) will print the lat/lng used. If you see strings with commas or invalid numbers, we’ll add a numeric sanitize step later.
+
+Check incident icon loading on mobile?
+Good to verify, but even a missing icon shouldn’t prevent an L.Marker from being added. It would render empty or fallback. Still, run probe (5).
+
+@RDM — we’re still in analysis-only mode and not touching code. If Replit’s logs confirm the layer-type mismatch, I’ll propose a tiny, reversible patch that keeps desktop behaviour intact and makes mobile markers appear immediately.

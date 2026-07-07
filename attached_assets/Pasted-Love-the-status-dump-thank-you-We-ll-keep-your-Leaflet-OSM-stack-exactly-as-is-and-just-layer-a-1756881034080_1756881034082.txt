@@ -1,0 +1,242 @@
+Love the status dump—thank you. ✅ We’ll keep your Leaflet + OSM stack exactly as-is and just layer a mobile-only floating chrome on top. No clustering, no marker changes, no desktop changes. This honors Progress Law.
+
+Below is a Leaflet-adapted version of the chrome with the smallest possible surface area:
+
+Works with your existing SimpleMapView.tsx and /pages/community/SimpleMap.tsx.
+
+Mobile only (md:hidden), so desktop UI & controls stay intact.
+
+Zoom uses map.zoomIn/zoomOut.
+
+Light/Dark switches tile layers (not GL styles).
+
+If needed, the whole thing can be disabled by removing one import line.
+
+1) New floating chrome (library-agnostic)
+
+client/src/components/map/MobileMapChrome.tsx
+
+import React from "react";
+import { Home, FilePlus2, Newspaper, Minus, Plus, Sun, Moon } from "lucide-react";
+import clsx from "clsx";
+
+type Props = {
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  mode: "light" | "dark";
+  onToggleMode: () => void;
+  onNav?: (dest: "home" | "report" | "feed") => void;
+};
+
+export default function MobileMapChrome({
+  onZoomIn,
+  onZoomOut,
+  mode,
+  onToggleMode,
+  onNav,
+}: Props) {
+  return (
+    <div className="md:hidden">
+      {/* Top Nav */}
+      <div
+        className={clsx(
+          "fixed left-3 right-3 z-[60]",
+          "rounded-2xl shadow-md border",
+          "backdrop-blur bg-background/70",
+          "flex items-center justify-between px-2 py-1",
+          "mt-[max(env(safe-area-inset-top),0.5rem)]"
+        )}
+      >
+        <button className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm hover:bg-muted/60 active:scale-95"
+                onClick={() => onNav?.("home")}>
+          <Home size={18}/> Home
+        </button>
+        <button className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm hover:bg-muted/60 active:scale-95"
+                onClick={() => onNav?.("report")}>
+          <FilePlus2 size={18}/> Report
+        </button>
+        <button className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm hover:bg-muted/60 active:scale-95"
+                onClick={() => onNav?.("feed")}>
+          <Newspaper size={18}/> Feed
+        </button>
+      </div>
+
+      {/* Right stack: zoom + theme */}
+      <div className="fixed right-3 bottom-28 z-[60] flex flex-col gap-2">
+        <button aria-label="Zoom in"
+                className="h-12 w-12 grid place-items-center rounded-2xl bg-background/90 border shadow-md active:scale-95"
+                onClick={onZoomIn}>
+          <Plus size={20}/>
+        </button>
+        <button aria-label="Zoom out"
+                className="h-12 w-12 grid place-items-center rounded-2xl bg-background/90 border shadow-md active:scale-95"
+                onClick={onZoomOut}>
+          <Minus size={20}/>
+        </button>
+        <button aria-label="Toggle theme"
+                className="h-12 w-12 grid place-items-center rounded-2xl bg-background/90 border shadow-md active:scale-95"
+                onClick={onToggleMode}>
+          {mode === "light" ? <Moon size={20}/> : <Sun size={20}/>}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+If lucide-react or clsx are missing: npm i lucide-react clsx
+
+2) Minimal edits to SimpleMapView.tsx (Leaflet)
+
+Goal: keep your marker code; just add (a) dual base layers + (b) mobile chrome hooks + (c) hide Leaflet’s default zoom control on mobile.
+
+// client/src/components/SimpleMapView.tsx
+import React, { useEffect, useRef, useState } from "react";
+import L, { Map as LeafletMap, TileLayer, LayerGroup } from "leaflet";
+import "leaflet/dist/leaflet.css";
+import MobileMapChrome from "@/components/map/MobileMapChrome"; // <-- NEW
+
+const isMobile = () => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
+
+// Base tiles (feel free to swap dark to something else later)
+const LIGHT_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
+const DARK_URL  = "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png";
+
+const ATTR_OSM = '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> contributors';
+const ATTR_CARTO = '&copy; <a href="https://carto.com/attributions">CARTO</a>';
+
+type Incident = { id: string; lat: number; lng: number }; // adjust to your shape
+type Props = {
+  incidents: Incident[];
+  center?: [number, number];
+  zoom?: number;
+};
+
+export default function SimpleMapView({ incidents, center = [37.98, 23.73], zoom = 7 }: Props) {
+  const mapEl = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<LeafletMap | null>(null);
+  const baseRef = useRef<{ light?: TileLayer; dark?: TileLayer; current?: "light" | "dark" }>({});
+  const markersRef = useRef<LayerGroup | null>(null);
+  const [mode, setMode] = useState<"light" | "dark">("light");
+
+  // init map once
+  useEffect(() => {
+    if (!mapEl.current || mapRef.current) return;
+
+    const map = L.map(mapEl.current, {
+      center,
+      zoom,
+      zoomControl: !isMobile(), // hide default zoom control on mobile
+    });
+
+    // base layers
+    const light = L.tileLayer(LIGHT_URL, { attribution: ATTR_OSM, maxZoom: 19 });
+    const dark  = L.tileLayer(DARK_URL,  { attribution: `${ATTR_OSM} | ${ATTR_CARTO}`, maxZoom: 19 });
+
+    light.addTo(map);
+    baseRef.current = { light, dark, current: "light" };
+
+    // markers layer group (keeps incidents above base when we switch tiles)
+    const markers = L.layerGroup().addTo(map);
+    markersRef.current = markers;
+
+    mapRef.current = map;
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+    };
+  }, [center, zoom]);
+
+  // render/update markers without touching your logic
+  useEffect(() => {
+    if (!markersRef.current) return;
+    const group = markersRef.current;
+    group.clearLayers();
+
+    // --- keep your exact marker rendering here ---
+    // Example using your style (bright red circle markers):
+    incidents.forEach((p) => {
+      L.circleMarker([p.lat, p.lng], {
+        radius: 10,
+        color: "#ff0000",
+        fillColor: "#ff0000",
+        fillOpacity: 0.9,
+        weight: 2,
+      }).addTo(group);
+    });
+    // --------------------------------------------
+  }, [incidents]);
+
+  // theme toggle: switch tile layers only
+  useEffect(() => {
+    const map = mapRef.current;
+    const base = baseRef.current;
+    if (!map || !base.light || !base.dark) return;
+
+    if (mode === base.current) return;
+
+    // remove current base and add the other
+    if (base.current === "light") {
+      map.removeLayer(base.light);
+      base.dark.addTo(map);
+      base.current = "dark";
+    } else {
+      map.removeLayer(base.dark);
+      base.light.addTo(map);
+      base.current = "light";
+    }
+  }, [mode]);
+
+  return (
+    <div className="relative h-[calc(100vh)] w-full">
+      {/* Map canvas */}
+      <div ref={mapEl} className="absolute inset-0" />
+
+      {/* Floating mobile chrome */}
+      <MobileMapChrome
+        mode={mode}
+        onToggleMode={() => setMode(m => (m === "light" ? "dark" : "light"))}
+        onZoomIn={() => mapRef.current?.zoomIn()}
+        onZoomOut={() => mapRef.current?.zoomOut()}
+        onNav={(dest) => {
+          if (dest === "home")  location.href = "/";
+          if (dest === "report") location.href = "/report";
+          if (dest === "feed")  location.href = "/feed";
+        }}
+      />
+    </div>
+  );
+}
+
+
+Why this is safe
+
+We don’t touch your incident rendering—your L.circleMarker code remains intact (now placed inside a LayerGroup so base tiles can switch without affecting markers).
+
+Default Leaflet zoom control is hidden only on mobile; desktop keeps it.
+
+If anything misbehaves, delete the MobileMapChrome import + JSX and you’re back to today’s UI.
+
+3) Page wrapper remains the same
+
+client/src/pages/community/SimpleMap.tsx should not need changes (it just passes incidents into SimpleMapView).
+
+4) Tiny CSS nicety (optional)
+
+If Leaflet’s attribution/controls still peek through on tiny screens, add:
+
+/* mobile-only trim */
+@media (max-width: 767px) {
+  .leaflet-control-attribution { font-size: 10px; }
+}
+
+Replit ↔ GPT protocol (to protect progress)
+
+Feature scope: presentation only; no data shape or marker logic changes.
+
+Roll-back point: remove one import + one JSX block.
+
+Testing: quick check on mobile viewport (Chrome dev tools): zoom buttons, theme toggle, top nav.
+
+If you’re good with this, go ahead and drop in the two edits. If your SimpleMapView.tsx has different structure (e.g., you already use a LayerGroup for incidents), keep that and just wire the MobileMapChrome callbacks to mapRef.

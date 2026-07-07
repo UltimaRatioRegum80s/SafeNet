@@ -1,0 +1,119 @@
+GPT → Replit (debug huddle)
+
+got it — the “Drop a pin” button on desktop isn’t triggering report mode. let’s isolate where it’s breaking. can you reply inline to these?
+
+A) Repro + console
+
+When you click Drop a pin, do you see any console logs/errors? (Radix/Sheet warnings, state-immutable errors, etc.)
+
+B) Store state transitions (Zustand)
+
+Right before clicking, what are these values?
+
+useQuickReportStore.getState().sheetOpen
+
+useQuickReportStore.getState().reportMode
+
+useQuickReportStore.getState().location
+
+Immediately after clicking Drop a pin, what are they?
+
+sheetOpen should be false
+
+reportMode should be true
+
+location unchanged (until map click)
+
+Can you confirm there’s only one instance of the store? Search for imports:
+
+Are all imports using the same path (e.g. @/state/useQuickReportStore) or is there a mix like ../../state/useQuickReportStore? (mixed paths can create duplicate Zustand stores)
+
+C) Button wiring (QuickReportCard)
+
+What’s the exact onClick handler for the button right now? (Paste snippet.)
+
+Is it this?
+
+<Button
+  variant="secondary"
+  type="button"
+  onClick={() => { closeSheet(); startReportMode(); }}
+>
+  Drop a pin
+</Button>
+
+
+If type isn’t set, it might be submitting the form and short-circuiting the click. Is type="button" present?
+
+Is startReportMode definitely coming from the same store instance as closeSheet? (Both destructured from the same useQuickReportStore() call in this component?)
+
+Is the Sheet controlled like this?
+
+<Sheet open={sheetOpen} onOpenChange={(o) => (o ? openSheet() : closeSheet())}>
+
+
+If you’re also calling closeSheet() inside the button, confirm there’s no immediate re-open due to some upstream state (e.g., a parent that calls openSheet() on focus).
+
+D) Map side (overlay & click binding)
+
+On button click, do you see the crosshair cursor and the “Click the map…” overlay?
+
+If no overlay, reportMode likely isn’t true or Map.tsx isn’t subscribing to it.
+
+In Map.tsx, can you confirm these lines exist and are active?
+
+Subscription:
+
+const { reportMode, confirmTempPin, cancelReportMode } = useQuickReportStore();
+
+
+Effect that attaches click handler when reportMode is true:
+
+useEffect(() => {
+  const map = mapRef.current; if (!map) return;
+  function onClick(e: L.LeafletMouseEvent) {
+    if (!reportMode) return;
+    confirmTempPin({ lat: e.latlng.lat, lng: e.latlng.lng });
+  }
+  map.on("click", onClick);
+  return () => map.off("click", onClick);
+}, [reportMode, confirmTempPin]);
+
+
+Is anything visually blocking map clicks after the sheet closes?
+
+Inspect the DOM: is there a lingering Radix/Sheet backdrop ([data-radix-portal]) covering the map (z-index > 0)?
+
+Our overlay uses pointer-events-none; if a backdrop remains with pointer-events-auto, clicks won’t reach the map.
+
+E) Breakpoint logic
+
+What does useIsDesktop() return on this screen?
+
+Add a temp log on the button click: console.log('isDesktop', isDesktop)
+
+If it’s false at ≥1024px, report mode won’t be used.
+
+F) Double-store / module boundary check
+
+Are QuickReportCard and Map.tsx compiled in different chunks with different path aliases? (e.g., Vite/TS paths vs Vite resolve.alias)
+
+If yes, please paste both alias configs. Duplicate module resolution could produce two store instances.
+
+G) Quick sanity toggles
+
+If you manually run in the console:
+
+const s = window.__nn = (await import('@/state/useQuickReportStore')).useQuickReportStore;
+s.getState().startReportMode()
+
+
+— do you see the overlay and crosshair immediately? If yes, the store + map wiring works and the issue is just the button handler.
+
+Conversely:
+
+const s = (await import('@/state/useQuickReportStore')).useQuickReportStore;
+s.getState().confirmTempPin({lat: 10, lng: 10})
+
+
+— does the sheet open with coordinates? If yes, confirmTempPin path is good.

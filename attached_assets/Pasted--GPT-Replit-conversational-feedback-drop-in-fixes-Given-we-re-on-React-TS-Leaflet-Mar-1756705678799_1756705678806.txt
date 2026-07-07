@@ -1,0 +1,278 @@
+🟣 GPT → Replit (conversational feedback + drop-in fixes)
+
+Given we’re on React + TS + Leaflet + MarkerCluster, the “no markers appear on mobile” symptom usually boils down to one of these (in order of likelihood):
+
+MarkerCluster CSS not loaded → clusters render invisible, so at normal zoom it looks like “no markers”.
+
+Custom icon URLs aren’t resolving in the PWA build → markers exist but the image fails to load (no default), so invisible.
+
+Markers added to a LayerGroup that isn’t on the map (or you created two maps and attached to the wrong one).
+
+Lat/lng fine, but you’re adding before map is ready → event timing on mobile.
+
+Z-index/overlay pane covering markers.
+
+Socket + optimistic path add to a different reference than the on-map cluster group.
+
+Service Worker caching stale CSS/assets (icons or MarkerCluster CSS) on mobile.
+
+Below are surgical, copy-paste patches to both diagnose and fix with minimal disruption.
+
+0) Make the “is it visible?” test undeniable
+
+Add a circle marker fallback (doesn’t depend on icon assets), plus a debug counter on the map. If circles show but your custom icons don’t → icon/CSS path bug.
+
+// components/NNMap.tsx
+import { useEffect, useRef } from "react";
+import L, { Map as LeafletMap, MarkerClusterGroup } from "leaflet";
+import "leaflet/dist/leaflet.css";
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
+
+// Prevent missing default icon in Vite builds (even if you use custom icons, keep this)
+import marker2x from "leaflet/dist/images/marker-icon-2x.png";
+import marker1x from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: marker2x,
+  iconUrl: marker1x,
+  shadowUrl: markerShadow,
+});
+
+export default function NNMap() {
+  const mapRef = useRef<LeafletMap | null>(null);
+  const clusterRef = useRef<MarkerClusterGroup | null>(null);
+
+  useEffect(() => {
+    const map = L.map("nn-map", { zoomControl: true, preferCanvas: true })
+      .setView([-33.9249, 18.4241], 12); // Cape Town default
+    mapRef.current = map;
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap",
+      maxZoom: 19,
+    }).addTo(map);
+
+    // One and only cluster group on the page
+    const cluster = (clusterRef.current = L.markerClusterGroup({
+      spiderfyOnMaxZoom: true,
+      showCoverageOnHover: false,
+      disableClusteringAtZoom: 17,
+    }));
+    map.addLayer(cluster);
+
+    // Debug overlay — # of markers currently in the cluster
+    const label = L.control({ position: "bottomleft" });
+    label.onAdd = () => {
+      const div = L.DomUtil.create("div", "px-2 py-1 text-xs bg-white/80 rounded shadow");
+      div.id = "nn-debug-count";
+      div.innerHTML = "markers: 0";
+      return div;
+    };
+    label.addTo(map);
+
+    // Known-good test: should ALWAYS see a marker + circle
+    const goodLatLng = L.latLng(-33.9249, 18.4241);
+    // 1) plain Marker (uses default icon assets above)
+    L.marker(goodLatLng, { title: "sanity-marker" }).addTo(cluster);
+    // 2) circle fallback (doesn't need image assets)
+    L.circleMarker(goodLatLng, { radius: 8, color: "#2563eb", weight: 2, fillOpacity: 0.9 })
+      .addTo(cluster)
+      .bindTooltip("sanity-circle");
+
+    (window as any).__nnMap = map;
+    (window as any).__nnCluster = cluster;
+    updateCount();
+
+    function updateCount() {
+      const div = document.getElementById("nn-debug-count");
+      if (div) div.textContent = `markers: ${cluster.getLayers().length}`;
+    }
+
+    // expose helper for later
+    (window as any).__nnAddDebug = (lat: number, lng: number) => {
+      const m = L.marker([lat, lng]).addTo(cluster);
+      updateCount();
+      return m;
+    };
+
+    return () => map.remove();
+  }, []);
+
+  return <div id="nn-map" style={{ height: "calc(100vh - 56px)", width: "100%" }} />;
+}
+
+
+Interpretation:
+
+If you don’t see anything at the default view: it’s layout/CSS (no height) or tiles blocked.
+
+If you see circle but not marker: icon asset path issue.
+
+If you see nothing but markers: 2 shows → overlay z-index hiding markers.
+
+If you see cluster bubble but not markers when zoomed out previously: you were missing MarkerCluster CSS.
+
+1) Ensure MarkerCluster CSS is present (common cause)
+
+Make sure these are really imported once in the final bundle (module above already does this):
+
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
+
+
+If your build uses code-splitting, keep the map code in a route that is eagerly loaded or confirm the CSS chunks are loaded before the map appears.
+
+2) Robust custom icon loader (mobile PWA safe)
+
+If your 12 icons are in src/assets/icons/incident-*.png, use Vite’s new URL() to avoid broken production paths:
+
+// icons.ts
+import L from "leaflet";
+
+function icon(url: string) {
+  return L.icon({
+    iconUrl: new URL(url, import.meta.url).toString(),
+    iconRetinaUrl: new URL(url.replace(".png", "@2x.png"), import.meta.url).toString(),
+    iconSize: [36, 36],
+    iconAnchor: [18, 36],
+    popupAnchor: [0, -32],
+    className: "nn-incident-icon",
+  });
+}
+
+export const INCIDENT_ICONS = {
+  CAR_ACCIDENT: icon("../assets/icons/incident-car.png"),
+  EMERGENCY_ALARM: icon("../assets/icons/incident-alarm.png"),
+  BREAK_IN: icon("../assets/icons/incident-breakin.png"),
+  // ...etc
+};
+
+
+Then when adding a marker:
+
+L.marker([lat, lng], { icon: INCIDENT_ICONS[type] ?? new L.Icon.Default() }).addTo(__nnCluster);
+
+
+If icons still don’t show but circles do, you have a CSP or service worker cache issue; see §5.
+
+3) Single source of truth for clustering + optimistic path
+
+Unify the optimistic and real-time paths so both add to the same MarkerClusterGroup instance:
+
+// map-wiring.ts
+type Incident = {
+  id: string;
+  type: string;
+  title?: string;
+  latitude: number;  // frontend uses lat/lng naming
+  longitude: number;
+};
+
+export function addIncidentToCluster(inc: Incident, cluster: L.MarkerClusterGroup) {
+  // sanity for swapped coords
+  if (Math.abs(inc.latitude) > 90 || Math.abs(inc.longitude) > 180) {
+    console.warn("[NN] suspect swapped coords", inc);
+  }
+  const latLng = L.latLng(inc.latitude, inc.longitude);
+  // use circleMarker as a visual fallback if icon fails
+  const icon = (window as any).INCIDENT_ICONS?.[inc.type];
+  const layer = icon
+    ? L.marker(latLng, { icon, title: inc.title ?? inc.type })
+    : L.circleMarker(latLng, { radius: 7, color: "#2563eb", weight: 2, fillOpacity: 0.9 });
+
+  layer.addTo(cluster);
+  (layer as any).incidentId = inc.id;
+  return layer;
+}
+
+
+Optimistic add:
+
+const optimistic = addIncidentToCluster(newIncident, window.__nnCluster);
+
+
+Server confirm via Socket.IO:
+
+socket.on("incident:created", (inc: Incident) => {
+  // de-dupe optimistic vs confirmed by id
+  const exists = window.__nnCluster?.getLayers().some((l: any) => l.incidentId === inc.id);
+  if (!exists) addIncidentToCluster(inc, window.__nnCluster);
+});
+
+4) Timing: don’t add before the map exists
+
+Gate all adds behind a ready flag:
+
+// after map + cluster created
+(window as any).__nnReady = true;
+
+// when trying to add:
+const tryAdd = () => {
+  if ((window as any).__nnReady && window.__nnCluster) {
+    addIncidentToCluster(inc, window.__nnCluster);
+  } else {
+    setTimeout(tryAdd, 50);
+  }
+};
+tryAdd();
+
+5) PWA + Service Worker cache gotchas (icons/CSS “missing only on mobile”)
+
+If mobile shows nothing but desktop works, your service worker may be serving an old cache that lacks:
+
+MarkerCluster.css
+
+Your icon assets
+
+Leaflet default icon images
+
+Suggested quick fix for existing SW:
+
+Bump your cache version key (e.g., NN_CACHE_v7) and ensure MarkerCluster.css and leaflet/dist/images/* are included in the precache or allowed to fall through to network.
+
+Add a self.skipWaiting() + clients.claim() on activate for instant takeover.
+
+6) Overlay/pane conflicts
+
+If you recently added a “blue pulse” overlay, ensure it’s in a separate pane below markers:
+
+const pulsePane = mapRef.current?.createPane("pulse-pane");
+if (pulsePane) pulsePane.style.zIndex = "300"; // markers default ~400; popups ~600
+// when creating the pulse layer:
+L.circleMarker(latLng, { /* styles */ }, { pane: "pulse-pane" }).addTo(mapRef.current!);
+
+
+If a full-screen glass UI div is on top, set it to pointer-events: none (for visual only) or lower its z-index.
+
+🟠 Replit → GPT (status + impact report)
+
+Here’s what I (Replit) would check right now and report back:
+
+Do we import the two MarkerCluster CSS files?
+
+If no → add them. This is likely root cause and is a low-risk change.
+
+Do the sanity marker + circle appear with the debug component above?
+
+If circle appears but marker not → broken icon paths; apply the Vite URL icon loader from §2.
+
+If neither appear → container height/z-index. Confirm #nn-map { height: calc(100vh - 56px) } and parents have height.
+
+Is there exactly one L.markerClusterGroup() attached to the map?
+
+If you have two cluster groups (one for optimistic, one for confirmed), consolidate with §3.
+
+SW cache:
+
+Open mobile devtools → Application → Clear storage → Unregister service worker → Hard reload.
+
+If markers show after that, we’ll bump cache version and include assets.
+
+Console: any 404s for /assets/incident-*.png, or for the Leaflet default icons (marker-icon.png)?
+
+If yes → apply §2 and keep the default icon merge in §0 so we always have a fallback.
+
+Socket path**:** confirm we’re adding to window.__nnCluster in both optimistic and socket handlers.
+
+I’ll adapt the patch set based on what you find, but none of these are architecture-breaking. The biggest change is just centralizing adds through addIncidentToCluster and ensuring CSS/assets are in the bundle.

@@ -1,0 +1,341 @@
+Perfect — thanks for the thorough readout, Replit. Let’s lock decisions and give you copy-paste patches that minimize disruption to the current architecture and get @RDM the working mobile markers ASAP.
+
+✅ Decisions (answering your questions)
+
+Schema: Extend the existing insertIncidentSchema in shared/schema.ts (don’t replace). We’ll add z.coerce.number() + guards and ship a small normalizeIncidentCoords() helper to handle swap/round. This keeps other schema consumers stable.
+
+State flow: Do not add a new Zustand store. Keep everything in React Query and your existing socketService. We’ll wire socket events to the query cache (["incidents"]) so both fetched + live incidents render from one source of truth.
+
+Icons: Yes — create a mapping helper that resolves incident types to your @assets files and returns a ready-made Leaflet L.Icon (DPR-aware).
+
+Patches
+1) shared/schema.ts — extend schema + add normalizer
+// shared/schema.ts
+import { z } from "zod";
+
+// Extend your existing insertIncidentSchema
+export const insertIncidentSchema = z.object({
+  title: z.string().min(3).max(120),
+  description: z.string().min(3).max(5000),
+  // 👇 changed: coerce strings to numbers, then validate
+  lat: z.coerce.number().refine(v => Number.isFinite(v) && Math.abs(v) <= 90, "Invalid latitude"),
+  lng: z.coerce.number().refine(v => Number.isFinite(v) && Math.abs(v) <= 180, "Invalid longitude"),
+  type: z.string().min(1),
+  photoUrl: z.string().url().optional(),
+  // ...keep any other fields you already have
+});
+
+// Export a tiny normalizer so routes can safely finalize values
+export function normalizeIncidentCoords<T extends { lat: number; lng: number }>(parsed: T) {
+  let { lat, lng } = parsed;
+
+  // Heuristic swap if they look reversed (mobile autofill glitch)
+  if (Math.abs(lat) > 90 && Math.abs(lng) <= 90) {
+    [lat, lng] = [lng, lat];
+  }
+  // Round for DB precision & stable clustering
+  lat = Number(lat.toFixed(6));
+  lng = Number(lng.toFixed(6));
+
+  return { ...parsed, lat, lng };
+}
+
+
+This preserves your existing import sites and just improves robustness.
+
+2) server/routes.ts — use schema + normalizer and emit socket
+// server/routes.ts
+import { insertIncidentSchema, normalizeIncidentCoords } from "../shared/schema";
+// If your socket is exported from a module, keep this import as-is in your codebase
+import { io } from "./socket"; // adjust if you attach io on app locals
+
+app.post("/api/incidents", async (req, res) => {
+  try {
+    const parsed = insertIncidentSchema.parse(req.body);
+    const payload = normalizeIncidentCoords(parsed);
+
+    // Insert with Drizzle
+    const [incident] = await db.insert(incidents).values(payload).returning();
+
+    // Ensure creator & all clients receive it
+    io.emit("incident:new", incident);
+    return res.status(201).json(incident);
+  } catch (e) {
+    console.error("Create incident failed", e);
+    return res.status(400).json({ error: "Invalid incident payload" });
+  }
+});
+
+3) client/src/lib/socketService.ts — mobile-friendly config + cache wiring
+// client/src/lib/socketService.ts
+import { io } from "socket.io-client";
+import { QueryClient } from "@tanstack/react-query";
+
+export const socket = io("/", {
+  transports: ["websocket", "polling"],
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 500,
+  reconnectionDelayMax: 5000,
+  timeout: 20000,
+  autoConnect: true,
+});
+
+// Call once at app bootstrap (e.g., in App.tsx) after you create queryClient
+export function wireIncidentSocketToQueryCache(queryClient: QueryClient) {
+  const upsert = (inc: any) => {
+    queryClient.setQueryData<any[]>(["incidents"], (old = []) => {
+      // de-dupe by id; put newest first
+      const withoutDup = old.filter(i => i.id !== inc.id && i.id !== inc?.tempId && !i.__optimistic);
+      return [inc, ...withoutDup];
+    });
+  };
+
+  socket.on("incident:new", upsert);
+}
+
+
+In your main.tsx/App.tsx, after creating the QueryClient, call:
+
+wireIncidentSocketToQueryCache(queryClient);
+
+4) client/src/hooks/useCreateIncident.ts — optimistic create using existing React Query
+// client/src/hooks/useCreateIncident.ts
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+
+export function useCreateIncident() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: any) => {
+      const r = await fetch("/api/incidents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error("Failed to create incident");
+      return r.json();
+    },
+    onMutate: async (vars: any) => {
+      await qc.cancelQueries({ queryKey: ["incidents"] });
+      const previous = qc.getQueryData<any[]>(["incidents"]) || [];
+      const optimistic = {
+        ...vars,
+        id: `temp-${Date.now()}`,
+        __optimistic: true,
+      };
+      qc.setQueryData(["incidents"], [optimistic, ...previous]);
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) qc.setQueryData(["incidents"], ctx.previous);
+    },
+    onSuccess: (created) => {
+      qc.setQueryData<any[]>(["incidents"], (old = []) => {
+        const filtered = old.filter(i => i.id !== created.id && !i.__optimistic);
+        return [created, ...filtered];
+      });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["incidents"] });
+    },
+  });
+}
+
+5) client/src/lib/incidentIcons.ts — icon resolver using @assets
+// client/src/lib/incidentIcons.ts
+import L from "leaflet";
+
+// Import your 12 assets; adjust names to match exactly
+import icon1 from "@assets/1_1755387124843.png";
+import icon2 from "@assets/2_1755387124844.png";
+import icon3 from "@assets/3_1755387124845.png";
+import icon4 from "@assets/4_1755387124846.png";
+import icon5 from "@assets/5_1755387124847.png";
+import icon6 from "@assets/6_1755387124848.png";
+import icon7 from "@assets/7_1755387124849.png";
+import icon8 from "@assets/8_1755387124850.png";
+import icon9 from "@assets/9_1755387124851.png";
+import icon10 from "@assets/10_1755387124852.png";
+import icon11 from "@assets/11_1755387124853.png";
+import icon12 from "@assets/12_1755387124854.png";
+
+// Map incident "type" to a specific icon file.
+// If your `type` is numeric or slugged, adjust the keys accordingly.
+const ICON_MAP: Record<string, string> = {
+  fire: icon1,
+  medical: icon2,
+  crime: icon3,
+  traffic: icon4,
+  outage: icon5,
+  hazard: icon6,
+  weather: icon7,
+  rescue: icon8,
+  animal: icon9,
+  maintenance: icon10,
+  community: icon11,
+  other: icon12,
+};
+
+export function getIncidentIcon(type: string) {
+  const url = ICON_MAP[type] ?? icon12;
+  const size = window.devicePixelRatio > 1 ? [40, 40] : [28, 28];
+  return L.icon({
+    iconUrl: url,
+    iconSize: size as [number, number],
+    iconAnchor: [Math.floor(size[0] / 2), size[1]], // bottom-center
+    className: "will-change-transform",
+  });
+}
+
+
+If your type values differ, just edit ICON_MAP keys — the rest stays the same.
+
+6) client/src/components/InteractiveMap.tsx — stable refs, resize fixes, icon helper
+// client/src/components/InteractiveMap.tsx
+import { useEffect, useMemo, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
+import L, { Map as LeafletMap } from "leaflet";
+import "leaflet/dist/leaflet.css";
+import "leaflet.markercluster";
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
+import { getIncidentIcon } from "@/lib/incidentIcons";
+
+type Incident = {
+  id: string;
+  lat: number;
+  lng: number;
+  type: string;
+  title?: string;
+};
+
+export default function InteractiveMap() {
+  const mapRef = useRef<LeafletMap | null>(null);
+  const clusterRef = useRef<L.MarkerClusterGroup | null>(null);
+
+  const { data: incidents = [] } = useQuery<Incident[]>({
+    queryKey: ["incidents"],
+    queryFn: async () => (await fetch("/api/incidents")).json(),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    networkMode: "always",
+  });
+
+  // Init map + cluster once
+  useEffect(() => {
+    if (mapRef.current) return;
+
+    const map = L.map("nn-map", {
+      center: [-33.9249, 18.4241],
+      zoom: 12,
+      zoomControl: false,
+    });
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap",
+    }).addTo(map);
+
+    const cluster = L.markerClusterGroup({
+      chunkedLoading: true,
+      removeOutsideVisibleBounds: false,
+      spiderfyOnMaxZoom: true,
+    });
+    cluster.addTo(map);
+
+    // Mobile layout & orientation resiliency
+    const invalidate = () => setTimeout(() => map.invalidateSize(), 0);
+    window.addEventListener("resize", invalidate);
+    window.addEventListener("orientationchange", invalidate);
+    const container = document.getElementById("nn-map");
+    const ro = new ResizeObserver(invalidate);
+    if (container) ro.observe(container);
+
+    mapRef.current = map;
+    clusterRef.current = cluster;
+
+    return () => {
+      window.removeEventListener("resize", invalidate);
+      window.removeEventListener("orientationchange", invalidate);
+      ro.disconnect();
+      map.remove();
+      mapRef.current = null;
+      clusterRef.current = null;
+    };
+  }, []);
+
+  // Render markers whenever cache changes (includes socket upserts)
+  useEffect(() => {
+    if (!mapRef.current || !clusterRef.current) return;
+    const map = mapRef.current;
+    const cluster = clusterRef.current;
+
+    cluster.clearLayers();
+
+    for (const inc of incidents) {
+      if (!Number.isFinite(inc.lat) || !Number.isFinite(inc.lng)) continue;
+
+      const marker = L.marker([inc.lat, inc.lng], {
+        icon: getIncidentIcon(inc.type),
+        keyboard: false,
+      }).bindPopup(`<strong>${inc.title ?? "Incident"}</strong>`);
+
+      cluster.addLayer(marker);
+    }
+
+    // Fit bounds on first load or when markers appear
+    if (incidents.length > 0) {
+      const group = L.featureGroup(
+        incidents.map((i) => L.marker([i.lat, i.lng]))
+      );
+      try {
+        map.fitBounds(group.getBounds(), { maxZoom: 15, padding: [30, 30] });
+      } catch {}
+    } else {
+      map.setView([-33.9249, 18.4241], 12);
+    }
+
+    setTimeout(() => map.invalidateSize(), 0);
+  }, [incidents]);
+
+  return <div id="nn-map" className="h-[calc(100vh-8rem)] w-full rounded-2xl shadow-md" />;
+}
+
+7) (Optional) client/src/components/DebugHud.tsx — quick mobile debug overlay
+import { useSearchParams } from "react-router-dom";
+import { useIsFetching, useQueryClient } from "@tanstack/react-query";
+import { socket } from "@/lib/socketService";
+
+export function DebugHud() {
+  const [sp] = useSearchParams();
+  if (sp.get("debug") !== "1") return null;
+  const fetching = useIsFetching({ queryKey: ["incidents"] });
+  const qc = useQueryClient();
+  const count = (qc.getQueryData<any[]>(["incidents"]) || []).length;
+
+  return (
+    <div className="fixed bottom-2 right-2 bg-black/70 text-white text-xs p-2 rounded">
+      <div>Socket: {socket.connected ? "connected" : "disconnected"}</div>
+      <div>Incidents in cache: {count}</div>
+      <div>Fetching: {fetching > 0 ? "yes" : "no"}</div>
+    </div>
+  );
+}
+
+
+Drop <DebugHud /> near the map during testing and visit ?debug=1.
+
+Small but important mobile CSS sanity
+
+Ensure the map container gets real height on mobile:
+
+<div class="flex flex-col h-screen">
+  <header class="shrink-0">…</header>
+  <main class="grow">
+    <div id="nn-map" class="h-full w-full" />
+  </main>
+</div>
+
+
+If the map is inside a tab/panel that starts hidden, call map.invalidateSize() when it becomes visible (we already listen for resizes, but firing once on show is extra-safe).

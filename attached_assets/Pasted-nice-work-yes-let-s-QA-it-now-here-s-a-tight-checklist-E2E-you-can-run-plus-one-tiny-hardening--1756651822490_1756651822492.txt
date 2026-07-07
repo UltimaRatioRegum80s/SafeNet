@@ -1,0 +1,106 @@
+nice work! yes—let’s QA it now. here’s a tight checklist + E2E you can run, plus one tiny hardening patch.
+
+Desktop QA (manual, ~2–3 min)
+
+Click Report → see crosshair + overlay; press Esc → overlay disappears; focus returns to the Report FAB.
+
+Click map once → right-sheet opens; line reads “Location set: …”; pin sits exactly where clicked.
+
+Click Drop a pin inside sheet → sheet closes → overlay returns → next click reopens sheet with new coords.
+
+While in report mode: double-click map → zooms but does not drop two pins or open sheet twice.
+
+Resize below 1024px while in report mode → mode auto-cancels; mobile flow + GPS button visible.
+
+Submit → optimistic marker appears, clusters, and Socket.IO pushes live.
+
+Mobile/Tablet regression (quick)
+
+iOS/Android: FAB → bottom sheet; Use my current location present; no crosshair overlay ever shows.
+
+Playwright E2E (add file)
+
+tests/report.desktop.spec.ts
+
+import { test, expect } from "@playwright/test";
+
+test.describe("Desktop tap-to-report", () => {
+  test.use({ viewport: { width: 1366, height: 900 } });
+
+  test("click to pin → sheet opens right", async ({ page }) => {
+    await page.goto("/map");
+    await page.getByRole("button", { name: "Report" }).click();
+    await expect(page.getByText(/Click the map to set the incident location/i)).toBeVisible();
+
+    const map = page.locator("#map");
+    const b = await map.boundingBox();
+    if (!b) throw new Error("map bounding box not found");
+    await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+
+    await expect(page.getByText(/Location set:/i)).toBeVisible();
+    // Sheet is right-sided: has translate-x on desktop container or an attribute/class
+    await expect(page.locator('[data-side="right"]')).toBeVisible();
+  });
+
+  test("Esc cancels", async ({ page }) => {
+    await page.goto("/map");
+    await page.getByRole("button", { name: "Report" }).click();
+    await expect(page.getByText(/Click the map/i)).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByText(/Click the map/i)).toBeHidden();
+    await expect(page.getByRole("button", { name: "Report" })).toBeFocused();
+  });
+
+  test("mobile regression", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/map");
+    await page.getByRole("button", { name: "Report" }).click();
+    await expect(page.getByRole("button", { name: /Use my current location/i })).toBeVisible();
+    await expect(page.getByText(/Click the map/i)).toHaveCount(0);
+  });
+});
+
+Tiny hardening patch (preserve prior dbl-click zoom state)
+
+If some other feature disables dbl-click zoom, let’s restore to whatever it was before report mode.
+
+diff --git a/client/src/pages/community/Map.tsx b/client/src/pages/community/Map.tsx
+@@
+-  useEffect(() => {
+-    const map = mapRef.current;
+-    if (!map) return;
+-    // toggle dblclick zoom to prevent double placements
+-    if (reportMode) map.doubleClickZoom.disable();
+-    else map.doubleClickZoom.enable();
++  const dblStateRef = useRef<boolean | null>(null);
++  useEffect(() => {
++    const map = mapRef.current;
++    if (!map) return;
++    if (dblStateRef.current === null) {
++      dblStateRef.current = map.doubleClickZoom.enabled();
++    }
++    if (reportMode) map.doubleClickZoom.disable();
++    else if (dblStateRef.current) map.doubleClickZoom.enable();
+     function onClick(e: L.LeafletMouseEvent) {
+       if (!reportMode) return;
+       confirmTempPin({ lat: e.latlng.lat, lng: e.latlng.lng });
+     }
+     map.on("click", onClick);
+-    return () => map.off("click", onClick);
++    return () => map.off("click", onClick);
+   }, [reportMode, confirmTempPin]);
+
+A11y spot-check
+
+Overlay container: role="status" aria-live="polite" so SR users hear “Click the map…”
+
+When sheet opens, focus lands on first interactive element (category grid or textarea).
+
+“Drop a pin” button uses aria-describedby to reference the helper text.
+
+- <div className="pointer-events-auto rounded-xl border bg-background/85 px-3 py-2 text-sm shadow">
++ <div role="status" aria-live="polite"
++      className="pointer-events-auto rounded-xl border bg-background/85 px-3 py-2 text-sm shadow">
+
+
+If these checks pass locally, we’re golden. If any assertion fails, paste the failing step and I’ll adjust the patch right away.

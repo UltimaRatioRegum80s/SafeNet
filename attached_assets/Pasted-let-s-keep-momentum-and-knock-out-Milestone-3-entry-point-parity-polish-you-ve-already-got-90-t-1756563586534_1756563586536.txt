@@ -1,0 +1,201 @@
+let’s keep momentum and knock out Milestone 3: entry-point parity + polish. you’ve already got 90%—this makes the experience coherent from both places and adds a handy deep-link.
+
+Milestone 3 — Scope
+
+Parity: Quick Report page and Map FAB use the same panel (already true) with identical prefill + behavior.
+
+Deep-linking: /community/report?type=fire opens the panel preselected.
+
+Map FAB polish: safe placement, avoids overlap with other FABs, respects keyboard on mobile.
+
+A11y/UX touches: focus management, escape/Back to close, reduced-motion safe.
+
+Analytics hooks: track start/submit/cancel for your success metrics.
+
+Below are tight, drop-in snippets.
+
+1) Deep-link open by type (wouter)
+
+Open the panel when a type query param is present. Also update URL when user selects a type on the grid so you can share a link.
+
+// client/src/pages/community/ReportIncident.tsx
+import { useLocation } from "wouter";
+import { useEffect } from "react";
+import { useReportPanel } from "@/features/report/useReportPanel";
+import { INCIDENT_TYPES } from "@/features/report/incidentTypes"; // if you’ve centralized it
+import ReportPanel from "@/features/report/ReportPanel";
+
+function getQuery(search: string) {
+  const q = new URLSearchParams(search.replace(/^\?/, ""));
+  return Object.fromEntries(q.entries());
+}
+
+export default function ReportIncidentPage() {
+  const { openWith } = useReportPanel();
+  const [path, setLocation] = useLocation();
+  const search = typeof window !== "undefined" ? window.location.search : "";
+  const query = getQuery(search);
+
+  // open on load if ?type=<id>
+  useEffect(() => {
+    if (query.type) {
+      const t = INCIDENT_TYPES.find(x => x.id === query.type);
+      if (t) openWith(t);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query.type]);
+
+  function selectType(t: (typeof INCIDENT_TYPES)[number]) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("type", t.id);
+    // push new URL (no full reload)
+    window.history.replaceState({}, "", url.toString());
+    openWith(t);
+  }
+
+  return (
+    <div className="relative mx-auto max-w-6xl p-4">
+      <h1 className="text-2xl font-semibold mb-4">Quick Report</h1>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
+        {INCIDENT_TYPES.map((t) => (
+          <button
+            key={t.id}
+            className="rounded-2xl p-4 bg-slate-800/40 hover:bg-slate-800 transition shadow-sm border border-slate-700/40"
+            onClick={() => selectType(t)}
+          >
+            <div className="flex flex-col items-center gap-3">
+              <img src={t.iconSrc} alt={t.label} className="h-12 w-12" />
+              <div className="text-sm text-center">{t.label}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      <ReportPanel />
+    </div>
+  );
+}
+
+
+Optionally, clear the type param when the panel closes (see ReportPanel snippet in #4).
+
+2) Map FAB: safe placement + keyboard avoidance
+
+If you have multiple FABs, use a small container that stacks them with gaps and avoids notch/homebar.
+
+// client/src/pages/community/Map.tsx (fragment)
+<div className="absolute inset-x-0 bottom-3 flex justify-end px-3 pointer-events-none">
+  <div className="flex flex-col gap-2 pointer-events-auto">
+    {/* existing FABs here */}
+    <button
+      className="px-4 py-3 rounded-2xl backdrop-blur bg-slate-900/60 text-white border border-slate-700 shadow-lg active:scale-[0.98]"
+      style={{ paddingBottom: "calc(env(safe-area-inset-bottom) / 2 + 0.5rem)" }}
+      onClick={() => openWith(defaultType)}
+      aria-label="Report an incident"
+    >
+      Report
+    </button>
+  </div>
+</div>
+
+
+If your mobile keyboard overlaps the sheet, you already use a bottom Sheet—shadcn handles insets well; otherwise add overscroll-contain on body when open (see #4).
+
+3) Analytics hooks (tiny)
+
+Fire events for funnel: start, submit, cancel.
+
+// client/src/lib/analytics.ts
+export const track = (name: string, props?: Record<string, unknown>) => {
+  // plug your analytics here (PostHog/GA/etc.)
+  console.debug("[analytics]", name, props);
+};
+
+
+In ReportPanel:
+
+// when panel opens with a type
+useEffect(() => {
+  if (open && selected) track("report_start", { type: selected.id });
+}, [open, selected]);
+
+// on submit success:
+track("report_submit", { type: selected?.id, anon: isAnonymous });
+
+// when user closes without submitting:
+onOpenChange={(o) => {
+  if (!o && selected) track("report_cancel", { type: selected.id });
+  if (!o) close();
+}}
+
+4) ReportPanel small a11y/UX polish
+
+ESC/Back closes panel (shadcn handles ESC; we’ll also clear ?type).
+
+Reduce motion respect.
+
+Prevent scroll bleed when panel open.
+
+// client/src/features/report/ReportPanel.tsx
+import { useEffect } from "react";
+import { useLocation } from "wouter";
+
+// clear ?type on close
+function clearTypeParam() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("type");
+  window.history.replaceState({}, "", url.toString());
+}
+
+export default function ReportPanel() {
+  // …existing code…
+
+  // prevent background rubber-band scrolling on iOS while open
+  useEffect(() => {
+    if (open) {
+      const prev = document.body.style.overscrollBehavior;
+      document.body.style.overscrollBehavior = "contain";
+      return () => { document.body.style.overscrollBehavior = prev; };
+    }
+  }, [open]);
+
+  // respect reduced motion for any subtle animations you added
+  const prefersReduced = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) {
+          clearTypeParam();
+          track("report_cancel", { type: selected?.id });
+          close();
+        }
+      }}
+    >
+      {/* existing SheetContent … maybe gate any animated pieces on !prefersReduced */}
+    </Sheet>
+  );
+}
+
+5) Shareable prefilled links (bonus)
+
+Anywhere in the app (e.g., an “Report Fire” CTA), link to:
+
+/community/report?type=fire
+
+
+This now opens the panel with the right selection.
+
+6) Mini QA for Milestone 3
+
+Open /community/report?type=car_accident → panel opens with “Car Accident”.
+
+Clicking a tile updates the URL with ?type=<id>; closing clears it.
+
+Map FAB opens the same panel; keyboard and safe-area feel right on mobile.
+
+report_start/report_submit/report_cancel events log as expected.
+
+If you want, I can also prep a tiny e2e Playwright test for the deep-link behavior and the ?type clearing on close. Otherwise, feel free to paste these in and we can move to Milestone 4 (Map refine UX: ghost pin, confirm/cancel, and snapping to roads) or jump straight to photo pipeline hardening.

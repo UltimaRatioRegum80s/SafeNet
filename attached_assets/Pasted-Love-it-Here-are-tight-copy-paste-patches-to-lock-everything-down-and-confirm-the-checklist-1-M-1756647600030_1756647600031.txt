@@ -1,0 +1,172 @@
+Love it. Here are tight, copy-paste patches to lock everything down and confirm the checklist.
+
+1) Mount the Toaster once (root)
+
+client/src/main.tsx (or your top-level App.tsx)
+
+import { Toaster } from "@/components/ui/toaster";
+
+// ...
+root.render(
+  <React.StrictMode>
+    {/* your providers (QueryClientProvider, etc.) */}
+    <App />
+    <Toaster /> {/* mount ONCE at root */}
+  </React.StrictMode>
+);
+
+2) Ensure incidents query key matches the mutation
+
+Where your map loads incidents:
+
+client/src/pages/community/Map.tsx
+
+import { useQuery } from "@tanstack/react-query";
+
+const { data: incidents } = useQuery({
+  queryKey: ["incidents"],          // <-- must match the mutation invalidate
+  queryFn: fetchIncidentsFromApi,   // your existing fetch
+  staleTime: 15_000,
+});
+
+3) Socket hook to drop markers in real time
+
+Map.tsx (or your map hook)
+
+import { useEffect } from "react";
+import { socket } from "@/lib/socket"; // your existing client
+import { createIncidentMarker } from "@/features/map/createIncidentMarker"; // your helper
+
+useEffect(() => {
+  const onNew = (inc: {
+    id: string; type: string; latitude: number; longitude: number; description?: string;
+  }) => {
+    console.debug("[socket] incident:new", inc.id, inc.type);
+    createIncidentMarker({
+      id: inc.id,
+      type: inc.type as any,
+      lat: inc.latitude,
+      lng: inc.longitude,
+      description: inc.description,
+    });
+  };
+
+  socket.on("incident:new", onNew);
+  return () => socket.off("incident:new", onNew);
+}, []);
+
+4) “Focus the new pin” support
+
+Redirected with ?focus=<id>? Center when that marker exists.
+
+Add a tiny util client/src/lib/url.ts:
+
+export const getQueryParam = (key: string): string | null =>
+  new URLSearchParams(window.location.search).get(key);
+
+
+In Map.tsx after incidents load / marker hydration:
+
+import { getQueryParam } from "@/lib/url";
+import L from "leaflet";
+
+useEffect(() => {
+  const focusId = getQueryParam("focus");
+  if (!focusId || !incidents?.length) return;
+
+  // find the incident & center
+  const target = incidents.find(i => i.id === focusId);
+  if (!target) return;
+
+  // center and flash
+  map?.panTo([target.latitude, target.longitude], { animate: true });
+  // optional pulse ring:
+  L.circle([target.latitude, target.longitude], {
+    radius: 20, color: "#22d3ee", fillColor: "#22d3ee", fillOpacity: 0.25
+  }).addTo(map);
+
+  // optional: cleanup querystring
+  const u = new URL(window.location.href);
+  u.searchParams.delete("focus");
+  window.history.replaceState({}, "", u.toString());
+}, [map, incidents]);
+
+
+If you prefer optimistic focus (before refetch/socket), send coordinates in the redirect instead: ?lat=..&lng=.. and pan immediately.
+
+5) QuickReportCard small fixes (useToast + race-proof)
+
+client/src/features/report/QuickReportCard.tsx
+
+import { useToast } from "@/components/ui/use-toast";
+const { toast } = useToast();
+const [isLocating, setIsLocating] = React.useState(false);
+const isBusy = isLocating || createIncident.isPending;
+
+const onSubmit = async () => {
+  if (!type || !severity || isBusy) return;
+  try {
+    setIsLocating(true);
+    const { lat, lng } = await getCurrentPosition();
+    const result = await createIncident.mutateAsync({
+      type, severity, latitude: lat, longitude: lng,
+      description: note?.trim() || undefined,
+    });
+
+    reset();
+    toast({ title: "Incident reported", description: "Redirecting to map…" });
+    // Prefer focus param if server returns id
+    const id = (result as any)?.id;
+    setLocation(id ? `/map?focus=${encodeURIComponent(id)}` : "/map");
+  } catch (err: any) {
+    toast({
+      title: "Couldn’t get your location",
+      description: err?.message ?? "Please enable location and try again.",
+      variant: "destructive",
+    });
+  } finally {
+    setIsLocating(false);
+  }
+};
+
+
+And disable the button:
+
+<Button onClick={onSubmit} disabled={isBusy || !type || !severity}>
+  {isBusy ? "Submitting…" : "Submit"}
+</Button>
+
+6) Debug logs (temporary)
+
+useCreateIncident:
+
+onSuccess: () => {
+  console.debug("[incident] created -> invalidating incidents");
+  qc.invalidateQueries({ queryKey: ["incidents"] }).catch(() => {});
+},
+
+
+geolocation.ts:
+
+const onError = (err: GeolocationPositionError) => {
+  console.warn("[geo] error", err.code, err.message);
+  reject(new GeolocationError(err.message, err.code));
+};
+
+7) HTTPS / permissions reminder
+
+Geolocation requires HTTPS (or http://localhost). If testing on a custom dev URL, ensure it’s secure or the browser will block it.
+
+✅ Your confirmation checklist
+
+Reply with these five checks:
+
+ Toaster mounted at root (toasts visible)
+
+ POST /api/incidents receives { type, severity, latitude, longitude, description? }
+
+ incident:new socket adds a marker (log appears)
+
+ Map centers/marks on ?focus= id
+
+ Submit button disables while locating/posting (no double submits)

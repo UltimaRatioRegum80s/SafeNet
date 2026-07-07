@@ -1,0 +1,306 @@
+heck yes—let’s implement the probes + watchdog now, tailored to your exact wiring (Leaflet+MarkerCluster, Zustand store, Socket.IO, toApiIncident payload). Below are drop-in patches that won’t change UX or the main flow. They add: probe endpoints, a socket watchdog (self-healing if WS drops), a tiny NetBadge (dev-only), and probe filtering so your clusters never show test markers.
+
+SERVER (Express / Drizzle / Socket.IO)
+1) Add a probe router
+
+server/routes/probe.ts (new file)
+
+import { Router } from "express";
+import type { Request, Response } from "express";
+import { sql, and, gte, lte } from "drizzle-orm";
+import { db } from "../db"; // adjust to your db export
+import { incidents } from "../schema"; // adjust path to your drizzle schema
+import { io } from "../socket"; // adjust to where you export your initialized Socket.IO server
+import { ensureAdmin } from "../auth"; // adjust to your admin/auth middleware
+
+export const probeRouter = Router();
+
+/**
+ * 1) Socket canary — emits a fake incident to verify WS delivery
+ *    No DB write, ignored by clients (we filter __probe__ on the frontend below).
+ *    Admin-only.
+ */
+probeRouter.post("/socket-canary", ensureAdmin, (req: Request, res: Response) => {
+  const probeId = `probe_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  // mimic your toApiIncident() public payload shape
+  const payload = {
+    id: probeId,
+    type: "__probe__",
+    title: "socket probe",
+    description: "connectivity check",
+    latitude: -33.9249,
+    longitude: 18.4241,
+    severity: "low",
+    category: "__probe__",
+    photos: [],
+    state: "validated",
+    status: "validated",
+    metadata: { probe: true, source: "socket-canary" },
+    isAnonymous: true,
+    createdAt: new Date().toISOString(),
+  };
+
+  io.emit("incident:created", payload); // broadcast public view
+  return res.json({ ok: true, id: probeId });
+});
+
+/**
+ * 2) BBox echo — returns server-parsed bbox + count only (fast diag).
+ *    Admin-only. sinceHours optional.
+ */
+probeRouter.get("/bbox-echo", ensureAdmin, async (req: Request, res: Response) => {
+  const bbox = String(req.query.bbox || "");
+  const sinceHours = Number(req.query.sinceHours ?? 72);
+
+  const [minLng, minLat, maxLng, maxLat] = bbox.split(",").map(Number);
+  if ([minLng, minLat, maxLng, maxLat].some((n) => Number.isNaN(n))) {
+    return res.status(400).json({ ok: false, error: "Invalid bbox" });
+  }
+
+  // Adjust column names if yours differ (latitude/longitude are decimals in your schema).
+  // If you have createdAt/created_at, include sinceHours; otherwise omit this predicate.
+  const since = sql`now() - interval '${sinceHours} hours'`;
+  const where = and(
+    gte(incidents.longitude, minLng),
+    lte(incidents.longitude, maxLng),
+    gte(incidents.latitude, minLat),
+    lte(incidents.latitude, maxLat),
+    // comment out the next line if you don't have a createdAt column:
+    gte(incidents.createdAt as any, since)
+  );
+
+  const [row] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(incidents)
+    .where(where);
+
+  return res.json({
+    ok: true,
+    bbox: { minLng, minLat, maxLng, maxLat },
+    sinceHours,
+    count: row?.count ?? 0,
+  });
+});
+
+/**
+ * 3) Health endpoints
+ */
+probeRouter.get("/healthz", (_req, res) => res.json({ ok: true, ts: Date.now() }));
+probeRouter.get("/readyz", async (_req, res) => {
+  try {
+    await db.execute(sql`select 1`);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(503).json({ ok: false });
+  }
+});
+
+Wire it up
+
+server/index.ts (add mount; paths may differ)
+
+import { probeRouter } from "./routes/probe"; // new import
+// ...
+app.use("/api/probe", probeRouter);
+// Optional: if you want top-level health paths too
+app.get("/api/healthz", (_req, res) => res.json({ ok: true, ts: Date.now() }));
+app.get("/api/readyz", async (_req, res) => {
+  try {
+    await db.execute(sql`select 1`);
+    res.json({ ok: true });
+  } catch {
+    res.status(503).json({ ok: false });
+  }
+});
+
+
+Admin check: the router uses ensureAdmin. Swap to whatever guard you use for feature-flagged tools.
+
+2) Correlation IDs on create (optional but recommended)
+
+In your existing POST /api/incidents handler, add:
+
+// grab idempotency or generate
+const corrId =
+  req.get("x-idempotency-key") ||
+  `corr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+// ... after you persist:
+const publicPayload = toApiIncident(incident, false);
+(io as any).emit?.("incident:created", { ...publicPayload, corrId });
+res.setHeader("x-correlation-id", corrId);
+
+
+This lets the client reconcile optimistic → confirmed using a single token.
+
+CLIENT (Leaflet / Zustand / Socket service)
+3) Filter probes so they never render
+
+client/src/features/map/createIncidentMarker.ts (early return)
+
+export function createIncidentMarker(inc: Incident) {
+  // ignore probes
+  if (
+    inc?.type === "__probe__" ||
+    inc?.category === "__probe__" ||
+    (inc as any)?.metadata?.probe
+  ) {
+    return null;
+  }
+
+  // ... existing custom divIcon + marker creation logic
+}
+
+
+If your add path calls a wrapper like upsert(inc), do the same probe-guard there.
+
+4) Socket watchdog (self-healing, no UX change)
+
+We’ll mount this inside the map page where you have access to the Leaflet map + cluster + seenIds. It listens to any socket event, and only if there’s 15s of silence it performs a one-off bbox fetch and upserts anything new. No polling loop otherwise.
+
+client/src/pages/community/Map.tsx (add within your component)
+
+import { useEffect, useRef } from "react";
+import { getSocket } from "../../lib/socketService"; // add this export below
+// ... your existing imports
+
+function MapView() {
+  // ... your existing refs (map, cluster, seenIds, etc.)
+  const lastEventAt = useRef(Date.now());
+
+  useEffect(() => {
+    const socket = getSocket(); // singleton instance your app bootstraps
+    if (!socket) return;
+
+    // any socket event counts as “alive”
+    const onAny = () => (lastEventAt.current = Date.now());
+    socket.onAny(onAny);
+
+    // watchdog tick (5s); fetch only if 15s quiet
+    const t = setInterval(async () => {
+      if (Date.now() - lastEventAt.current <= 15000) return;
+      const map = /* your map ref */ (window as any).__nnMap as L.Map || null;
+      if (!map) return;
+
+      const b = map.getBounds();
+      const minLng = b.getWest(), minLat = b.getSouth(), maxLng = b.getEast(), maxLat = b.getNorth();
+      const url = `/api/incidents?bbox=${minLng},${minLat},${maxLng},${maxLat}&sinceHours=72&limit=300`;
+
+      try {
+        const res = await fetch(url, { credentials: "include" });
+        if (!res.ok) return;
+        const arr = await res.json(); // array of incidents in bbox mode
+        for (const inc of arr) {
+          if (
+            inc?.type === "__probe__" ||
+            inc?.category === "__probe__" ||
+            inc?.metadata?.probe
+          ) continue;
+          if ((window as any).__nnAddIncident) (window as any).__nnAddIncident(inc);
+        }
+        lastEventAt.current = Date.now();
+      } catch {
+        // swallow; badge will reflect HTTP down if you enable it
+      }
+    }, 5000);
+
+    return () => {
+      clearInterval(t);
+      socket.offAny(onAny);
+    };
+  }, []);
+
+  // ... rest of your component
+}
+
+
+The watchdog doesn’t replace your socket flow; it’s a safety net if a proxy silently drops WS.
+
+Export a socket getter (if you don’t already)
+
+client/src/lib/socketService.ts (add at the bottom)
+
+let __socket: import("socket.io-client").Socket | null = null;
+
+// You likely already create it; make sure to assign it:
+export function setSocketInstance(s: import("socket.io-client").Socket) {
+  __socket = s;
+}
+
+export function getSocket() {
+  return __socket;
+}
+
+
+Where you currently initialize the socket (in wireIncidentSocketToQueryCache(queryClient)), call setSocketInstance(socket) once.
+
+5) Tiny NetBadge (dev/staging only)
+
+client/src/components/NetBadge.tsx (new)
+
+import { useEffect, useState } from "react";
+import type { Socket } from "socket.io-client";
+
+export function NetBadge({ socket }: { socket: Socket | null }) {
+  if (!import.meta.env.VITE_FLAG_NETBADGE) return null;
+
+  const [ws, setWs] = useState("⏳");
+  const [http, setHttp] = useState("⏳");
+
+  useEffect(() => {
+    if (!socket) return;
+    const update = () => setWs(socket.connected ? "🟢" : "🟠");
+    socket.on("connect", update);
+    socket.on("disconnect", update);
+    update();
+    return () => {
+      socket.off("connect", update);
+      socket.off("disconnect", update);
+    };
+  }, [socket]);
+
+  useEffect(() => {
+    const t = setInterval(async () => {
+      try {
+        const r = await fetch("/api/healthz", { credentials: "include" });
+        setHttp(r.ok ? "🟢" : "🔴");
+      } catch {
+        setHttp("🔴");
+      }
+    }, 8000);
+    return () => clearInterval(t);
+  }, []);
+
+  return (
+    <div className="fixed bottom-3 right-3 px-2 py-1 rounded bg-black/70 text-white text-xs shadow-lg">
+      WS {ws} · HTTP {http}
+    </div>
+  );
+}
+
+
+client/src/App.tsx (render the badge once)
+
+import { NetBadge } from "./components/NetBadge";
+import { getSocket } from "./lib/socketService";
+
+// inside your App component render:
+<NetBadge socket={getSocket()} />
+
+
+Enable it per-env with a secret or .env:
+
+VITE_FLAG_NETBADGE=1
+
+HOW TO USE (for @RDM)
+
+To check sockets end-to-end without touching the DB:
+POST /api/probe/socket-canary (admin only).
+If NetBadge shows WS 🟢 and nothing crashes, you’re good.
+
+To verify the server sees your map bbox correctly (no heavy payload):
+GET /api/probe/bbox-echo?bbox=minLng,minLat,maxLng,maxLat&sinceHours=72
+You’ll get { count, bbox } back—great for “is it data vs. render?”
+
+The app now self-heals: if WS is quiet for 15s (proxy hiccup), the map does a one-off bbox fetch and reconciles.

@@ -1,0 +1,75 @@
+Prompt for Replit Agent — Interactive Map Upgrade
+
+Update the existing Incident Map page so that:
+
+1. Interactive Map
+
+Replace the current static “Interactive Community Map” placeholder with a fully functional interactive map.
+
+Use MapLibre GL JS (open-source) by default. If VITE_MAPBOX_TOKEN is set in .env, allow using Mapbox tiles instead.
+
+The map must:
+
+Center on the community’s approximate location (configurable via .env or a default lat/lng).
+
+Show markers for all incidents in the current list.
+
+Marker colors based on incident type:
+
+Crime → red
+
+Suspicious → purple
+
+Alerts → orange
+
+On marker click: show popup with title, type, description snippet, and time ago.
+
+Zoom and pan controls.
+
+Cluster markers if more than 20 points are in view.
+
+2. Data Binding
+
+Load incidents from the existing app’s data source (Firestore or local mock API).
+
+Update markers dynamically when the incident filter tabs (All Incidents / Crime / Suspicious / Alerts) change.
+
+Keep the existing filter, “Last 7 Days” dropdown, “Filters” button, and “Layers” button functional (map should respond to date/filter changes).
+
+3. Layout Preservation
+
+Keep all other page content unchanged:
+
+Page title, breadcrumb nav
+
+Tabs for All / Crime / Suspicious / Alerts
+
+Right-hand Safety Statistics and Recent Incidents panels
+
+Filters, Layers, and date range controls in the same place
+
+The map container must be responsive and keep the same height as the current placeholder.
+
+4. Implementation Details
+
+Place the map component in a reusable MapView.tsx under components/.
+
+Props: incidents (array of { id, lat, lng, type, title, description, timestamp }), center, zoom.
+
+Use Tailwind classes for sizing and responsive breakpoints.
+
+For dev mode: include a mock incidents.json file to render without backend.
+
+Make sure to handle cleanup: destroy map instance on unmount to avoid memory leaks.
+
+5. Acceptance Criteria
+
+I can click “Map” tab and see the interactive map in place of the placeholder.
+
+Map loads with all incidents visible.
+
+Clicking a marker opens a popup with incident info.
+
+Filter tabs update markers in real time.
+
+Everything else on the page stays identical to the current design.

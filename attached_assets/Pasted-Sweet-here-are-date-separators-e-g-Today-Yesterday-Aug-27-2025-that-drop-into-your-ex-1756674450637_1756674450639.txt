@@ -1,0 +1,187 @@
+Sweet — here are date separators (e.g., “Today”, “Yesterday”, “Aug 27, 2025”) that drop into your existing timeline. Copy-paste ready.
+
+1) Tiny date utils
+// client/src/lib/date.ts
+export function toLocalDateKey(d: string | Date) {
+  const dt = typeof d === "string" ? new Date(d) : d;
+  // yyyy-mm-dd in local time
+  return [
+    dt.getFullYear(),
+    String(dt.getMonth() + 1).padStart(2, "0"),
+    String(dt.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+export function relativeDateLabel(d: string | Date, locale = undefined) {
+  const dt = typeof d === "string" ? new Date(d) : d;
+
+  const today = new Date();
+  const yday = new Date();
+  yday.setDate(today.getDate() - 1);
+
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  if (sameDay(dt, today)) return "Today";
+  if (sameDay(dt, yday)) return "Yesterday";
+
+  return dt.toLocaleDateString(locale, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+2) Timeline separator component
+// client/src/components/Timeline.tsx
+import React from "react";
+
+type Variant = "incident" | "message";
+type Severity = "low" | "medium" | "high" | "critical";
+
+export function Timeline({ children }: { children: React.ReactNode }) {
+  return (
+    <ol
+      className="
+        relative space-y-3 sm:space-y-4
+        before:absolute before:inset-y-0 before:left-5 before:w-px before:bg-white/10
+      "
+    >
+      {children}
+    </ol>
+  );
+}
+
+export function TimelineItem({
+  children,
+  variant = "incident",
+  severity = "medium",
+}: {
+  children: React.ReactNode;
+  variant?: Variant;
+  severity?: Severity;
+}) {
+  const dot =
+    variant === "message"
+      ? "bg-zinc-500"
+      : severity === "low"
+      ? "bg-emerald-400"
+      : severity === "medium"
+      ? "bg-amber-400"
+      : severity === "high"
+      ? "bg-orange-400"
+      : "bg-red-400";
+
+  return (
+    <li className="relative pl-10">
+      <span
+        className={`
+          absolute left-4 top-7 h-2.5 w-2.5 rounded-full ${dot}
+          ring-2 ring-zinc-950 shadow-[0_0_10px_rgba(255,255,255,0.15)]
+        `}
+      />
+      {children}
+    </li>
+  );
+}
+
+/** Full-width chip that sits on the rail and has no dot */
+export function TimelineSeparator({ label }: { label: string }) {
+  return (
+    <li className="relative pl-10">
+      {/* hide the rail right behind the chip to avoid a line through text */}
+      <div className="absolute left-4 top-3 -ml-px h-6 w-px bg-zinc-950" />
+      <div className="flex items-center">
+        <span
+          className="
+            mx-auto select-none rounded-full border border-white/10
+            bg-zinc-900/70 px-3 py-1 text-xs font-medium text-zinc-300
+            shadow-sm backdrop-blur
+          "
+          aria-label={`Date: ${label}`}
+        >
+          {label}
+        </span>
+      </div>
+    </li>
+  );
+}
+
+3) Use separators in the Feed
+
+This version groups by local day and injects a separator before the first item of each day. Works with your items that contain both incidents and messages (item.kind).
+
+// client/src/pages/community/Feed.tsx
+import { Timeline, TimelineItem, TimelineSeparator } from "@/components/Timeline";
+import { IncidentCard } from "@/components/IncidentCard";
+import { toLocalDateKey, relativeDateLabel } from "@/lib/date";
+// …other imports
+
+export default function Feed() {
+  // items: Array<{ kind: "incident" | "message", data: any, createdAt: string }>
+  // ensure items are sorted DESC or ASC consistently; here we'll assume DESC (newest first)
+  const sorted = [...items].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+
+  let lastKey = "";
+  return (
+    <AppLayout>
+      <FeedPageWrapper>
+        <div className="mx-auto w-full max-w-2xl px-4 sm:max-w-3xl sm:px-6 lg:max-w-4xl lg:px-8">
+          <section className="py-4 sm:py-6">
+            <Timeline>
+              {sorted.map((item) => {
+                const key = toLocalDateKey(item.createdAt);
+                const needsSeparator = key !== lastKey;
+                if (needsSeparator) lastKey = key;
+
+                return (
+                  <React.Fragment key={`${item.kind}-${item.data.id}`}>
+                    {needsSeparator && (
+                      <TimelineSeparator label={relativeDateLabel(item.createdAt)} />
+                    )}
+
+                    {item.kind === "incident" ? (
+                      <TimelineItem
+                        severity={item.data.severity}
+                        variant="incident"
+                      >
+                        <IncidentCard incident={item.data} />
+                      </TimelineItem>
+                    ) : (
+                      <TimelineItem variant="message">
+                        <MessageList message={item.data} />
+                      </TimelineItem>
+                    )}
+                  </React.Fragment>
+                );
+              })}
+            </Timeline>
+          </section>
+        </div>
+
+        <StickyComposer />
+      </FeedPageWrapper>
+    </AppLayout>
+  );
+}
+
+4) (Optional) “Load older” sentinel between date blocks
+
+If you paginate by day, put this after the last item of a day:
+
+<TimelineSeparator label="Load older…" />
+
+
+Hook it to your React Query fetchNextPage() with an IntersectionObserver if you want infinite scroll.
+
+UX notes
+
+Separators are non-interactive chips (readable by screen readers via aria-label).
+
+If your list is ascending (oldest → newest), the same code works; you’ll just see “Today” at the bottom.
+
+Locale: relativeDateLabel uses the user’s locale by default for older dates.

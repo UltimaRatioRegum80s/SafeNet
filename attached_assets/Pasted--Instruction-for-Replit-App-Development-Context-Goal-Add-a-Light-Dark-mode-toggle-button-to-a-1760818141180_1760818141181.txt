@@ -1,0 +1,185 @@
+✅ Instruction for Replit / App Development Context
+
+Goal:
+Add a Light / Dark mode toggle button to all mobile pages (Home, Map, Report, Feed) that is sleek, semi-discreet, and visually modern, with a small pulse animation when toggled.
+
+The toggle should float separately from the existing top floating navigation bar — not integrated into it — and the nav bar should be made slightly broader for aesthetic balance.
+
+🎨 Design & Placement
+Button Placement
+
+Position: Top-right corner, floating independently above content.
+
+Safe-area aware:
+
+top-[calc(env(safe-area-inset-top)+10px)]
+right-4
+
+
+Rounded, translucent glass look:
+
+bg-neutral-900/70 dark:bg-neutral-100/40 backdrop-blur-md
+
+Size: 40×40px
+
+Elevation: shadow-[0_4px_12px_rgba(0,0,0,0.25)]
+
+Interaction: scale on tap + pulse glow when toggled.
+
+🌗 Behavior
+
+Tap toggles Light ⇄ Dark themes.
+
+Uses localStorage to persist preference.
+
+Theme switch applies globally via Tailwind’s dark: classes.
+
+Smooth animated transition and a gentle pulse ripple (Framer Motion) for user feedback.
+
+💡 Suggestion for Replit (Implementation Plan — Suggestion Only)
+
+⚠️ This is a suggestion only.
+Review before applying.
+It modifies only visuals and theme state, not app logic.
+
+Step 1: Enable Class-Based Dark Mode
+// tailwind.config.js
+module.exports = {
+  darkMode: "class",
+  // ...existing settings
+};
+
+Step 2: Create Theme Store
+// src/store/useTheme.ts
+import { create } from "zustand";
+
+type Theme = "light" | "dark";
+interface ThemeState {
+  theme: Theme;
+  toggleTheme: () => void;
+}
+
+export const useTheme = create<ThemeState>((set) => ({
+  theme: (localStorage.getItem("theme") as Theme) || "dark",
+  toggleTheme: () =>
+    set((state) => {
+      const next = state.theme === "dark" ? "light" : "dark";
+      document.documentElement.classList.toggle("dark", next === "dark");
+      localStorage.setItem("theme", next);
+      return { theme: next };
+    }),
+}));
+
+Step 3: Add Floating Theme Toggle with Pulse Animation
+// src/components/ThemeToggle.tsx
+import { Sun, Moon } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useTheme } from "@/store/useTheme";
+import { cn } from "@/lib/utils";
+import { useState } from "react";
+
+export default function ThemeToggle() {
+  const { theme, toggleTheme } = useTheme();
+  const [pulse, setPulse] = useState(false);
+
+  const handleToggle = () => {
+    toggleTheme();
+    setPulse(true);
+    setTimeout(() => setPulse(false), 400); // reset pulse
+  };
+
+  return (
+    <motion.button
+      onClick={handleToggle}
+      aria-label="Toggle theme"
+      whileTap={{ scale: 0.9 }}
+      className={cn(
+        "fixed right-4 top-[calc(env(safe-area-inset-top)+10px)] z-60",
+        "h-10 w-10 flex items-center justify-center rounded-full",
+        "bg-neutral-900/70 dark:bg-neutral-100/40 backdrop-blur-md",
+        "border border-white/10 shadow-[0_4px_12px_rgba(0,0,0,0.25)]",
+        "transition-all duration-300 hover:scale-105 active:scale-95"
+      )}
+    >
+      {/* Pulse effect */}
+      {pulse && (
+        <motion.span
+          initial={{ scale: 0, opacity: 0.6 }}
+          animate={{ scale: 2, opacity: 0 }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+          className="absolute inset-0 rounded-full bg-blue-400/30 dark:bg-yellow-300/30"
+        />
+      )}
+
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={theme}
+          initial={{ rotate: 90, opacity: 0 }}
+          animate={{ rotate: 0, opacity: 1 }}
+          exit={{ rotate: -90, opacity: 0 }}
+          transition={{ duration: 0.3 }}
+        >
+          {theme === "dark" ? (
+            <Sun size={18} className="text-yellow-400" />
+          ) : (
+            <Moon size={18} className="text-blue-500" />
+          )}
+        </motion.div>
+      </AnimatePresence>
+    </motion.button>
+  );
+}
+
+
+🪄 Effect:
+When tapped, the icon rotates, the background pulse gently expands, and the app theme switches instantly with smooth fade transitions.
+
+Step 4: Render Globally
+
+Place <ThemeToggle /> in your main layout (used across all pages):
+
+// src/layouts/MobileLayout.tsx
+import ThemeToggle from "@/components/ThemeToggle";
+import FloatingNav from "@/components/FloatingNav";
+
+export default function MobileLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative h-screen w-full overflow-hidden bg-background">
+      <ThemeToggle />
+      <FloatingNav />
+      {children}
+    </div>
+  );
+}
+
+Step 5: Broaden the Floating Nav
+
+Adjust FloatingNav.tsx for a bit more horizontal space:
+
+className={cn(
+  "fixed top-3 left-1/2 -translate-x-1/2 z-50 flex items-center justify-center gap-3 px-6 py-3",
+  "w-[88%] rounded-2xl bg-neutral-900/70 backdrop-blur-md border border-white/10 shadow-lg md:hidden"
+)}
+
+
+This creates balanced breathing room while keeping it visually aligned with the floating theme button.
+
+✅ Expected Result
+Element	Description
+Floating Nav	Slightly wider, balanced, modern layout
+Theme Toggle	Independent circular floating button (top-right)
+Interaction	Smooth rotation, pulse glow, no visual clutter
+Persistence	Theme stored in localStorage
+Responsiveness	Works across all mobile pages without layout shifts
+Performance	Lightweight — uses Framer Motion for animation only
+📱 Manual Testing Checklist
+
+Toggle correctly switches between dark/light on all pages.
+
+Pulse animation appears once per toggle.
+
+Theme preference persists after refresh.
+
+Floating nav and map buttons unaffected.
+
+Visuals look clean in both themes (no text or icon color clashes).

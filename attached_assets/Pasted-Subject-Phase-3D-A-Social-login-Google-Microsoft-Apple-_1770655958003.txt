@@ -1,0 +1,182 @@
+Subject: Phase 3D-A — Social login (Google/Microsoft/Apple) + Request-Access Gate + Admin Approval Page
+
+Hi Replit — we are implementing Option B: Request Access (soft gate) and adding social sign-in buttons. This replaces the current whitelist approach.
+
+1) Goal
+
+Allow fast sign-up/sign-in via social providers without opening /community access immediately. Users can authenticate, but must be approved before they can access /community/*.
+
+2) Providers (build order)
+
+Google
+
+Microsoft
+
+Apple (only after Google+Microsoft are confirmed working)
+
+3) New Access Control Rule (replaces whitelist)
+
+After OAuth login:
+
+If user access_status = approved → allow /community/*
+
+If user access_status = pending or denied → redirect to /pending and block /community/*
+
+Hard requirement:
+
+Direct navigation to /community/* while not approved must not leak content; must redirect/block server-side.
+
+4) User-Facing UX
+Auth screen
+
+Show buttons:
+
+Continue with Google
+
+Continue with Microsoft
+
+Continue with Apple (added later)
+Keep email/password flow if you want, but it should also respect approval gate.
+
+Pending page (new route)
+
+Route: /pending
+Purpose: Show calm “controlled rollout” messaging and capture optional request details.
+
+Shows:
+
+Title: “Access pending”
+
+Text: “NaborNet is in controlled rollout. Your request has been received.”
+
+Optional fields (safe + minimal):
+
+display_name (optional)
+
+town/city (optional)
+
+reason (optional)
+Buttons:
+
+Submit request (first time)
+
+After submission: show “Request received” state (disable submit OR allow “Update details”)
+
+5) Data Model (minimal & safe)
+
+Add to users table OR separate access_requests table (your choice, minimal changes preferred):
+
+Required:
+
+access_status ENUM: pending | approved | denied (default pending for new users)
+
+access_requested_at timestamp
+
+access_approved_at timestamp nullable
+
+access_decided_by (admin email/id) nullable
+Optional request details:
+
+requested_name, requested_city, requested_reason
+
+6) Admin Approval Page (YES, REQUIRED)
+
+We need an admin page so approvals are not done via database editing.
+
+Admin route
+
+Route: /admin/access
+Access control:
+
+Only allow if user is admin (existing role) OR an environment allowlist:
+
+ADMIN_EMAILS=you@...,...
+This route must be blocked server-side (not just hidden in UI).
+
+What it shows
+
+A list of requests, default filter = Pending.
+
+Each entry shows:
+
+Email (primary identifier)
+
+Requested name (if provided)
+
+Town/city (if provided)
+
+Reason (if provided)
+
+Requested timestamp
+
+Current status badge (pending/approved/denied)
+
+Optional filters/tabs:
+
+Pending | Approved | Denied
+
+Buttons on each request
+
+Approve
+
+Deny
+Optional:
+
+“Copy email”
+
+“View user profile” (if exists)
+
+What the buttons do
+
+Approve:
+
+set access_status=approved
+
+set access_approved_at=now
+
+set access_decided_by=admin
+Deny:
+
+set access_status=denied
+
+set access_decided_by=admin
+
+7) Explicitly OUT (do not do)
+
+No open public access to /community/*
+
+No feed/map changes
+
+No analytics funneling
+
+No referral systems
+
+No growth mechanics
+
+No schema refactors beyond what’s required for this gate
+
+8) Acceptance Tests
+
+New user authenticates via Google/Microsoft → lands on /pending
+
+Pending user cannot access /community/* even by typing URL
+
+Admin can approve from /admin/access
+
+After approval, user can enter /community/* on refresh/login
+
+Denied user remains blocked and sees a polite message
+
+Existing users (already approved) are unaffected
+
+Reply back with:
+
+files changed
+
+table/fields added
+
+route names used
+
+how admin access is enforced
+
+Thanks.

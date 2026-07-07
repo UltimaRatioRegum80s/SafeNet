@@ -1,0 +1,81 @@
+I’m resuming app development and focusing on an issue with incident reporting on mobile and tablet views.
+
+Problem
+
+When a user reports an incident and presses the Submit button:
+
+The app navigates to the map page, but the marker for the reported incident does not immediately appear.
+
+The marker only becomes visible after leaving the map page and returning to it.
+
+Even when the app navigates to the map page after reporting, the zoom level is too wide and does not focus on the reported incident’s location.
+
+Expected Behavior
+
+After submitting an incident report, the app should:
+
+Navigate to the map page.
+
+Immediately display the marker at the reported incident’s exact GPS location.
+
+Maximally zoom in on that location so the incident is clearly visible.
+
+Do you want me to also write a developer-oriented task breakdown (like action items for fixing it in code), or just keep it as a clean problem statement for now?
+
+You said:
+
+Do you want me to also write a **developer-oriented task breakdown** (like action items for fixing it in code), or just keep it as a clean problem statement for now?
+
+yes
+NN Builder & Coder said:
+
+Got it ✅ — here’s the developer-oriented task breakdown for fixing the incident reporting/map navigation issue in NN:
+
+Task Breakdown – Incident Reporting Map Flow
+1. Incident Submission → Map Navigation
+
+Current behavior:
+
+After submission, the app navigates to the map page, but the new marker does not render immediately.
+
+Fix:
+
+Ensure the reported incident’s data is persisted (e.g., in Zustand/React Query state) before triggering navigation.
+
+Pass the incident ID or GPS coordinates as route state/params when redirecting to the map page.
+
+2. Marker Visibility
+
+Current behavior:
+
+Marker only becomes visible after leaving and re-entering the map page.
+
+Fix:
+
+On map page load, re-fetch or subscribe to incident data if a new report was submitted.
+
+Trigger a map update/render once the marker data is available.
+
+Use a useEffect that listens for “newIncident” in state to place the marker immediately.
+
+3. Auto Zoom & Centering
+
+Current behavior:
+
+Map defaults to a wide zoom, not centered on the reported incident.
+
+Fix:
+
+On navigation with incident coordinates:
+
+Call map.flyTo({ center: [lng, lat], zoom: MAX_ZOOM }).
+
+Ensure this happens after marker placement, so the user sees the incident instantly.
+
+4. Edge Cases to Handle
+
+User reports incident with poor GPS signal → fallback zoom to approximate location.
+
+Multiple incident reports in quick succession → app should still highlight the latest report.
+
+Incident submitted offline → marker should be created once sync completes, then map should auto-zoom.

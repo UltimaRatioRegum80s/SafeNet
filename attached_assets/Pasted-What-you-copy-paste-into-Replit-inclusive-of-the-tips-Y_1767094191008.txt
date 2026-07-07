@@ -1,0 +1,181 @@
+What you copy-paste into Replit (inclusive of the tips)
+
+You paste exactly this into Replit as a non-executable foundation document.
+Do not treat it as code.
+
+✅ Best places to paste it (pick ONE)
+
+Option A (recommended):
+📄 docs/PHASE_2_FOUNDATION.md
+→ This is the cleanest and most future-proof place.
+
+Option B:
+📄 README_PHASE_2.md
+→ If you want it visible at repo root.
+
+Option C:
+🧠 Top-of-file comment in your backend service that will own reactions
+(e.g. incidentResponses.ts), like this:
+
+/**
+ * NABORNET — PHASE 2 FOUNDATION
+ *
+ * This file implements structured incident reactions.
+ * The rules, constraints, and intent are defined below.
+ *
+ * ⚠️ This comment is intentional and must not be removed.
+ */
+
+
+Then paste the full text below that comment.
+
+🔒 EXACT TEXT TO PASTE (no edits needed)
+
+You can copy this verbatim:
+
+NaborNet — Phase 2: Structured Incident Responses
+Baseline, context, and direction
+
+Baseline / Where we are now
+
+Phase 1 is complete and intentionally closed.
+
+Phase 1 outcomes
+
+Incident reporting is location-based, not room/chat-based.
+
+Users see incidents within a radius + time window.
+
+Reporting is structured, not conversational.
+
+Free-form neighbourhood chat was deliberately removed.
+
+Clear UX signalling exists (lock icons + tooltips) to communicate:
+
+This is a structured safety-reporting system, not free chat.
+
+Content is moderated and subject to safety rules.
+
+Category + severity filtering is live and stable.
+
+System is deployed to production and functioning as intended.
+
+Phase 1 established
+
+A clear architectural boundary
+
+A clear legal posture
+
+A clear UX philosophy: safety signals over speculation
+
+This phase is a locked foundation.
+
+What Phase 2 is about
+
+Phase 2 introduces a new interaction layer — not a return to chat.
+
+The shift is:
+From reporting incidents → to reacting to incidents
+
+This matters because it affects:
+
+How users feel “heard” without speaking freely
+
+How community consensus is signalled
+
+How legal exposure is controlled
+
+How moderation load is avoided
+
+How trust signals + analytics can be built later
+
+Phase 2 is not discussion.
+It is acknowledgement, awareness, and resolution signalling.
+
+Direction / Intent for Phase 2
+
+Allow users to participate using structured, neutral signals such as:
+
+Seen / Aware
+
+Caution
+
+Needs assistance
+
+Resolved
+
+(Optional later) False / Not there (high-risk; avoid early)
+
+Key constraints
+
+No free-text chat
+
+No speculation about people, addresses, or patterns
+
+One response per user per incident (upsert model)
+
+Signals must reduce, not increase, legal exposure
+
+UX should feel lightweight (WhatsApp-adjacent) without becoming chat
+
+Responses must never become “votes on guilt” or “naming/shaming”
+
+The system should
+
+Let users feel involved
+
+Let incidents gain context over time
+
+Avoid turning NaborNet into a rumour/accusation engine
+
+What this conversation is for
+
+This conversation exists to:
+
+Pressure-test the interaction model
+
+Evaluate legal + social implications
+
+Decide what signals are allowed now vs later
+
+Think ahead to extensibility (counts, decay, weighting, trust)
+
+Keep design decisions intentional and documented
+
+Execution can be handled by Replit.
+This space is for thinking clearly before scaling behaviour.
+
+Rule of thumb:
+If a reaction could be interpreted as an allegation about a person, it doesn’t ship in Phase 2.
+
+Why this belongs in Replit (important)
+
+This text acts as:
+
+🧭 Architectural compass (prevents feature creep)
+
+⚖️ Legal boundary marker (for future contributors)
+
+🧠 AI prompt anchor (when you ask Replit Agent to build features)
+
+🧱 “Do not cross” line when someone suggests chat/comments later
+
+When you say to Replit Agent:
+
+“Implement reactions according to the Phase 2 foundation”
+
+— this document is what it should reference.
+
+Next (when you’re ready)
+
+In the new GPT chat, the correct next steps are:
+
+Define Signal Set v1 (final, shippable)
+
+Lock the database schema
+
+Decide which signals are write-once vs reversible
+
+Decide visibility rules (counts only? icons only? decay?)
+
+Say the word and we do step 1 cleanly and conservatively.

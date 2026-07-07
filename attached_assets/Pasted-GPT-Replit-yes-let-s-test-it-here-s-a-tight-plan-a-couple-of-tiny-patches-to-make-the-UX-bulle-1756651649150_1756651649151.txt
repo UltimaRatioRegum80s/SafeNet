@@ -1,0 +1,175 @@
+GPT → Replit
+
+yes—let’s test it. here’s a tight plan + a couple of tiny patches to make the UX bullet-proof.
+
+1) Manual QA (desktop)
+
+Browsers: Chrome, Firefox, Safari (≥ lg viewport, e.g. 1366×800)
+
+Click Report → crosshair cursor + overlay appears; Esc cancels and returns to normal.
+
+Click on map → sheet opens; header visible; Location set: lat,lng shows; pin is at clicked spot.
+
+Change zoom level (scroll) while sheet open → pin persists.
+
+Click Drop a pin in sheet → sheet closes, overlay appears, next click reopens sheet with new coords.
+
+Resize to <1024px while in report mode → overlay auto-cancels; mobile FAB flow works; GPS button still present.
+
+Double-click zoom while in report mode does not place two pins or open twice.
+
+Press Esc while overlay visible → cancels; focus returns to Report button.
+
+Submit a report → optimistic marker appears and clusters correctly.
+
+Navigate away and back to map → report mode is not “stuck.”
+
+2) Quick regression (mobile/tablet)
+
+iPhone Safari & Android Chrome: FAB → bottom sheet → Use my current location works; no tap-to-report overlay ever shows.
+
+Tablet landscape: confirm still using mobile/tablet GPS flow.
+
+3) Tiny patches (optional but recommended)
+A) Sheet opens on the right for desktop + “Drop a pin” closes sheet before entering report mode
+diff --git a/client/src/features/report/QuickReportCard.tsx b/client/src/features/report/QuickReportCard.tsx
+@@
+-  const { sheetOpen, openSheet, closeSheet, location, startReportMode } = useQuickReportStore();
++  const { sheetOpen, openSheet, closeSheet, location, startReportMode } = useQuickReportStore();
+   const isDesktop = useIsDesktop();
+@@
+-  <SheetContent side="bottom" className="w-full sm:max-w-md">
++  <SheetContent side={isDesktop ? "right" : "bottom"} className="w-full sm:max-w-md">
+@@
+-              <Button variant="secondary" onClick={startReportMode}>
++              <Button
++                variant="secondary"
++                onClick={() => {
++                  closeSheet();        // let user see full map before clicking
++                  startReportMode();
++                }}
++              >
+                 Drop a pin
+               </Button>
+
+B) Disable double-click zoom during report mode + cancel when dropping below desktop
+diff --git a/client/src/pages/community/Map.tsx b/client/src/pages/community/Map.tsx
+@@
+   useEffect(() => {
+     const map = mapRef.current;
+     if (!map) return;
++    // toggle dblclick zoom to prevent double placements
++    if (reportMode) map.doubleClickZoom.disable();
++    else map.doubleClickZoom.enable();
+     function onClick(e: L.LeafletMouseEvent) {
+       if (!reportMode) return;
+       confirmTempPin({ lat: e.latlng.lat, lng: e.latlng.lng });
+     }
+     map.on("click", onClick);
+     return () => map.off("click", onClick);
+   }, [reportMode, confirmTempPin]);
+ 
++  // auto-cancel if viewport becomes non-desktop mid-flow
++  useEffect(() => {
++    if (!isDesktop && reportMode) cancelReportMode();
++  }, [isDesktop, reportMode, cancelReportMode]);
+
+4) Playwright E2E (copy-paste)
+
+tests/report.desktop.spec.ts
+
+import { test, expect } from "@playwright/test";
+
+test.describe("Desktop tap-to-report", () => {
+  test.use({ viewport: { width: 1366, height: 900 } });
+
+  test("report flow opens sheet after map click", async ({ page }) => {
+    await page.goto("/map");
+    await page.getByRole("button", { name: "Report" }).click();
+
+    // overlay visible
+    await expect(page.getByText(/Click the map to set the incident location/i)).toBeVisible();
+
+    // click roughly center of map
+    const map = page.locator("#map");
+    const box = await map.boundingBox();
+    if (!box) throw new Error("Map not found");
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+
+    // sheet opens and shows coords line
+    await expect(page.getByText(/Location set:/i)).toBeVisible();
+  });
+
+  test("esc cancels report mode", async ({ page }) => {
+    await page.goto("/map");
+    await page.getByRole("button", { name: "Report" }).click();
+    await expect(page.getByText(/Click the map/i)).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByText(/Click the map/i)).toBeHidden();
+  });
+
+  test("mobile regression", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/map");
+    await page.getByRole("button", { name: "Report" }).click();
+    await expect(page.getByRole("button", { name: /Use my current location/i })).toBeVisible();
+    await expect(page.getByText(/Click the map/i)).toHaveCount(0);
+  });
+});
+
+
+Add to package.json if needed:
+
+{
+  "scripts": {
+    "test:e2e": "playwright test"
+  }
+}
+
+5) Store unit tests (Vitest)
+
+client/src/state/useQuickReportStore.test.ts
+
+import { describe, it, expect, beforeEach } from "vitest";
+import { useQuickReportStore } from "./useQuickReportStore";
+
+const reset = () =>
+  useQuickReportStore.setState(
+    { sheetOpen: false, note: "", reportMode: false, categoryId: undefined, location: undefined, tempPin: undefined },
+    true
+  );
+
+describe("useQuickReportStore desktop flow", () => {
+  beforeEach(reset);
+
+  it("start → confirm pin opens sheet with location", () => {
+    const s = useQuickReportStore.getState();
+    s.startReportMode();
+    expect(useQuickReportStore.getState().reportMode).toBe(true);
+    s.confirmTempPin({ lat: 1, lng: 2 });
+    const st = useQuickReportStore.getState();
+    expect(st.sheetOpen).toBe(true);
+    expect(st.reportMode).toBe(false);
+    expect(st.location).toEqual({ lat: 1, lng: 2 });
+  });
+
+  it("cancel clears temp pin", () => {
+    const s = useQuickReportStore.getState();
+    s.startReportMode();
+    s.cancelReportMode();
+    expect(useQuickReportStore.getState().tempPin).toBeUndefined();
+  });
+});
+
+6) Lightweight telemetry (optional)
+
+Emit events so @RDM can see adoption:
+
+// add near actions where appropriate
+window.dispatchEvent(new CustomEvent("nn.analytics", { detail: { event: "reportMode_start" }}));
+window.dispatchEvent(new CustomEvent("nn.analytics", { detail: { event: "reportMode_pin_set" }}));
+window.dispatchEvent(new CustomEvent("nn.analytics", { detail: { event: "reportMode_cancel" }}));
+
+
+if you run the manual steps + the playwright spec and all pass, we can call this desktop flow ✅.
+want me to ship the two tiny patches (A & B) as final diffs, or are you happy with the current behavior as-is?

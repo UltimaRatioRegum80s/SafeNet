@@ -1,0 +1,111 @@
+got it — the chips are still getting covered because they’re likely rendered inside the map/card container (which has its own stacking/overflow/transform). Let’s make them escape that container and pin to the viewport so nothing covers them.
+
+🟣 GPT → Replit (precise fix: portal + fixed stack)
+1) Render the chips via a portal to document.body
+
+Create client/src/components/StatusHUD.tsx:
+
+// client/src/components/StatusHUD.tsx
+import { createPortal } from "react-dom";
+
+type Props = { children: React.ReactNode; position?: "top-right" | "bottom-right" | "top-left" | "bottom-left" };
+
+export default function StatusHUD({ children, position = "top-right" }: Props) {
+  const root = typeof document !== "undefined" ? document.body : null;
+  if (!root) return null;
+
+  const pos = {
+    "top-right": "top: env(safe-area-inset-top, 12px); right: env(safe-area-inset-right, 12px);",
+    "bottom-right": "bottom: env(safe-area-inset-bottom, 12px); right: env(safe-area-inset-right, 12px);",
+    "top-left": "top: env(safe-area-inset-top, 12px); left: env(safe-area-inset-left, 12px);",
+    "bottom-left": "bottom: env(safe-area-inset-bottom, 12px); left: env(safe-area-inset-left, 12px);",
+  }[position];
+
+  return createPortal(
+    <div
+      id="nn-status-stack"
+      style={{
+        position: "fixed",
+        zIndex: 2147483000, // above everything, but below native UI
+        pointerEvents: "none",
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+        // position string injected
+        ...(Object.fromEntries(pos.split(";").filter(Boolean).map(s=>{
+          const [k,v]=s.split(":").map(t=>t.trim()); return [k as any, v];
+        })) as any),
+      }}
+    >
+      <div style={{ pointerEvents: "auto", display: "flex", flexDirection: "column", gap: "8px" }}>
+        {children}
+      </div>
+    </div>,
+    root
+  );
+}
+
+
+Why this works: Portaling to body + position: fixed avoids being clipped/covered by any parent with overflow: hidden, transform, filter, or local stacking contexts.
+
+2) Mount it once near your app root
+
+In App.tsx (or your top layout):
+
+import StatusHUD from "@/components/StatusHUD";
+import { SubmittingChip, SavedOfflineChip } from "@/components/YourChips"; // whatever you call them
+
+export default function App() {
+  return (
+    <>
+      {/* ... your existing layout/routes ... */}
+
+      <StatusHUD position="top-right">
+        <SubmittingChip />
+        <SavedOfflineChip />
+      </StatusHUD>
+    </>
+  );
+}
+
+
+If you ever want them bottom-right on mobile, just pass position="bottom-right".
+
+3) (Optional) tiny CSS for chip spacing + touch area
+/* client/src/index.css */
+#nn-status-stack .nn-chip {
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.25);
+}
+
+
+Make your chip components include className="nn-chip" if you want that style.
+
+4) Ensure Leaflet UI isn’t “above” them
+
+You likely already set this, but for certainty:
+
+.leaflet-pane,
+.leaflet-top,
+.leaflet-bottom { z-index: 400; }
+.leaflet-popup-pane { z-index: 600; }
+/* our HUD is z-index ~2.1e9 via inline style — guaranteed on top */
+
+5) Quick sanity test
+
+Temporarily add this to confirm placement:
+
+<StatusHUD position="top-right">
+  <div style={{background:"#0ea5e9", color:"#fff", padding:"8px 12px", borderRadius:12}}>TEST HUD</div>
+</StatusHUD>
+
+
+If you can see this in the top-right of the viewport on every page (and it doesn’t scroll with the map), the portal works. Replace with your chips afterwards.
+
+🟠 If it still looks covered…
+
+That would mean a fullscreen overlay is on top (e.g., a modal backdrop). Two options:
+
+Put the HUD after your modal provider in the DOM (still via portal).
+
+Or bump the HUD z-index even higher (we already set it very high). Make sure nothing sets backdrop-filter on body — that can create a weird stacking context on some browsers.

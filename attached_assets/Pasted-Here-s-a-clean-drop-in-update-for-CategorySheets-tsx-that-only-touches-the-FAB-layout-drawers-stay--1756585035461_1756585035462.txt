@@ -1,0 +1,95 @@
+Here’s a clean drop-in update for CategorySheets.tsx that only touches the FAB layout (drawers stay the same).
+
+Patch: center the 3 buttons, 2/3 width, colored
+1) Update SeverityFab to accept className (remove inline style)
+// replace the SeverityFab signature + return with this version
+function SeverityFab({
+  severity,
+  label,
+  onClick,
+  className,
+}: {
+  severity: Severity;
+  label: string;
+  onClick: () => void;
+  className?: string;
+}) {
+  const icon =
+    severity === "low" ? <Circle className="h-5 w-5" /> :
+    severity === "medium" ? <AlertTriangle className="h-5 w-5" /> :
+    <Flame className="h-5 w-5" />;
+
+  return (
+    <button
+      onClick={onClick}
+      aria-label={`Report a ${label.toLowerCase()}-risk incident`}
+      className={clsx(
+        "nn-glass backdrop-blur-md",
+        FAB_STYLE,           // padding, ring, press animation, focus styles
+        COLORS[severity],    // ✅ brings back the colors
+        className            // for placement from parent
+      )}
+    >
+      {icon}
+      <span className="font-semibold">{label}</span>
+    </button>
+  );
+}
+
+2) Replace the FAB positioning block with a centered horizontal row
+// replace the entire <div className="fixed inset-0 pointer-events-none lg:hidden z-[55]"> … </div>
+// with this centered layout:
+
+<div className="fixed inset-0 pointer-events-none lg:hidden z-[55]">
+  <div
+    className={clsx(
+      "pointer-events-auto",
+      // center of the screen
+      "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2",
+      // width = 2/3 of the screen, with sensible max/min
+      "w-2/3 max-w-md min-w-[260px]"
+    )}
+  >
+    <div className="flex items-center justify-between gap-3">
+      <SeverityFab severity="low"    label="Low"    onClick={() => setOpen("low")}    />
+      <SeverityFab severity="medium" label="Medium" onClick={() => setOpen("medium")} />
+      <SeverityFab severity="high"   label="High"   onClick={() => setOpen("high")}   />
+    </div>
+  </div>
+</div>
+
+
+Buttons are now in the middle of the screen, horizontal, and the row’s container is 2/3 screen width (w-2/3), capped by max-w-md with a minimum for tiny phones.
+
+Colors are restored via COLORS[severity].
+
+If you prefer the trio to be centered horizontally but slightly below the exact middle, change top-1/2 -translate-y-1/2 to something like top-[58%] -translate-y-1/2 or top-[60%].
+
+Optional styling tweaks (choose any)
+
+Make the three buttons grow evenly across the row:
+
+<div className="flex items-center gap-3">
+  <SeverityFab className="flex-1 justify-center" … />
+  <SeverityFab className="flex-1 justify-center" … />
+  <SeverityFab className="flex-1 justify-center" … />
+</div>
+
+
+Make labels larger on tablets:
+
+<span className="font-semibold text-sm sm:text-base">{label}</span>
+
+Quick QA
+
+Buttons are centered and span ≈66% of the screen.
+
+Colors: yellow / amber / red are back.
+
+Tap any button → corresponding glass sheet opens with correct incident list; selecting a type opens the Report panel preselected.
+
+On very small phones, width never collapses below 260px (readable/tappable).
+
+On large phones/tablets, the row caps at max-w-md to avoid overly wide buttons.
+
+If you want the trio a bit lower or higher, tell me roughly where and I’ll give you the exact Tailwind offsets.

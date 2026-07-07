@@ -1,0 +1,411 @@
+amazing — let’s ship Leaflet clustering + smart, state-aware popups that fit your current stack (Vite + React + TS, plain Leaflet, Zustand, React Query, Socket.io, custom HTML markers).
+
+I’ll give you drop-in patches. Minimal disruption; your existing optimistic/offline visuals still work.
+
+0) Install cluster plugin + CSS
+# in the client workspace
+npm i leaflet.markercluster @types/leaflet.markercluster
+
+
+Add base CSS (plus our custom styles later):
+
+// client/src/main.tsx (or wherever you import global styles)
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
+
+1) Cluster group helper (singleton)
+
+client/src/features/map/cluster.ts
+
+import L from "leaflet";
+import "leaflet.markercluster";
+
+// Keep one instance across the map page lifecycle
+let _cluster: L.MarkerClusterGroup | null = null;
+
+export function createClusterGroup(): L.MarkerClusterGroup {
+  if (_cluster) return _cluster;
+
+  _cluster = L.markerClusterGroup({
+    showCoverageOnHover: false,
+    spiderfyOnMaxZoom: true,
+    disableClusteringAtZoom: 17,
+    maxClusterRadius: 48,
+    // style cluster icon based on children states
+    iconCreateFunction(cluster) {
+      const count = cluster.getChildCount();
+      const markers = cluster.getAllChildMarkers() as L.Marker[];
+      let hasOptimistic = false;
+      let hasOffline = false;
+
+      for (const m of markers) {
+        const flags = (m as any).nnFlags as { optimistic?: boolean; offline?: boolean } | undefined;
+        if (flags?.optimistic) hasOptimistic = true;
+        if (flags?.offline) hasOffline = true;
+        if (hasOptimistic && hasOffline) break;
+      }
+
+      const classes = ["nn-cluster"];
+      if (hasOptimistic) classes.push("nn-cluster--optimistic");
+      if (hasOffline) classes.push("nn-cluster--offline");
+
+      return L.divIcon({
+        html: `<div class="nn-cluster__inner"><span>${count}</span></div>`,
+        className: classes.join(" "),
+        iconSize: [40, 40],
+      });
+    },
+  });
+
+  return _cluster!;
+}
+
+export function getClusterGroup(): L.MarkerClusterGroup | null {
+  return _cluster;
+}
+
+export function refreshClusterFor(marker?: L.Marker) {
+  const c = getClusterGroup();
+  if (!c) return;
+  // refreshClusters exists on markercluster; refresh what changed (faster than full redraw)
+  (c as any).refreshClusters?.(marker ? [marker] : undefined);
+}
+
+2) Cluster styles (clean, dark theme)
+
+client/src/styles/nn-cluster.css (import once in main.tsx as well)
+
+.nn-cluster {
+  border-radius: 9999px;
+  background: rgba(18, 22, 28, 0.9);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.35);
+  border: 2px solid rgba(255,255,255,0.08);
+}
+.nn-cluster__inner {
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  color: #fff; font-weight: 700;
+}
+
+/* teal glow if any optimistic children */
+.nn-cluster--optimistic {
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.25), 0 6px 16px rgba(0,0,0,0.4);
+}
+
+/* amber dashed ring if any offline children */
+.nn-cluster--offline {
+  position: relative;
+}
+.nn-cluster--offline::after {
+  content: "";
+  position: absolute; inset: -4px;
+  border-radius: 9999px;
+  border: 2px dashed rgba(251, 191, 36, 0.7);
+  animation: nnDash 1.8s linear infinite;
+}
+@keyframes nnDash { to { transform: rotate(360deg); } }
+
+// client/src/main.tsx
+import "@/styles/nn-cluster.css";
+
+3) Smart popups (state-aware content)
+
+client/src/features/map/popup.ts
+
+import type { IncidentType, IncidentSeverity } from "@/features/report/incidentTypes";
+
+export type PopupData = {
+  id: string;
+  type: IncidentType;
+  severity: IncidentSeverity;
+  description?: string;
+  optimistic?: boolean;
+  offline?: boolean;
+  createdAt?: string;
+};
+
+export function renderPopupHTML(data: PopupData) {
+  const status = data.offline
+    ? `<div class="nn-popup__status nn-popup__status--offline">⏳ Saved offline — will auto-send when online</div>`
+    : data.optimistic
+    ? `<div class="nn-popup__status nn-popup__status--optimistic">⚡ Submitting…</div>`
+    : "";
+
+  const desc = data.description
+    ? `<div class="nn-popup__desc">${escapeHTML(data.description)}</div>`
+    : "";
+
+  return `
+    <div class="nn-popup">
+      <div class="nn-popup__header">
+        <div class="nn-popup__type">${prettyType(data.type)}</div>
+        <div class="nn-popup__sev nn-popup__sev--${data.severity}">${data.severity}</div>
+      </div>
+      ${status}
+      ${desc}
+      ${data.createdAt ? `<div class="nn-popup__meta">Reported ${new Date(data.createdAt).toLocaleString()}</div>` : ""}
+    </div>
+  `;
+}
+
+const prettyType = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, m => m.toUpperCase());
+const escapeHTML = (s: string) => s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]!));
+
+
+Popup styles (append to your markers CSS or new file nn-popup.css)
+
+.nn-popup { max-width: 240px; font: 12px/1.4 system-ui, sans-serif; color: #e5e7eb; }
+.nn-popup__header { display:flex; justify-content:space-between; gap:8px; align-items:center; margin-bottom:6px; }
+.nn-popup__type { text-transform: capitalize; font-weight:700; }
+.nn-popup__sev { font-size:10px; padding:2px 6px; border-radius:999px; background:#1f2937; color:#fff; text-transform:uppercase; letter-spacing:.04em; }
+.nn-popup__sev--low { background:#064e3b; }
+.nn-popup__sev--medium { background:#92400e; }
+.nn-popup__sev--high { background:#7c2d12; }
+.nn-popup__sev--critical { background:#7f1d1d; }
+
+.nn-popup__status { font-size:11px; padding:6px 8px; border-radius:10px; margin:6px 0; }
+.nn-popup__status--optimistic { background:rgba(34,211,238,.12); color:#67e8f9; border:1px solid rgba(34,211,238,.25); }
+.nn-popup__status--offline { background:rgba(251,191,36,.12); color:#fcd34d; border:1px dashed rgba(251,191,36,.35); }
+.nn-popup__desc { white-space:pre-wrap; color:#e5e7eb; }
+.nn-popup__meta { color:#9ca3af; margin-top:6px; font-size:11px; }
+
+
+Import once:
+
+import "@/styles/nn-popup.css";
+
+4) Update marker helper to support cluster + popups
+
+client/src/features/map/createIncidentMarker.ts (patch)
+
+import L from "leaflet";
+import { INCIDENT_MARKERS } from "@/features/report/incidentTypes";
+import { renderPopupHTML, PopupData } from "./popup";
+import { refreshClusterFor, getClusterGroup } from "./cluster";
+
+const markerRegistry = new Map<string, L.Marker>();
+
+type CreateMarkerOpts = {
+  id: string;
+  type: string;
+  lat: number;
+  lng: number;
+  description?: string;
+  severity?: string;
+  optimistic?: boolean;
+  offline?: boolean;
+  target?: L.LayerGroup | L.Map; // cluster group or map
+};
+
+export function createIncidentMarker(opts: CreateMarkerOpts): L.Marker {
+  const { id, type, lat, lng, description, severity, optimistic, offline, target } = opts;
+  const iconUrl = (INCIDENT_MARKERS as any)[type]?.icon;
+
+  const classes = ["nn-marker"];
+  if (optimistic) classes.push("nn-marker--optimistic");
+  if (offline) classes.push("nn-marker--offline");
+  const badgeText = offline ? "⏳" : optimistic ? "⚡" : "";
+
+  const html = `
+    <div class="${classes.join(" ")}" data-id="${id}">
+      <img class="nn-marker__img" src="${iconUrl}" alt="${type}" />
+      ${badgeText ? `<span class="nn-marker__badge">${badgeText}</span>` : ""}
+    </div>
+  `;
+
+  const divIcon = L.divIcon({
+    html,
+    className: "",
+    iconSize: [36, 36],
+    iconAnchor: [18, 36],
+    popupAnchor: [0, -28],
+  });
+
+  const marker = L.marker([lat, lng], { icon: divIcon });
+  (marker as any).nnFlags = { optimistic: !!optimistic, offline: !!offline };
+  (marker as any).nnData = { id, type, severity, description } as PopupData;
+
+  // bind popup with smart content
+  marker.bindPopup(() => renderPopupHTML((marker as any).nnData));
+
+  const layer = target ?? getClusterGroup() ?? undefined;
+  if (layer) (layer as L.LayerGroup).addLayer(marker);
+
+  markerRegistry.set(id, marker);
+  return marker;
+}
+
+export function updateMarkerFlags(
+  id: string,
+  flags: { optimistic?: boolean; offline?: boolean }
+) {
+  const marker = markerRegistry.get(id);
+  if (!marker) return;
+  (marker as any).nnFlags = { ...(marker as any).nnFlags, ...flags };
+
+  // update DOM classes if icon is present
+  const el = (marker as any)._icon as HTMLElement | null;
+  if (el) {
+    el.classList.toggle("nn-marker--optimistic", !!(marker as any).nnFlags.optimistic);
+    el.classList.toggle("nn-marker--offline", !!(marker as any).nnFlags.offline);
+    const wantBadge = (marker as any).nnFlags.optimistic || (marker as any).nnFlags.offline;
+    let badge = el.querySelector(".nn-marker__badge") as HTMLSpanElement | null;
+    if (wantBadge && !badge) {
+      badge = document.createElement("span");
+      badge.className = "nn-marker__badge";
+      el.appendChild(badge);
+    }
+    if (!wantBadge && badge) badge.remove();
+    else if (badge) badge.textContent = (marker as any).nnFlags.offline ? "⏳" : "⚡";
+  }
+  refreshClusterFor(marker);
+}
+
+export function updateMarkerData(id: string, data: Partial<PopupData>) {
+  const marker = markerRegistry.get(id);
+  if (!marker) return;
+  (marker as any).nnData = { ...(marker as any).nnData, ...data };
+  if (marker.isPopupOpen()) marker.setPopupContent(renderPopupHTML((marker as any).nnData));
+}
+
+export function replaceMarkerId(tempId: string, newId: string) {
+  const marker = markerRegistry.get(tempId);
+  if (!marker) return;
+  markerRegistry.delete(tempId);
+  markerRegistry.set(newId, marker);
+
+  (marker as any).nnData.id = newId;
+  const el = (marker as any)._icon as HTMLElement | null;
+  if (el) el.setAttribute("data-id", newId);
+  refreshClusterFor(marker);
+}
+
+export function getMarkerById(id: string) {
+  return markerRegistry.get(id) ?? null;
+}
+
+5) Use the cluster group in the map
+
+client/src/pages/community/Map.tsx (key patches only)
+
+import L from "leaflet";
+import "leaflet.markercluster";
+import { createClusterGroup, getClusterGroup } from "@/features/map/cluster";
+import { createIncidentMarker, getMarkerById } from "@/features/map/createIncidentMarker";
+import { getQueryParam } from "@/lib/url"; // your existing util
+// ... your other imports
+
+export default function MapPage() {
+  // ... map init code
+
+  useEffect(() => {
+    if (!map) return;
+    // 1) ensure cluster layer exists and is added
+    const cluster = createClusterGroup();
+    map.addLayer(cluster);
+
+    // 2) initial incidents → add to cluster
+    if (incidents?.length) {
+      incidents.forEach((inc) => {
+        createIncidentMarker({
+          id: inc.id,
+          type: inc.type,
+          lat: inc.latitude,
+          lng: inc.longitude,
+          description: inc.description,
+          severity: inc.severity,
+          target: cluster,
+        });
+      });
+    }
+
+    // 3) socket realtime
+    const onNew = (inc: any) => {
+      console.debug("[socket] incident:new", inc.id, inc.type);
+      createIncidentMarker({
+        id: inc.id,
+        type: inc.type,
+        lat: inc.latitude,
+        lng: inc.longitude,
+        description: inc.description,
+        severity: inc.severity,
+        target: cluster,
+      });
+    };
+    socket.on("incident:new", onNew);
+
+    return () => socket.off("incident:new", onNew);
+  }, [map, incidents]);
+
+  // 4) focus=ID → zoom & spiderfy to reveal the marker in cluster
+  useEffect(() => {
+    if (!map) return;
+    const id = getQueryParam("focus");
+    if (!id) return;
+
+    const tryFocus = () => {
+      const marker = getMarkerById(id);
+      if (!marker) return false;
+      const cluster = getClusterGroup();
+      if (cluster) {
+        (cluster as any).zoomToShowLayer(marker, () => {
+          map.setView(marker.getLatLng(), Math.max(map.getZoom(), 17), { animate: true });
+          marker.openPopup();
+        });
+      } else {
+        map.setView(marker.getLatLng(), 17, { animate: true });
+        marker.openPopup();
+      }
+      return true;
+    };
+
+    // give a tick for markers to mount
+    const ok = tryFocus();
+    if (!ok) setTimeout(tryFocus, 150);
+
+    // clean URL
+    const u = new URL(window.location.href);
+    u.searchParams.delete("focus");
+    window.history.replaceState({}, "", u.toString());
+  }, [map]);
+  
+  return /* your map JSX */;
+}
+
+6) QuickReportCard (tiny adjustment for cluster refresh on confirm)
+
+Where you confirm and swap temp → real id, keep your existing logic but ensure flags clear:
+
+import { replaceMarkerId, updateMarkerFlags, updateMarkerData } from "@/features/map/createIncidentMarker";
+
+// after POST success:
+replaceMarkerId(tempId, result.id);
+updateMarkerFlags(result.id, { optimistic: false, offline: false });
+updateMarkerData(result.id, { createdAt: new Date().toISOString() });
+
+
+(If you’re still redirecting immediately to /map, the map page will pick up and render; these calls are safe no-ops when the marker isn’t mounted yet.)
+
+✅ What you get
+
+Fast clustering that scales to hundreds of incidents.
+
+Cluster icons show teal glow if any optimistic pins inside, amber dashed ring if any offline pins inside.
+
+Smart popups that explain status and show severity/type/details.
+
+focus= reliably zooms/spiderfies to reveal the target marker.
+
+Minimal changes to your existing flow and helpers.
+
+🧪 Quick test script
+
+Load /map: markers should cluster on zoomed-out view.
+
+Submit a Quick Report: cluster nearest to you should glow teal until confirmation.
+
+Go offline, submit: cluster shows amber dashed ring; popup says “Saved offline…”.
+
+Come back online: queued report sends, cluster loses amber ring; marker popup shows normal state.
+
+Use ?focus=<id>: map zooms/spiderfies and opens the popup.

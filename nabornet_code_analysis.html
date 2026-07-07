@@ -1,0 +1,1937 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NaborNet - Complete Code Analysis</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; 
+            background: #0d1117; 
+            color: #e6edf3; 
+            line-height: 1.6; 
+        }
+        .header { 
+            background: linear-gradient(135deg, #1f2937 0%, #374151 100%); 
+            padding: 2rem; 
+            text-align: center; 
+            border-bottom: 3px solid #3b82f6; 
+        }
+        .header h1 { 
+            color: #60a5fa; 
+            font-size: 2.5em; 
+            margin-bottom: 0.5rem; 
+        }
+        .nav { 
+            background: #161b22; 
+            padding: 1rem; 
+            position: sticky; 
+            top: 0; 
+            z-index: 100; 
+            border-bottom: 1px solid #30363d; 
+        }
+        .nav button { 
+            background: #21262d; 
+            color: #e6edf3; 
+            border: 1px solid #30363d; 
+            padding: 0.5rem 1rem; 
+            border-radius: 6px; 
+            margin-right: 0.5rem; 
+            cursor: pointer; 
+        }
+        .nav button:hover { background: #30363d; }
+        .nav button.active { background: #1f6feb; color: white; }
+        .file-section { 
+            margin: 1rem; 
+            background: #0d1117; 
+            border: 1px solid #30363d; 
+            border-radius: 8px; 
+            overflow: hidden; 
+        }
+        .file-header { 
+            background: #21262d; 
+            padding: 1rem; 
+            color: #58a6ff; 
+            font-weight: bold; 
+        }
+        .code-block { 
+            background: #0d1117; 
+            color: #e6edf3; 
+            padding: 1.5rem; 
+            white-space: pre-wrap; 
+            font-size: 0.85em; 
+            overflow-x: auto; 
+        }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>NaborNet - Complete Code Analysis</h1>
+        <p>Community Safety Platform - Full Application Source</p>
+    </div>
+    
+    <div class="nav">
+        <button class="active" onclick="filterFiles('all')">All Files</button>
+        <button onclick="filterFiles('backend')">Backend</button>
+        <button onclick="filterFiles('frontend')">Frontend</button>
+        <button onclick="filterFiles('shared')">Shared</button>
+        <button onclick="filterFiles('config')">Configuration</button>
+    </div>
+    
+    <div id="file-contents">
+        <div class="file-section backend">
+            <div class="file-header">📘 server/index.ts - Main Server Entry Point</div>
+            <div class="code-block">
+import express, { type Request, Response, NextFunction } from "express";
+import session from "express-session";
+import ConnectPgSimple from "connect-pg-simple";
+import { pool } from "./db";
+import { registerRoutes } from "./routes";
+import { setupVite, serveStatic, log } from "./vite";
+
+const PgSession = ConnectPgSimple(session);
+
+const app = express();
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+
+// Security: Fail fast if SESSION_SECRET is missing in production
+if (process.env.NODE_ENV === "production" &amp;&amp; !process.env.SESSION_SECRET) {
+  throw new Error("SESSION_SECRET is required in production");
+}
+
+// Session configuration
+app.use(session({
+  store: new PgSession({
+    pool: pool,
+    tableName: 'session',
+    createTableIfMissing: true,
+  }),
+  secret: process.env.SESSION_SECRET || 'nabornet-session-secret-dev',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    sameSite: 'lax'
+  }
+}));
+
+app.use((req, res, next) =&gt; {
+  const start = Date.now();
+  const path = req.path;
+  let capturedJsonResponse: Record&lt;string, any&gt; | undefined = undefined;
+
+  const originalResJson = res.json;
+  res.json = function (bodyJson, ...args) {
+    capturedJsonResponse = bodyJson;
+    return originalResJson.apply(res, [bodyJson, ...args]);
+  };
+
+  res.on("finish", () =&gt; {
+    const duration = Date.now() - start;
+    if (path.startsWith("/api")) {
+      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
+      if (capturedJsonResponse) {
+        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
+      }
+
+      if (logLine.length &gt; 80) {
+        logLine = logLine.slice(0, 79) + "…";
+      }
+
+      log(logLine);
+    }
+  });
+
+  next();
+});
+
+(async () =&gt; {
+  const server = await registerRoutes(app);
+
+  app.use((err: any, _req: Request, res: Response, _next: NextFunction) =&gt; {
+    const status = err.status || err.statusCode || 500;
+    const message = err.message || "Internal Server Error";
+
+    res.status(status).json({ message });
+    // Security: Don't re-throw after responding to prevent process crashes
+    console.error('Error handled:', err);
+  });
+
+  // importantly only setup vite in development and after
+  // setting up all the other routes so the catch-all route
+  // doesn't interfere with the other routes
+  if (app.get("env") === "development") {
+    await setupVite(app, server);
+  } else {
+    serveStatic(app);
+  }
+
+  // ALWAYS serve the app on the port specified in the environment variable PORT
+  // Other ports are firewalled. Default to 5000 if not specified.
+  // this serves both the API and the client.
+  // It is the only port that is not firewalled.
+  const port = parseInt(process.env.PORT || '5000', 10);
+  server.listen({
+    port,
+    host: "0.0.0.0",
+    reusePort: true,
+  }, () =&gt; {
+    log(`serving on port ${port}`);
+  });
+})();
+            </div>
+        </div>
+
+        <div class="file-section backend">
+            <div class="file-header">📘 server/routes.ts - API Routes & Security</div>
+            <div class="code-block">
+import type { Express, Request, Response, NextFunction } from "express";
+import { createServer, type Server } from "http";
+import { storage } from "./storage";
+import { 
+  insertUserSchema, 
+  insertIncidentSchema, 
+  insertReportSchema,
+  insertFollowSchema,
+  signupSchema,
+  loginSchema,
+  anonJoinSchema
+} from "@shared/schema";
+import { 
+  createUser, 
+  createAnonymousUser, 
+  validateLogin 
+} from "./auth";
+import { getCitiesByCountry, getNeighbourhoodsByCity, getSupportedCountries } from "./locationService";
+import { Server as SocketIOServer } from "socket.io";
+import { incidentDB, validateIncidentData, checkRateLimit, type CreateIncidentData } from "./incidentDatabase";
+
+// Security: Text sanitization to prevent XSS
+function sanitizeText(s?: string): string {
+  if (typeof s !== "string") return s || "";
+  return s.replace(/&lt;[^&gt;]*&gt;?/gm, "").replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, 2000);
+}
+
+// Security: RBAC helpers
+const MODERATOR_TYPES = new Set(["police", "municipal", "security", "fire", "medical", "ngo"]);
+
+async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const uid = (req.session as any)?.userId || (req.headers["x-user-id"] as string);
+  if (!uid) return res.status(401).json({ error: "Authentication required" });
+  (req as any).authUserId = uid;
+  next();
+}
+
+async function requireModerator(req: Request, res: Response, next: NextFunction) {
+  const uid = (req.session as any)?.userId || (req.headers["x-user-id"] as string);
+  if (!uid) return res.status(401).json({ error: "Authentication required" });
+
+  try {
+    const user = await storage.getUser(uid);
+    if (!user) return res.status(401).json({ error: "User not found" });
+    
+    // Check if user is verified and has moderator privileges
+    if (!(user.isVerified &amp;&amp; user.verifiedType &amp;&amp; MODERATOR_TYPES.has(String(user.verifiedType)))) {
+      return res.status(403).json({ error: "Moderator privileges required" });
+    }
+    
+    (req as any).authUserId = uid;
+    next();
+  } catch (error) {
+    return res.status(500).json({ error: "Authorization check failed" });
+  }
+}
+
+export async function registerRoutes(app: Express): Promise&lt;Server&gt; {
+  // Authentication routes
+  app.post("/api/auth/signup", async (req, res) =&gt; {
+    try {
+      const userData = signupSchema.parse(req.body);
+      const user = await createUser(userData);
+      
+      // Store user in session
+      (req.session as any).userId = user.id;
+      
+      res.json({ 
+        ok: true, 
+        user: { 
+          id: user.id, 
+          username: user.username, 
+          roles: user.roles, 
+          country: user.country, 
+          city: user.city,
+          neighbourhood: user.neighbourhood
+        } 
+      });
+    } catch (error: any) {
+      console.error('Signup error:', error);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/auth/login", async (req, res) =&gt; {
+    try {
+      const { email, password } = loginSchema.parse(req.body);
+      const user = await validateLogin(email, password);
+      
+      if (!user) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+      
+      // Store user in session
+      (req.session as any).userId = user.id;
+      
+      res.json({ 
+        ok: true, 
+        user: { 
+          id: user.id, 
+          username: user.username, 
+          roles: user.roles, 
+          country: user.country, 
+          city: user.city,
+          neighbourhood: user.neighbourhood
+        } 
+      });
+    } catch (error: any) {
+      console.error('Login error:', error);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/auth/anon-join", async (req, res) =&gt; {
+    try {
+      const userData = anonJoinSchema.parse(req.body);
+      const user = await createAnonymousUser(userData);
+      
+      // Store user in session
+      (req.session as any).userId = user.id;
+      
+      res.json({ 
+        ok: true, 
+        user: { 
+          id: user.id, 
+          username: user.username, 
+          roles: user.roles, 
+          country: user.country, 
+          city: user.city,
+          neighbourhood: user.neighbourhood
+        } 
+      });
+    } catch (error: any) {
+      console.error('Anonymous join error:', error);
+      
+      // Handle specific database constraint errors
+      if (error.code === '23505') {
+        if (error.constraint === 'users_email_unique') {
+          return res.status(400).json({ error: 'An account with this email address already exists. Please try logging in instead.' });
+        }
+        if (error.constraint === 'users_username_unique') {
+          return res.status(400).json({ error: 'This username is already taken. Please choose a different one.' });
+        }
+      }
+      
+      res.status(400).json({ error: error.message || 'Unable to create account. Please try again.' });
+    }
+  });
+
+  app.post("/api/auth/logout", async (req, res) =&gt; {
+    req.session.destroy((err) =&gt; {
+      if (err) {
+        return res.status(500).json({ error: "Could not log out" });
+      }
+      res.clearCookie('connect.sid');
+      res.json({ ok: true });
+    });
+  });
+
+  app.get("/api/auth/me", async (req, res) =&gt; {
+    try {
+      const userId = (req.session as any).userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
+      
+      res.json({ 
+        user: { 
+          id: user.id, 
+          username: user.username, 
+          roles: user.roles, 
+          country: user.country, 
+          city: user.city,
+          neighbourhood: user.neighbourhood
+        } 
+      });
+    } catch (error: any) {
+      console.error('Auth check error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // User routes
+  app.post("/api/users", async (req, res) =&gt; {
+    try {
+      const userData = insertUserSchema.parse(req.body);
+      const user = await storage.createUser(userData);
+      res.json(user);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/users/:id", async (req, res) =&gt; {
+    try {
+      const user = await storage.getUser(req.params.id);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      res.json(user);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Update user location for geo-notifications
+  app.post("/api/users/:id/location", async (req, res) =&gt; {
+    try {
+      const { latitude, longitude } = req.body;
+      await storage.updateUserLocation(req.params.id, latitude, longitude);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Verify user (admin only)
+  // Security: Admin/moderator only - verify user accounts
+  app.post("/api/users/:id/verify", requireModerator, async (req, res) =&gt; {
+    try {
+      const { type, badge } = req.body;
+      const user = await storage.verifyUser(req.params.id, type, badge);
+      res.json(user);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Incident routes
+  // Security: Create incident with sanitization and rate limiting
+  app.post("/api/incidents", async (req, res) =&gt; {
+    try {
+      const incidentData = insertIncidentSchema.parse(req.body);
+
+      // Security: Sanitize text fields to prevent XSS
+      const sanitizedData = {
+        ...incidentData,
+        title: sanitizeText(incidentData.title),
+        description: sanitizeText(incidentData.description),
+      };
+
+      // Security: Rate limiting based on session user, header, or IP
+      const key = (req.session as any)?.userId || 
+                 (req.headers["x-user-id"] as string) || 
+                 `ip:${req.ip}`;
+
+      if (!checkRateLimit(key)) {
+        return res.status(429).json({ error: "Too many reports, please slow down" });
+      }
+
+      const userId = key.startsWith("ip:") ? "anonymous" : key;
+      const incident = await storage.createIncident({ ...sanitizedData, userId });
+      res.json(incident);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/incidents", async (req, res) =&gt; {
+    try {
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
+      const incidents = await storage.getIncidents(limit);
+      res.json(incidents);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Security: Stronger coordinate validation for nearby incidents
+  app.get("/api/incidents/nearby", async (req, res) =&gt; {
+    try {
+      const { latitude, longitude, radius = 1000 } = req.query;
+      
+      // Security: Robust numeric validation (prevents rejecting valid zeros)
+      const lat = Number(latitude);
+      const lng = Number(longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return res.status(400).json({ error: "Valid latitude and longitude coordinates required" });
+      }
+      
+      const rad = Number(radius);
+      const safeRadius = Number.isFinite(rad) &amp;&amp; rad &gt; 0 ? rad : 1000;
+      
+      const incidents = await storage.getIncidentsNearby(lat, lng, safeRadius);
+      res.json(incidents);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Moderation route
+  // Security: Moderator only - incident moderation
+  app.post("/api/incidents/:id/moderate", requireModerator, async (req, res) =&gt; {
+    try {
+      const moderatorId = (req as any).authUserId; // From middleware
+      const { reason } = req.body;
+      await storage.moderateIncident(req.params.id, moderatorId, reason);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Report incident route
+  // Security: Require authentication for incident reporting
+  app.post("/api/incidents/:id/report", requireAuth, async (req, res) =&gt; {
+    try {
+      const reportData = insertReportSchema.parse({
+        ...req.body,
+        incidentId: req.params.id
+      });
+      const reporterId = (req as any).authUserId; // From auth middleware
+      const report = await storage.reportIncident({ ...reportData, reporterId });
+      res.json(report);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Follow incident routes
+  // Security: Require authentication for following incidents  
+  app.post("/api/incidents/:id/follow", requireAuth, async (req, res) =&gt; {
+    try {
+      const userId = (req as any).authUserId; // From auth middleware
+      const follow = await storage.followIncident({ 
+        incidentId: req.params.id, 
+        userId 
+      });
+      res.json(follow);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/incidents/:id/follow", requireAuth, async (req, res) =&gt; {
+    try {
+      const userId = (req as any).authUserId; // From auth middleware
+      await storage.unfollowIncident(userId, req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Notifications routes
+  app.get("/api/notifications", async (req, res) =&gt; {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      const notifications = await storage.getUserNotifications(userId);
+      res.json(notifications);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/notifications/:id/read", async (req, res) =&gt; {
+    try {
+      await storage.markNotificationRead(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Location API routes (with both singular and plural endpoints for compatibility)
+  app.get("/api/location/countries", (req, res) =&gt; {
+    try {
+      const countries = getSupportedCountries();
+      res.json({ countries });
+    } catch (error: any) {
+      console.error('Error fetching countries:', error);
+      res.status(500).json({ error: "Failed to fetch countries" });
+    }
+  });
+
+  app.get("/api/locations/countries", (req, res) =&gt; {
+    try {
+      const countries = getSupportedCountries();
+      res.json({ countries });
+    } catch (error: any) {
+      console.error('Error fetching countries:', error);
+      res.status(500).json({ error: "Failed to fetch countries" });
+    }
+  });
+
+  app.get("/api/location/cities/:country", (req, res) =&gt; {
+    try {
+      const { country } = req.params;
+      const cities = getCitiesByCountry(country);
+      res.json({ cities: cities.map(city =&gt; ({ name: city.name, population: city.population })) });
+    } catch (error: any) {
+      console.error('Error fetching cities:', error);
+      res.status(500).json({ error: "Failed to fetch cities" });
+    }
+  });
+
+  app.get("/api/locations/cities/:country", (req, res) =&gt; {
+    try {
+      const { country } = req.params;
+      const cities = getCitiesByCountry(country);
+      res.json({ cities: cities.map(city =&gt; ({ name: city.name, population: city.population })) });
+    } catch (error: any) {
+      console.error('Error fetching cities:', error);
+      res.status(500).json({ error: "Failed to fetch cities" });
+    }
+  });
+
+  app.get("/api/location/neighbourhoods/:country/:city", (req, res) =&gt; {
+    try {
+      const { country, city } = req.params;
+      const neighbourhoods = getNeighbourhoodsByCity(city, country);
+      res.json({ neighbourhoods: neighbourhoods.map(n =&gt; ({ name: n.name, population: n.population })) });
+    } catch (error: any) {
+      console.error('Error fetching neighbourhoods:', error);
+      res.status(500).json({ error: "Failed to fetch neighbourhoods" });
+    }
+  });
+
+  app.get("/api/locations/neighbourhoods/:country/:city", (req, res) =&gt; {
+    try {
+      const { country, city } = req.params;
+      const neighbourhoods = getNeighbourhoodsByCity(city, country);
+      res.json({ neighbourhoods: neighbourhoods.map(n =&gt; ({ name: n.name, population: n.population })) });
+    } catch (error: any) {
+      console.error('Error fetching neighbourhoods:', error);
+      res.status(500).json({ error: "Failed to fetch neighbourhoods" });
+    }
+  });
+
+  // Real-time incident endpoints
+  app.get("/api/incidents/live", async (req, res) =&gt; {
+    try {
+      const since = req.query.since ? parseInt(req.query.since as string) : (Date.now() - 24 * 60 * 60 * 1000);
+      const incidents = incidentDB.getIncidentsSince(since);
+      res.json(incidents);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Create HTTP server
+  const httpServer = createServer(app);
+  
+  // Setup Socket.IO
+  const io = new SocketIOServer(httpServer, {
+    path: '/socket.io',
+    cors: {
+      origin: "*",
+      methods: ["GET", "POST"]
+    }
+  });
+
+  // Socket.IO incident handling
+  io.on('connection', (socket) =&gt; {
+    console.log('Client connected:', socket.id);
+
+    socket.on('incident:new', (data) =&gt; {
+      try {
+        // Validate incident data
+        const validation = validateIncidentData(data);
+        if (!validation.valid) {
+          socket.emit('incident:error', { error: validation.error });
+          return;
+        }
+
+        // Check rate limiting
+        const reporterId = data.reporter_id || socket.handshake.address;
+        if (!checkRateLimit(reporterId)) {
+          socket.emit('incident:error', { error: 'Rate limit exceeded. Please wait before reporting another incident.' });
+          return;
+        }
+
+        // Sanitize description
+        const sanitizedDescription = data.description?.replace(/&lt;[^&gt;]*&gt;/g, '') || '';
+
+        // Create incident in database
+        const incident = incidentDB.createIncident({
+          type: data.type,
+          description: sanitizedDescription,
+          lat: data.lat,
+          lng: data.lng,
+          accuracy_m: data.accuracy_m,
+          reporter_id: data.reporter_id || null
+        });
+
+        // Broadcast to all clients
+        io.emit('incident:broadcast', incident);
+        
+        // Confirm to sender
+        socket.emit('incident:created', incident);
+        
+        console.log('New incident created:', incident.id);
+      } catch (error: any) {
+        console.error('Error creating incident:', error);
+        socket.emit('incident:error', { error: 'Failed to create incident' });
+      }
+    });
+
+    socket.on('disconnect', () =&gt; {
+      console.log('Client disconnected:', socket.id);
+    });
+  });
+
+  return httpServer;
+}
+            </div>
+        </div>
+
+        <div class="file-section backend">
+            <div class="file-header">📘 server/storage.ts - Database Operations</div>
+            <div class="code-block">
+import { 
+  type User, 
+  type InsertUser, 
+  type Incident, 
+  type InsertIncident, 
+  type Report, 
+  type InsertReport,
+  type Follow,
+  type InsertFollow,
+  type Notification,
+  users,
+  incidents,
+  reports,
+  follows,
+  notifications
+} from "@shared/schema";
+import { db } from "./db";
+import { eq, and, sql, desc, asc } from "drizzle-orm";
+
+export interface IStorage {
+  // User operations
+  getUser(id: string): Promise&lt;User | undefined&gt;;
+  getUserByUsername(username: string): Promise&lt;User | undefined&gt;;
+  createUser(user: InsertUser): Promise&lt;User&gt;;
+  updateUserLocation(userId: string, latitude: number, longitude: number): Promise&lt;void&gt;;
+  verifyUser(userId: string, type: string, badge: string): Promise&lt;User&gt;;
+
+  // Incident operations
+  createIncident(incident: InsertIncident &amp; { userId: string }): Promise&lt;Incident&gt;;
+  getIncidents(limit?: number): Promise&lt;Incident[]&gt;;
+  getIncident(id: string): Promise&lt;Incident | undefined&gt;;
+  getIncidentsNearby(latitude: number, longitude: number, radiusMeters: number): Promise&lt;Incident[]&gt;;
+  moderateIncident(incidentId: string, moderatorId: string, reason?: string): Promise&lt;void&gt;;
+
+  // Report operations
+  reportIncident(report: InsertReport &amp; { reporterId: string }): Promise&lt;Report&gt;;
+  getReportsByIncident(incidentId: string): Promise&lt;Report[]&gt;;
+
+  // Follow operations
+  followIncident(follow: InsertFollow &amp; { userId: string }): Promise&lt;Follow&gt;;
+  unfollowIncident(userId: string, incidentId: string): Promise&lt;void&gt;;
+  getFollowedIncidents(userId: string): Promise&lt;string[]&gt;;
+
+  // Notification operations
+  createNotification(notification: Omit&lt;Notification, 'id' | 'createdAt'&gt;): Promise&lt;Notification&gt;;
+  getUserNotifications(userId: string): Promise&lt;Notification[]&gt;;
+  markNotificationRead(notificationId: string): Promise&lt;void&gt;;
+}
+
+export class DatabaseStorage implements IStorage {
+  // User operations
+  async getUser(id: string): Promise&lt;User | undefined&gt; {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || undefined;
+  }
+
+  async getUserByUsername(username: string): Promise&lt;User | undefined&gt; {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || undefined;
+  }
+
+  async createUser(insertUser: InsertUser): Promise&lt;User&gt; {
+    const [user] = await db.insert(users).values(insertUser).returning();
+    return user;
+  }
+
+  async updateUserLocation(userId: string, latitude: number, longitude: number): Promise&lt;void&gt; {
+    await db.update(users)
+      .set({ 
+        lastLatitude: latitude.toString(), 
+        lastLongitude: longitude.toString() 
+      })
+      .where(eq(users.id, userId));
+  }
+
+  async verifyUser(userId: string, type: string, badge: string): Promise&lt;User&gt; {
+    const [user] = await db.update(users)
+      .set({ 
+        isVerified: true, 
+        verifiedType: type as any, 
+        verifiedBadge: badge 
+      })
+      .where(eq(users.id, userId))
+      .returning();
+    return user;
+  }
+
+  // Incident operations
+  async createIncident(incident: InsertIncident &amp; { userId: string }): Promise&lt;Incident&gt; {
+    const [newIncident] = await db.insert(incidents).values(incident).returning();
+    
+    // Notify nearby users if not anonymous
+    if (!incident.isAnonymous) {
+      await this.notifyNearbyUsers(newIncident);
+    }
+    
+    return newIncident;
+  }
+
+  async getIncidents(limit = 50): Promise&lt;Incident[]&gt; {
+    return await db.select()
+      .from(incidents)
+      .where(eq(incidents.isModerated, false))
+      .orderBy(desc(incidents.createdAt))
+      .limit(limit);
+  }
+
+  async getIncident(id: string): Promise&lt;Incident | undefined&gt; {
+    const [incident] = await db.select().from(incidents).where(eq(incidents.id, id));
+    return incident || undefined;
+  }
+
+  async getIncidentsNearby(latitude: number, longitude: number, radiusMeters: number): Promise&lt;Incident[]&gt; {
+    // Using Haversine formula for distance calculation
+    const radiusKm = radiusMeters / 1000;
+    return await db.select()
+      .from(incidents)
+      .where(
+        and(
+          eq(incidents.isModerated, false),
+          sql`(
+            6371 * acos(
+              cos(radians(${latitude})) * 
+              cos(radians(${incidents.latitude}::decimal)) * 
+              cos(radians(${incidents.longitude}::decimal) - radians(${longitude})) + 
+              sin(radians(${latitude})) * 
+              sin(radians(${incidents.latitude}::decimal))
+            )
+          ) &lt;= ${radiusKm}`
+        )
+      )
+      .orderBy(desc(incidents.createdAt));
+  }
+
+  async moderateIncident(incidentId: string, moderatorId: string, reason?: string): Promise&lt;void&gt; {
+    await db.update(incidents)
+      .set({ 
+        isModerated: true, 
+        moderatedBy: moderatorId, 
+        moderationReason: reason 
+      })
+      .where(eq(incidents.id, incidentId));
+  }
+
+  // Report operations
+  async reportIncident(report: InsertReport &amp; { reporterId: string }): Promise&lt;Report&gt; {
+    const [newReport] = await db.insert(reports).values(report).returning();
+    
+    // Increment report count on incident
+    await db.update(incidents)
+      .set({ reportCount: sql`report_count + 1` })
+      .where(eq(incidents.id, report.incidentId!));
+    
+    return newReport;
+  }
+
+  async getReportsByIncident(incidentId: string): Promise&lt;Report[]&gt; {
+    return await db.select()
+      .from(reports)
+      .where(eq(reports.incidentId, incidentId))
+      .orderBy(desc(reports.createdAt));
+  }
+
+  // Follow operations
+  async followIncident(follow: InsertFollow &amp; { userId: string }): Promise&lt;Follow&gt; {
+    const [newFollow] = await db.insert(follows).values(follow).returning();
+    return newFollow;
+  }
+
+  async unfollowIncident(userId: string, incidentId: string): Promise&lt;void&gt; {
+    await db.delete(follows)
+      .where(and(
+        eq(follows.userId, userId),
+        eq(follows.incidentId, incidentId)
+      ));
+  }
+
+  async getFollowedIncidents(userId: string): Promise&lt;string[]&gt; {
+    const followedIncidents = await db.select({ incidentId: follows.incidentId })
+      .from(follows)
+      .where(eq(follows.userId, userId));
+    
+    return followedIncidents.map(f =&gt; f.incidentId).filter(id =&gt; id !== null);
+  }
+
+  // Notification operations
+  async createNotification(notification: Omit&lt;Notification, 'id' | 'createdAt'&gt;): Promise&lt;Notification&gt; {
+    const [newNotification] = await db.insert(notifications).values(notification).returning();
+    return newNotification;
+  }
+
+  async getUserNotifications(userId: string): Promise&lt;Notification[]&gt; {
+    return await db.select()
+      .from(notifications)
+      .where(eq(notifications.userId, userId))
+      .orderBy(desc(notifications.createdAt));
+  }
+
+  async markNotificationRead(notificationId: string): Promise&lt;void&gt; {
+    await db.update(notifications)
+      .set({ isRead: true })
+      .where(eq(notifications.id, notificationId));
+  }
+
+  // Helper method to notify nearby users
+  private async notifyNearbyUsers(incident: Incident): Promise&lt;void&gt; {
+    // Get users within notification radius
+    const nearbyUsers = await db.select()
+      .from(users)
+      .where(
+        and(
+          sql`${users.lastLatitude} IS NOT NULL`,
+          sql`${users.lastLongitude} IS NOT NULL`,
+          sql`(
+            6371000 * acos(
+              cos(radians(${incident.latitude}::decimal)) * 
+              cos(radians(${users.lastLatitude}::decimal)) * 
+              cos(radians(${users.lastLongitude}::decimal) - radians(${incident.longitude}::decimal)) + 
+              sin(radians(${incident.latitude}::decimal)) * 
+              sin(radians(${users.lastLatitude}::decimal))
+            )
+          ) &lt;= ${users.notificationRadius}`
+        )
+      );
+
+    // Create notifications for nearby users
+    for (const user of nearbyUsers) {
+      if (user.id !== incident.userId) { // Don't notify the reporter
+        await this.createNotification({
+          userId: user.id,
+          incidentId: incident.id,
+          type: 'incident_nearby',
+          title: `${incident.severity.toUpperCase()}: ${incident.title}`,
+          message: `New incident reported nearby: ${incident.description}`,
+          isRead: false,
+        });
+      }
+    }
+  }
+}
+
+export const storage = new DatabaseStorage();
+            </div>
+        </div>
+
+        <div class="file-section shared">
+            <div class="file-header">📘 shared/schema.ts - Database Schema</div>
+            <div class="code-block">
+import { sql } from "drizzle-orm";
+import { pgTable, text, varchar, boolean, timestamp, decimal, integer, jsonb, uuid } from "drizzle-orm/pg-core";
+import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod";
+
+// Users table with roles, location, and optional email/password
+export const users = pgTable("users", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").unique(), // nullable for anonymous users
+  passwordHash: text("password_hash"), // nullable for anonymous users
+  username: text("username").notNull(),
+  roles: text("roles").array().notNull().default(sql`ARRAY['resident']::text[]`),
+  country: text("country").notNull(),
+  city: text("city").notNull(),
+  neighbourhood: text("neighbourhood"),
+  isVerified: boolean("is_verified").default(false),
+  verifiedType: varchar("verified_type", { enum: ["police", "municipal", "security", "fire", "medical", "ngo"] }),
+  verifiedBadge: text("verified_badge"), // Badge text to display
+  lastLatitude: decimal("last_latitude", { precision: 10, scale: 8 }),
+  lastLongitude: decimal("last_longitude", { precision: 11, scale: 8 }),
+  notificationRadius: integer("notification_radius").default(1000), // meters
+  fcmToken: text("fcm_token"), // For push notifications
+  createdAt: timestamp("created_at").default(sql`now()`),
+  updatedAt: timestamp("updated_at").default(sql`now()`),
+});
+
+// Incidents table with moderation support
+export const incidents = pgTable("incidents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() =&gt; users.id),
+  type: text("type").notNull(),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  latitude: decimal("latitude", { precision: 10, scale: 8 }).notNull(),
+  longitude: decimal("longitude", { precision: 11, scale: 8 }).notNull(),
+  severity: varchar("severity", { enum: ["low", "medium", "high", "critical"] }).notNull(),
+  category: text("category").notNull(),
+  isAnonymous: boolean("is_anonymous").default(false),
+  isModerated: boolean("is_moderated").default(false),
+  moderatedBy: varchar("moderated_by").references(() =&gt; users.id),
+  moderationReason: text("moderation_reason"),
+  reportCount: integer("report_count").default(0),
+  photos: text("photos").array().default([]),
+  metadata: jsonb("metadata"), // Additional incident data
+  createdAt: timestamp("created_at").default(sql`now()`),
+});
+
+// Reports table for moderation
+export const reports = pgTable("reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  reporterId: varchar("reporter_id").references(() =&gt; users.id),
+  incidentId: varchar("incident_id").references(() =&gt; incidents.id),
+  reason: varchar("reason", { enum: ["spam", "inappropriate", "fake", "harassment", "other"] }).notNull(),
+  description: text("description"),
+  createdAt: timestamp("created_at").default(sql`now()`),
+});
+
+// Following table for incident subscriptions
+export const follows = pgTable("follows", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() =&gt; users.id),
+  incidentId: varchar("incident_id").references(() =&gt; incidents.id),
+  createdAt: timestamp("created_at").default(sql`now()`),
+});
+
+// Notifications table
+export const notifications = pgTable("notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() =&gt; users.id),
+  incidentId: varchar("incident_id").references(() =&gt; incidents.id),
+  type: varchar("type", { enum: ["incident_nearby", "incident_update", "follow_update"] }).notNull(),
+  title: text("title").notNull(),
+  message: text("message").notNull(),
+  isRead: boolean("is_read").default(false),
+  createdAt: timestamp("created_at").default(sql`now()`),
+});
+
+// Schema definitions
+export const insertUserSchema = createInsertSchema(users).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  password: z.string().min(6).optional(), // For validation before hashing
+});
+
+export const signupSchema = insertUserSchema.extend({
+  role: z.enum(["private", "security_org"]),
+}).pick({
+  email: true,
+  password: true,
+  username: true,
+  role: true,
+  country: true,
+  city: true,
+  neighbourhood: true,
+});
+
+export const loginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(1),
+});
+
+export const anonJoinSchema = z.object({
+  username: z.string().min(1).max(100), // Allow longer names and remove regex restriction
+  email: z.string().email().optional(),
+  role: z.enum(["private", "security_org"]),
+  country: z.string().min(1),
+  city: z.string().min(1),
+  neighbourhood: z.string().min(1).optional(),
+});
+
+export type User = typeof users.$inferSelect;
+export type InsertUser = z.infer&lt;typeof insertUserSchema&gt;;
+export type SignupData = z.infer&lt;typeof signupSchema&gt;;
+export type LoginData = z.infer&lt;typeof loginSchema&gt;;
+export type AnonJoinData = z.infer&lt;typeof anonJoinSchema&gt;;
+
+// New schema for updated single form flow
+export const newJoinSchema = z.object({
+  name: z.string().min(1, "Name is required").max(100, "Name too long"),
+  email: z.string().email("Valid email is required"),
+  role: z.enum(["private_citizen", "security_organisation", "government_service"]),
+  country: z.string().min(1, "Country is required"),
+  city: z.string().min(1, "City is required"),
+  neighbourhood: z.string().min(1, "Neighbourhood is required")
+});
+
+export type NewJoinData = z.infer&lt;typeof newJoinSchema&gt;;
+
+// Keep existing schema definitions
+export const insertIncidentSchema = createInsertSchema(incidents).pick({
+  type: true,
+  title: true,
+  description: true,
+  latitude: true,
+  longitude: true,
+  severity: true,
+  category: true,
+  isAnonymous: true,
+  photos: true,
+});
+
+export const insertReportSchema = createInsertSchema(reports).pick({
+  incidentId: true,
+  reason: true,
+  description: true,
+});
+
+export const insertFollowSchema = createInsertSchema(follows).pick({
+  incidentId: true,
+});
+
+// Additional types
+export type InsertIncident = z.infer&lt;typeof insertIncidentSchema&gt;;
+export type Incident = typeof incidents.$inferSelect;
+export type InsertReport = z.infer&lt;typeof insertReportSchema&gt;;
+export type Report = typeof reports.$inferSelect;
+export type InsertFollow = z.infer&lt;typeof insertFollowSchema&gt;;
+export type Follow = typeof follows.$inferSelect;
+export type Notification = typeof notifications.$inferSelect;
+            </div>
+        </div>
+
+        <div class="file-section frontend">
+            <div class="file-header">⚛️ client/src/App.tsx - Main React Application</div>
+            <div class="code-block">
+import { Switch, Route, useLocation } from "wouter";
+import { useEffect } from "react";
+import { queryClient } from "./lib/queryClient";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { Toaster } from "@/components/ui/toaster";
+
+import { ThemeProvider } from "@/components/ThemeProvider";
+import { useAuthStore } from "./store/auth";
+import { useUserStore } from "./store/user";
+import { getCurrentUser } from "./lib/auth";
+import Layout from "./components/Layout";
+import ProtectedRoute from "./components/ProtectedRoute";
+import DevicePreview from "./components/DevicePreview";
+import ResponsiveHelper from "./components/ResponsiveHelper";
+
+// Pages
+import Login from "./pages/Login";
+import Signup from "./pages/Signup";
+import NotFound from "@/pages/not-found";
+
+// Community Pages
+import CommunityDashboard from "./pages/community/Dashboard";
+import CommunityFeed from "./pages/community/Feed";
+import CommunityMap from "./pages/community/Map";
+import ReportIncident from "./pages/community/ReportIncident";
+import ReportFull from "./pages/community/ReportFull";
+import Welcome from "./pages/Welcome";
+
+function AuthHandler() {
+  const { setUser, setLoading } = useAuthStore();
+  const { setCurrentRole } = useUserStore();
+
+  useEffect(() =&gt; {
+    const checkAuth = async () =&gt; {
+      try {
+        const user = await getCurrentUser();
+        setUser(user);
+        
+        // Set default role if user has roles
+        if (user &amp;&amp; user.roles &amp;&amp; user.roles.length &gt; 0) {
+          setCurrentRole(user.roles[0] as any);
+        } else {
+          setCurrentRole('resident' as any);
+        }
+      } catch (error) {
+        console.error('Error fetching user data:', error);
+        setUser(null);
+        setCurrentRole('resident' as any);
+      }
+      
+      setLoading(false);
+    };
+
+    checkAuth();
+  }, [setUser, setLoading, setCurrentRole]);
+
+  return null;
+}
+
+function Router() {
+  const [location] = useLocation();
+  const { user, loading } = useAuthStore();
+  const { currentRole } = useUserStore();
+
+  // Show loading while auth is being determined - but with shorter timeout
+  if (loading) {
+    return (
+      &lt;div className="min-h-screen flex items-center justify-center bg-background dark:bg-background"&gt;
+        &lt;div className="flex flex-col items-center space-y-4"&gt;
+          &lt;div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"&gt;&lt;/div&gt;
+          &lt;p className="text-muted-foreground"&gt;Loading NaborNet...&lt;/p&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    );
+  }
+
+  // Show auth pages if user is not logged in
+  if (!user) {
+    return (
+      &lt;Switch&gt;
+        &lt;Route path="/login" component={Login} /&gt;
+        &lt;Route path="/signup" component={Signup} /&gt;
+        &lt;Route path="/" component={Welcome} /&gt;
+        &lt;Route component={Welcome} /&gt;
+      &lt;/Switch&gt;
+    );
+  }
+  
+  // User is logged in - show main app
+  return (
+    &lt;Switch&gt;
+      {/* Public Routes */}
+      &lt;Route path="/login" component={Login} /&gt;
+      
+      {/* Community Routes */}
+      &lt;Route path="/" component={CommunityDashboard} /&gt;
+      &lt;Route path="/community" component={CommunityDashboard} /&gt;
+      &lt;Route path="/community/dashboard" component={CommunityDashboard} /&gt;
+      &lt;Route path="/community/feed" component={CommunityFeed} /&gt;
+      &lt;Route path="/community/map" component={CommunityMap} /&gt;
+      &lt;Route path="/community/report" component={ReportIncident} /&gt;
+      &lt;Route path="/community/report-full" component={ReportFull} /&gt;
+
+
+
+
+
+      {/* Fallback to 404 */}
+      &lt;Route component={NotFound} /&gt;
+    &lt;/Switch&gt;
+  );
+}
+
+function App() {
+  return (
+    &lt;QueryClientProvider client={queryClient}&gt;
+      &lt;ThemeProvider defaultTheme="system" storageKey="nabornet-theme"&gt;
+        &lt;DevicePreview&gt;
+          &lt;AuthHandler /&gt;
+          &lt;Toaster /&gt;
+          &lt;Router /&gt;
+          &lt;ResponsiveHelper /&gt;
+        &lt;/DevicePreview&gt;
+      &lt;/ThemeProvider&gt;
+    &lt;/QueryClientProvider&gt;
+  );
+}
+
+export default App;
+            </div>
+        </div>
+
+        <div class="file-section frontend">
+            <div class="file-header">⚛️ client/src/components/MapComponent.tsx - Interactive Map</div>
+            <div class="code-block">
+import { useEffect, useRef } from 'react';
+
+interface MapMarker {
+  id: string;
+  type: 'crime' | 'safety_alert' | 'suspicious' | 'emergency' | 'guard' | 'incident';
+  position: { lat: number; lng: number };
+  title: string;
+  data?: any;
+}
+
+interface MapComponentProps {
+  markers: MapMarker[];
+  height?: string;
+  onMarkerClick?: (marker: MapMarker) =&gt; void;
+  center?: { lat: number; lng: number };
+  zoom?: number;
+}
+
+export default function MapComponent({ 
+  markers, 
+  height = "400px", 
+  onMarkerClick,
+  center = { lat: 37.7749, lng: -122.4194 }, // San Francisco default
+  zoom = 13 
+}: MapComponentProps) {
+  const mapRef = useRef&lt;HTMLDivElement&gt;(null);
+
+  useEffect(() =&gt; {
+    // For now, show a placeholder map
+    // In a real implementation, this would integrate with Google Maps, MapLibre, or similar
+    if (mapRef.current) {
+      // Clear existing content
+      mapRef.current.innerHTML = '';
+      
+      // Create main container
+      const container = document.createElement('div');
+      container.style.cssText = `
+        width: 100%; 
+        height: ${height}; 
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-family: system-ui;
+        position: relative;
+        overflow: hidden;
+      `;
+      
+      // Create header section
+      const headerDiv = document.createElement('div');
+      headerDiv.style.cssText = 'text-align: center; z-index: 2;';
+      
+      const title = document.createElement('h3');
+      title.style.cssText = 'margin: 0; font-size: 24px; font-weight: 600;';
+      title.textContent = 'Interactive Community Map';
+      
+      const subtitle = document.createElement('p');
+      subtitle.style.cssText = 'margin: 8px 0 0 0; opacity: 0.9;';
+      subtitle.textContent = `Showing ${markers.length} incidents in your neighborhood`;
+      
+      headerDiv.appendChild(title);
+      headerDiv.appendChild(subtitle);
+      
+      // Create grid background
+      const gridBackground = document.createElement('div');
+      gridBackground.style.cssText = `
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-image: 
+          linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px);
+        background-size: 50px 50px;
+        opacity: 0.3;
+      `;
+      
+      // Create markers
+      markers.forEach((marker, index) =&gt; {
+        const x = 20 + (index * 15) % 60;
+        const y = 20 + Math.floor(index / 4) * 15;
+        const color = getMarkerColor(marker.type);
+        
+        const markerElement = document.createElement('div');
+        markerElement.setAttribute('data-marker-id', marker.id);
+        markerElement.style.cssText = `
+          position: absolute;
+          left: ${x}%;
+          top: ${y}%;
+          width: 20px;
+          height: 20px;
+          background: ${color};
+          border: 2px solid white;
+          border-radius: 50%;
+          cursor: pointer;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+          z-index: 10;
+          transition: transform 0.2s;
+        `;
+        
+        // Safely set title using textContent (no XSS risk)
+        markerElement.title = marker.title;
+        
+        // Add hover effects
+        markerElement.addEventListener('mouseenter', () =&gt; {
+          markerElement.style.transform = 'scale(1.2)';
+        });
+        markerElement.addEventListener('mouseleave', () =&gt; {
+          markerElement.style.transform = 'scale(1)';
+        });
+        
+        // Add click listener
+        markerElement.addEventListener('click', () =&gt; {
+          if (onMarkerClick) {
+            onMarkerClick(marker);
+          }
+        });
+        
+        container.appendChild(markerElement);
+      });
+      
+      // Assemble the map
+      container.appendChild(headerDiv);
+      container.appendChild(gridBackground);
+      mapRef.current.appendChild(container);
+    }
+  }, [markers, height, onMarkerClick]);
+
+  return &lt;div ref={mapRef} data-testid="map-component" style={{ height }} /&gt;;
+}
+
+function getMarkerColor(type: string): string {
+  switch (type) {
+    case 'crime': return '#DC2626';
+    case 'safety_alert': return '#2563EB';
+    case 'suspicious': return '#7C3AED';
+    case 'emergency': return '#EF4444';
+    default: return '#6B7280';
+  }
+}            </div>
+        </div>
+
+        <div class="file-section frontend">
+            <div class="file-header">⚛️ client/src/pages/community/Dashboard.tsx - Community Dashboard</div>
+            <div class="code-block">
+import { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
+import { Button } from '../../components/ui/button';
+import { Badge } from '../../components/ui/badge';
+import Header from '../../components/Header';
+import { Link } from 'wouter';
+import { 
+  Users, 
+  AlertTriangle, 
+  MapPin, 
+  TrendingUp,
+  Clock,
+  Shield,
+  Eye,
+  MessageSquare,
+  Camera,
+  Bell,
+  PlusCircle
+} from 'lucide-react';
+
+interface NeighborhoodStats {
+  totalMembers: number;
+  activeThisWeek: number;
+  incidentReports: number;
+  safetyScore: number;
+  recentActivity: Array&lt;{
+    id: string;
+    type: 'post' | 'report' | 'alert';
+    title: string;
+    author: string;
+    timeAgo: string;
+    priority?: 'low' | 'medium' | 'high';
+  }&gt;;
+}
+
+export default function CommunityDashboard() {
+  const [stats, setStats] = useState&lt;NeighborhoodStats | null&gt;(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() =&gt; {
+    // Mock neighborhood data
+    const mockStats: NeighborhoodStats = {
+      totalMembers: 1247,
+      activeThisWeek: 89,
+      incidentReports: 3,
+      safetyScore: 94,
+      recentActivity: [
+        {
+          id: '1',
+          type: 'report',
+          title: 'Suspicious Activity Near Elementary School',
+          author: 'Sarah Chen',
+          timeAgo: '2 hours ago',
+          priority: 'high'
+        },
+        {
+          id: '2',
+          type: 'post',
+          title: 'Lost Dog - Golden Retriever',
+          author: 'Mike Rodriguez',
+          timeAgo: '4 hours ago',
+          priority: 'medium'
+        },
+        {
+          id: '3',
+          type: 'alert',
+          title: 'Neighborhood Watch Meeting Saturday',
+          author: 'Community Moderator',
+          timeAgo: '1 day ago',
+          priority: 'low'
+        },
+        {
+          id: '4',
+          type: 'report',
+          title: 'Package Theft on Elm Street',
+          author: 'Anonymous',
+          timeAgo: '2 days ago',
+          priority: 'medium'
+        },
+        {
+          id: '5',
+          type: 'post',
+          title: 'Recommendation: Local Contractor',
+          author: 'Lisa Park',
+          timeAgo: '3 days ago',
+          priority: 'low'
+        }
+      ]
+    };
+    
+    setTimeout(() =&gt; {
+      setStats(mockStats);
+      setLoading(false);
+    }, 1000);
+  }, []);
+
+  const getActivityIcon = (type: string) =&gt; {
+    switch (type) {
+      case 'report': return &lt;AlertTriangle className="w-4 h-4 text-blue-700" /&gt;;
+      case 'alert': return &lt;Bell className="w-4 h-4 text-cyan-600" /&gt;;
+      default: return &lt;MessageSquare className="w-4 h-4 text-blue-600" /&gt;;
+    }
+  };
+
+  const getPriorityColor = (priority?: string) =&gt; {
+    switch (priority) {
+      case 'high': return 'bg-red-100 text-red-800';
+      case 'medium': return 'bg-orange-100 text-orange-800';
+      case 'low': return 'bg-green-100 text-green-800';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  if (loading) {
+    return (
+      &lt;div className="min-h-screen flex items-center justify-center bg-background dark:bg-background"&gt;
+        &lt;div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary"&gt;&lt;/div&gt;
+      &lt;/div&gt;
+    );
+  }
+
+  return (
+    &lt;div className="min-h-screen bg-background dark:bg-background"&gt;
+      &lt;Header /&gt;
+      
+      &lt;div className="max-w-6xl mx-auto p-4"&gt;
+        {/* Quick Stats */}
+        &lt;div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6"&gt;
+          &lt;div className="bg-white rounded-md border border-gray-200 p-2 text-center shadow-sm 
+                          transition-all duration-300 ease-in-out transform
+                          hover:p-4 hover:scale-105 hover:shadow-lg hover:border-cyan-300
+                          group cursor-pointer"&gt;
+            &lt;Users className="w-4 h-4 mx-auto mb-1 text-cyan-600 transition-all duration-300 group-hover:w-6 group-hover:h-6 group-hover:mb-2" /&gt;
+            &lt;div className="text-base font-semibold text-cyan-600 transition-all duration-300 group-hover:text-lg" data-testid="total-members"&gt;
+              {stats?.totalMembers.toLocaleString()}
+            &lt;/div&gt;
+            &lt;div className="text-xs text-gray-600 transition-all duration-300 group-hover:text-sm opacity-80 group-hover:opacity-100"&gt;Community Members&lt;/div&gt;
+          &lt;/div&gt;
+          
+          &lt;div className="bg-white rounded-md border border-gray-200 p-2 text-center shadow-sm 
+                          transition-all duration-300 ease-in-out transform
+                          hover:p-4 hover:scale-105 hover:shadow-lg hover:border-blue-300
+                          group cursor-pointer"&gt;
+            &lt;TrendingUp className="w-4 h-4 mx-auto mb-1 text-blue-600 transition-all duration-300 group-hover:w-6 group-hover:h-6 group-hover:mb-2" /&gt;
+            &lt;div className="text-base font-semibold text-blue-600 transition-all duration-300 group-hover:text-lg" data-testid="active-members"&gt;
+              {stats?.activeThisWeek}
+            &lt;/div&gt;
+            &lt;div className="text-xs text-gray-600 transition-all duration-300 group-hover:text-sm opacity-80 group-hover:opacity-100"&gt;Active This Week&lt;/div&gt;
+          &lt;/div&gt;
+          
+          &lt;div className="bg-white rounded-md border border-gray-200 p-2 text-center shadow-sm 
+                          transition-all duration-300 ease-in-out transform
+                          hover:p-4 hover:scale-105 hover:shadow-lg hover:border-orange-300
+                          group cursor-pointer"&gt;
+            &lt;AlertTriangle className="w-4 h-4 mx-auto mb-1 text-blue-700 transition-all duration-300 group-hover:w-6 group-hover:h-6 group-hover:mb-2" /&gt;
+            &lt;div className="text-base font-semibold text-blue-700 transition-all duration-300 group-hover:text-lg" data-testid="incident-reports"&gt;
+              {stats?.incidentReports}
+            &lt;/div&gt;
+            &lt;div className="text-xs text-gray-600 transition-all duration-300 group-hover:text-sm opacity-80 group-hover:opacity-100"&gt;Open Reports&lt;/div&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        {/* Quick Actions */}
+        &lt;div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"&gt;
+          &lt;Link href="/community/report"&gt;
+            &lt;Card className="transition-all duration-300 ease-in-out transform hover:scale-105 hover:shadow-xl 
+                           cursor-pointer group border-2 hover:border-cyan-300"&gt;
+              &lt;CardContent className="p-3 text-center transition-all duration-300 group-hover:p-6"&gt;
+                &lt;Camera className="w-8 h-8 mx-auto mb-2 text-cyan-600 transition-all duration-300 
+                                 group-hover:w-12 group-hover:h-12 group-hover:mb-3" /&gt;
+                &lt;h3 className="font-semibold mb-1 text-sm transition-all duration-300 
+                             group-hover:text-base group-hover:mb-2"&gt;Report Incident&lt;/h3&gt;
+                &lt;p className="text-xs text-gray-600 opacity-0 max-h-0 overflow-hidden transition-all duration-300 
+                             group-hover:opacity-100 group-hover:max-h-20 group-hover:text-sm group-hover:mb-3"&gt;
+                  Report suspicious activity, crime, or safety concerns
+                &lt;/p&gt;
+                &lt;Button className="w-full text-xs py-1 h-8 transition-all duration-300 
+                                 group-hover:text-sm group-hover:py-2 group-hover:h-10 group-hover:mt-1" 
+                        data-testid="report-incident-button"&gt;
+                  Report Now
+                &lt;/Button&gt;
+              &lt;/CardContent&gt;
+            &lt;/Card&gt;
+          &lt;/Link&gt;
+          
+          &lt;Link href="/community/map"&gt;
+            &lt;Card className="transition-all duration-300 ease-in-out transform hover:scale-105 hover:shadow-xl 
+                           cursor-pointer group border-2 hover:border-blue-300"&gt;
+              &lt;CardContent className="p-3 text-center transition-all duration-300 group-hover:p-6"&gt;
+                &lt;MapPin className="w-8 h-8 mx-auto mb-2 text-blue-600 transition-all duration-300 
+                                 group-hover:w-12 group-hover:h-12 group-hover:mb-3" /&gt;
+                &lt;h3 className="font-semibold mb-1 text-sm transition-all duration-300 
+                             group-hover:text-base group-hover:mb-2"&gt;View Map&lt;/h3&gt;
+                &lt;p className="text-xs text-gray-600 opacity-0 max-h-0 overflow-hidden transition-all duration-300 
+                             group-hover:opacity-100 group-hover:max-h-20 group-hover:text-sm group-hover:mb-3"&gt;
+                  See real-time incidents and safety alerts in your area
+                &lt;/p&gt;
+                &lt;Button className="w-full text-xs py-1 h-8 transition-all duration-300 
+                                 group-hover:text-sm group-hover:py-2 group-hover:h-10 group-hover:mt-1" 
+                        variant="outline" data-testid="view-map-button"&gt;
+                  Open Map
+                &lt;/Button&gt;
+              &lt;/CardContent&gt;
+            &lt;/Card&gt;
+          &lt;/Link&gt;
+          
+          &lt;Link href="/community/feed"&gt;
+            &lt;Card className="transition-all duration-300 ease-in-out transform hover:scale-105 hover:shadow-xl 
+                           cursor-pointer group border-2 hover:border-blue-300"&gt;
+              &lt;CardContent className="p-3 text-center transition-all duration-300 group-hover:p-6"&gt;
+                &lt;MessageSquare className="w-8 h-8 mx-auto mb-2 text-blue-600 transition-all duration-300 
+                                       group-hover:w-12 group-hover:h-12 group-hover:mb-3" /&gt;
+                &lt;h3 className="font-semibold mb-1 text-sm transition-all duration-300 
+                             group-hover:text-base group-hover:mb-2"&gt;Community Feed&lt;/h3&gt;
+                &lt;p className="text-xs text-gray-600 opacity-0 max-h-0 overflow-hidden transition-all duration-300 
+                             group-hover:opacity-100 group-hover:max-h-20 group-hover:text-sm group-hover:mb-3"&gt;
+                  Connect with neighbors and stay updated on local news
+                &lt;/p&gt;
+                &lt;Button className="w-full text-xs py-1 h-8 transition-all duration-300 
+                                 group-hover:text-sm group-hover:py-2 group-hover:h-10 group-hover:mt-1" 
+                        variant="outline" data-testid="view-feed-button"&gt;
+                  View Feed
+                &lt;/Button&gt;
+              &lt;/CardContent&gt;
+            &lt;/Card&gt;
+          &lt;/Link&gt;
+        &lt;/div&gt;
+
+        {/* Recent Activity - Full Width */}
+        &lt;Card&gt;
+          &lt;CardHeader&gt;
+            &lt;CardTitle className="flex items-center gap-2"&gt;
+              &lt;Clock className="w-5 h-5" /&gt;
+              Recent Activity
+            &lt;/CardTitle&gt;
+          &lt;/CardHeader&gt;
+          &lt;CardContent&gt;
+            &lt;div className="space-y-4"&gt;
+              {stats?.recentActivity.map((activity) =&gt; (
+                &lt;div 
+                  key={activity.id} 
+                  className="flex items-start gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors"
+                  data-testid={`activity-${activity.id}`}
+                &gt;
+                  {getActivityIcon(activity.type)}
+                  &lt;div className="flex-1 min-w-0"&gt;
+                    &lt;div className="flex items-start justify-between gap-2"&gt;
+                      &lt;h4 className="font-medium text-sm truncate"&gt;{activity.title}&lt;/h4&gt;
+                      {activity.priority &amp;&amp; (
+                        &lt;Badge className={getPriorityColor(activity.priority)}&gt;
+                          {activity.priority}
+                        &lt;/Badge&gt;
+                      )}
+                    &lt;/div&gt;
+                    &lt;p className="text-xs text-gray-600"&gt;by {activity.author}&lt;/p&gt;
+                    &lt;p className="text-xs text-gray-500"&gt;{activity.timeAgo}&lt;/p&gt;
+                  &lt;/div&gt;
+                &lt;/div&gt;
+              ))}
+            &lt;/div&gt;
+            &lt;Link href="/community/feed"&gt;
+              &lt;Button variant="outline" className="w-full mt-4"&gt;
+                View All Activity
+              &lt;/Button&gt;
+            &lt;/Link&gt;
+          &lt;/CardContent&gt;
+        &lt;/Card&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  );
+}            </div>
+        </div>
+
+        <div class="file-section config">
+            <div class="file-header">📋 package.json - Dependencies & Scripts</div>
+            <div class="code-block">
+{
+  "name": "rest-express",
+  "version": "1.0.0",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "dev": "NODE_ENV=development tsx server/index.ts",
+    "build": "vite build &amp;&amp; esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
+    "start": "NODE_ENV=production node dist/index.js",
+    "check": "tsc",
+    "db:push": "drizzle-kit push"
+  },
+  "dependencies": {
+    "@google-cloud/storage": "^7.16.0",
+    "@hookform/resolvers": "^3.10.0",
+    "@jridgewell/trace-mapping": "^0.3.25",
+    "@neondatabase/serverless": "^0.10.4",
+    "@radix-ui/react-accordion": "^1.2.4",
+    "@radix-ui/react-alert-dialog": "^1.1.7",
+    "@radix-ui/react-aspect-ratio": "^1.1.3",
+    "@radix-ui/react-avatar": "^1.1.4",
+    "@radix-ui/react-checkbox": "^1.1.5",
+    "@radix-ui/react-collapsible": "^1.1.4",
+    "@radix-ui/react-context-menu": "^2.2.7",
+    "@radix-ui/react-dialog": "^1.1.7",
+    "@radix-ui/react-dropdown-menu": "^2.1.7",
+    "@radix-ui/react-hover-card": "^1.1.7",
+    "@radix-ui/react-label": "^2.1.3",
+    "@radix-ui/react-menubar": "^1.1.7",
+    "@radix-ui/react-navigation-menu": "^1.2.6",
+    "@radix-ui/react-popover": "^1.1.7",
+    "@radix-ui/react-progress": "^1.1.3",
+    "@radix-ui/react-radio-group": "^1.2.4",
+    "@radix-ui/react-scroll-area": "^1.2.4",
+    "@radix-ui/react-select": "^2.1.7",
+    "@radix-ui/react-separator": "^1.1.3",
+    "@radix-ui/react-slider": "^1.2.4",
+    "@radix-ui/react-slot": "^1.2.0",
+    "@radix-ui/react-switch": "^1.1.4",
+    "@radix-ui/react-tabs": "^1.1.4",
+    "@radix-ui/react-toast": "^1.2.7",
+    "@radix-ui/react-toggle": "^1.1.3",
+    "@radix-ui/react-toggle-group": "^1.1.3",
+    "@radix-ui/react-tooltip": "^1.2.0",
+    "@tanstack/react-query": "^5.60.5",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/leaflet": "^1.9.20",
+    "@uppy/aws-s3": "^4.3.2",
+    "@uppy/core": "^4.5.2",
+    "@uppy/dashboard": "^4.4.3",
+    "@uppy/drag-drop": "^4.2.2",
+    "@uppy/file-input": "^4.2.2",
+    "@uppy/progress-bar": "^4.3.2",
+    "@uppy/react": "^4.5.2",
+    "bcryptjs": "^3.0.2",
+    "better-sqlite3": "^12.2.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "connect-pg-simple": "^10.0.0",
+    "date-fns": "^3.6.0",
+    "drizzle-orm": "^0.39.1",
+    "drizzle-zod": "^0.7.0",
+    "embla-carousel-react": "^8.6.0",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "firebase": "^12.1.0",
+    "framer-motion": "^11.13.1",
+    "google-auth-library": "^10.2.1",
+    "input-otp": "^1.4.2",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.453.0",
+    "memorystore": "^1.6.7",
+    "nanoid": "^5.1.5",
+    "next-themes": "^0.4.6",
+    "passport": "^0.7.0",
+    "passport-local": "^1.0.0",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-day-picker": "^8.10.1",
+    "react-dom": "^18.3.1",
+    "react-hook-form": "^7.55.0",
+    "react-icons": "^5.4.0",
+    "react-resizable-panels": "^2.1.7",
+    "recharts": "^2.15.2",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "tailwind-merge": "^2.6.0",
+    "tailwindcss-animate": "^1.0.7",
+    "tw-animate-css": "^1.2.5",
+    "vaul": "^1.1.2",
+    "wouter": "^3.3.5",
+    "ws": "^8.18.0",
+    "zod": "^3.24.2",
+    "zod-validation-error": "^3.4.0",
+    "zustand": "^5.0.7"
+  },
+  "devDependencies": {
+    "@replit/vite-plugin-cartographer": "^0.2.8",
+    "@replit/vite-plugin-runtime-error-modal": "^0.0.3",
+    "@tailwindcss/typography": "^0.5.15",
+    "@tailwindcss/vite": "^4.1.3",
+    "@types/connect-pg-simple": "^7.0.3",
+    "@types/express": "4.17.21",
+    "@types/express-session": "^1.18.0",
+    "@types/node": "20.16.11",
+    "@types/passport": "^1.0.16",
+    "@types/passport-local": "^1.0.38",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.5.13",
+    "@vitejs/plugin-react": "^4.3.2",
+    "autoprefixer": "^10.4.20",
+    "drizzle-kit": "^0.30.4",
+    "esbuild": "^0.25.0",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.1",
+    "typescript": "5.6.3",
+    "vite": "^5.4.19"
+  },
+  "optionalDependencies": {
+    "bufferutil": "^4.0.8"
+  }
+}
+            </div>
+        </div>
+
+        <div class="file-section config">
+            <div class="file-header">📝 replit.md - Project Documentation</div>
+            <div class="code-block">
+# NaborNet - Neighborhood Safety Community Platform
+
+## Overview
+
+NaborNet is a community-focused Progressive Web Application (PWA) designed for neighborhood safety and community reporting. The platform enables residents to report incidents, view local crime data, share safety alerts, and stay informed about their community. Built as a mobile-first responsive application, it provides an interactive map-based interface for real-time community safety monitoring and neighborhood communication.
+
+## User Preferences
+
+Preferred communication style: Simple, everyday language.
+Geographic focus: Namibia - Map centered on Windhoek, Namibia by default for local community safety.
+
+## Recent Changes (August 2025)
+
+- **Critical Security Fixes (August 18, 2025)**: Implemented comprehensive security hardening with RBAC middleware protecting admin/moderator-only actions, input sanitization preventing XSS attacks, rate limiting on incident creation, strengthened coordinate validation, and enhanced session security for production environments
+- **Updated Quick Report Icons**: Replaced old incident reporting icons with 12 new custom circular blue gradient icons (1_1755386584688.png through 12_1755386584694.png) featuring improved visual design and added descriptive text labels since new images lack embedded text
+- **Enhanced Incident Types**: Updated incident reporting with new categories including Car Accident, Emergency Alarm, Break In/Burglary, Construction Work, Fire Emergency, SOS/Need Help, Lost Pet, Suspicious Person, Hit &amp; Run, Traffic Issue, Lost &amp; Found, and Violence/Fight
+- **P0 Trust &amp; Retention Features**: Implemented verified agency accounts with distinct badges (police, municipal, security, fire, medical, NGO), content moderation system with user reporting, location-based notifications, and anonymous reporting capability
+- **Database Schema**: Added verified_accounts, user_reports, notifications, and moderation tables with proper PostgreSQL integration
+- **Comprehensive Manual Location Data**: Replaced external API dependency with extensive manual location database covering 121 cities/towns across Namibia (40), South Africa (46), and Botswana (35), plus detailed neighbourhood data for major cities including authentic local areas
+- **Authentic Namibian Neighbourhood Data**: Added comprehensive suburb/township data for 19 major Namibian cities including Windhoek's 32 authentic areas (Academia, Katutura, Klein Windhoek, Okuryangava, Wanaheda), coastal towns (Swakopmund's 12 areas, Walvis Bay's 11), northern centers (Rundu's 12 locations, Oshakati's 9), and regional towns with their proper local names and historical contexts
+
+### Security Improvements (August 18, 2025)
+- **Role-Based Access Control**: Protected user verification (/api/users/:id/verify) and incident moderation (/api/incidents/:id/moderate) routes with proper moderator privilege checks
+- **Authentication Middleware**: Added requireAuth and requireModerator middleware functions ensuring only verified agency accounts can perform moderation actions
+- **Input Sanitization**: Implemented sanitizeText function removing HTML tags and control characters from incident titles and descriptions to prevent XSS attacks
+- **Rate Limiting**: Added per-user and per-IP rate limiting on incident creation to prevent spam and DoS attacks
+- **Enhanced Validation**: Strengthened coordinate validation using Number.isFinite() to prevent edge cases while allowing valid zero coordinates
+- **Session Security**: Added production environment checks for SESSION_SECRET and improved error handling to prevent process crashes
+
+### New Image Assets (Quick Report Icons) - Latest Complete High Quality Set
+1. **1_1755387124843.png**: Car Accident - Two cars colliding with impact burst symbol (LATEST HQ)
+2. **2_1755387124844.png**: Emergency Alarm - Red emergency siren with radiating alarm lines (LATEST HQ)
+3. **3_1755387124844.png**: Break In/Burglary - House silhouette with red alert exclamation (LATEST HQ)
+4. **4_1755387124845.png**: Construction Work - Orange hard hat with crossed tools (LATEST HQ)
+5. **5_1755387124845.png**: Fire Emergency - Multi-layered flame in red/orange/yellow (LATEST HQ)
+6. **6_1755387124846.png**: SOS/Need Help - Bold red "SOS" text on blue gradient (LATEST HQ)
+7. **7_1755387124846.png**: Lost Pet - Red heart with cat/pet silhouette (LATEST HQ)
+8. **8_1755387124846.png**: Suspicious Person - Dark silhouette with question mark overlay (LATEST HQ)
+9. **9_1755387124847.png**: Hit &amp; Run - Running figure in motion with movement lines (LATEST HQ)
+10. **10_1755387124847.png**: Traffic Issue - Multiple cars showing traffic congestion (LATEST HQ)
+11. **11_1755387124848.png**: Lost &amp; Found - Location pin with helping hand beneath (LATEST HQ)
+12. **12_1755387124849.png**: Violence/Fight - Two fists in conflict with impact burst (LATEST HQ)
+
+## System Architecture
+
+### Frontend Architecture
+The application uses a modern React-based stack with TypeScript for type safety. The frontend is built using Vite as the build tool, providing fast development and optimized production builds. State management is handled through Zustand for global application state, with React Query managing data fetching and caching. The UI is constructed using shadcn/ui components built on top of Radix UI primitives, styled with Tailwind CSS for consistent design. Navigation is managed through Wouter, a lightweight routing solution.
+
+### Backend Architecture
+The backend leverages Firebase as a Backend-as-a-Service solution, providing a serverless architecture. Firebase Authentication handles user management with support for email/password and magic link authentication. Cloud Firestore serves as the primary database with real-time synchronization capabilities. Cloud Functions handle server-side business logic, data validation, and automated processes. The architecture implements strict multi-tenant data isolation using tenantId fields across all collections.
+
+### Database Design
+The Firestore database follows a flat collection structure optimized for multi-tenancy:
+- `tenants`: Organization metadata and billing information
+- `users`: User profiles with role-based permissions and tenant associations
+- `sites`: Location definitions with geofencing capabilities
+- `patrolPoints`: GPS coordinates and QR code assignments for guard check-ins
+- `routes`: Predefined patrol sequences linking multiple patrol points
+- `shifts`: Guard scheduling and assignment tracking
+- `checkins`: Real-time patrol verification with GPS and QR validation
+- `incidents`: Issue reporting with photo attachments and workflow status
+- `alerts`: Emergency SOS notifications with location tracking
+
+### Authentication and Authorization
+The system implements role-based access control (RBAC) with four distinct user roles:
+- **Guard**: Mobile-focused interface for patrol check-ins and incident reporting
+- **Supervisor**: Management dashboard for monitoring guard activities and incidents
+- **Client**: Read-only access to reports and site statistics
+- **Admin**: Full system administration including tenant and user management
+
+Custom Firebase claims enforce role-based permissions at the database level, with Firestore security rules providing defense-in-depth access control.
+
+### Progressive Web App Features
+The application is designed as an installable PWA with offline capabilities for critical guard functions. Service workers cache essential resources and enable offline check-ins, which sync automatically when connectivity is restored. Push notifications keep supervisors informed of incidents and emergency alerts in real-time.
+
+### Maps Integration
+The platform integrates MapLibre for open-source mapping with automatic fallback to Google Maps when API keys are available. This provides flexible deployment options while maintaining consistent geolocation features across guard tracking, geofencing, and incident reporting.
+
+## External Dependencies
+
+### Firebase Services
+- **Firebase Authentication**: User management with email/password and passwordless magic link authentication
+- **Cloud Firestore**: Real-time NoSQL database with offline synchronization
+- **Cloud Functions**: Serverless functions for business logic, data validation, and automated workflows
+- **Firebase Storage**: File storage for incident photos and QR code images
+- **Firebase Cloud Messaging**: Push notifications for real-time alerts and updates
+- **Firebase Hosting**: Static site hosting with automatic SSL and CDN distribution
+
+### Third-Party Libraries
+- **MapLibre**: Open-source mapping solution for geolocation features
+- **Google Maps API**: Optional premium mapping service with enhanced features
+- **Radix UI**: Accessible component primitives for UI construction
+- **React Query**: Server state management and data synchronization
+- **Zustand**: Lightweight state management for client-side application state
+- **QR Code Generation**: Server-side QR code creation for patrol point identification
+- **Canvas API**: Image processing for QR code generation and photo manipulation
+
+### Development Tools
+- **Vite**: Fast build tool with hot module replacement
+- **TypeScript**: Type safety and developer experience enhancement
+- **Tailwind CSS**: Utility-first CSS framework for consistent styling
+- **ESLint/Prettier**: Code quality and formatting standards
+- **Drizzle**: Database schema definition and migration tooling (prepared for potential PostgreSQL migration)            </div>
+        </div>
+    </div>
+
+    <script>
+        function filterFiles(category) {
+            const sections = document.querySelectorAll('.file-section');
+            const buttons = document.querySelectorAll('.nav button');
+            
+            buttons.forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            sections.forEach(section => {
+                if (category === 'all' || section.classList.contains(category)) {
+                    section.style.display = 'block';
+                } else {
+                    section.style.display = 'none';
+                }
+            });
+        }
+    </script>
+</body>
+</html>

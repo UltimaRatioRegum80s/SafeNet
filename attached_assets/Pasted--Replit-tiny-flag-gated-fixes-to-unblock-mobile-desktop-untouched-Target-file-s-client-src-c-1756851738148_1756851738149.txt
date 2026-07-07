@@ -1,0 +1,121 @@
+@Replit — tiny, flag-gated fixes to unblock mobile (desktop untouched)
+
+Target file(s): client/src/components/MapView.tsx (where the Leaflet map + cluster are created/managed)
+
+1) Ensure cluster is attached exactly once (idempotent)
+
+Add this right after map and cluster are created (keep behind the flag):
+
+// attach cluster to map once (flag only)
+if (Flags.fixMobileMarkers && mapRef.current && clusterRef.current) {
+  if (!mapRef.current.hasLayer(clusterRef.current)) {
+    mapRef.current.addLayer(clusterRef.current);
+  }
+  (window as any)._map = mapRef.current;      // debug only (flagged)
+  (window as any)._cluster = clusterRef.current; // debug only (flagged)
+}
+
+2) Stop the Leaflet zoom crash (defensive guard)
+
+Monkey-patch only when the flag is ON so desktop is unaffected:
+
+// defensive guard: ignore marker zoom anim if marker is not on a map
+if (Flags.fixMobileMarkers && (L as any).Marker && !(L as any).Marker.__nnPatched) {
+  const P = (L as any).Marker.prototype as any;
+  const original = P._animateZoom;
+  P._animateZoom = function(e: any) {
+    if (!this._map) return;     // <- prevents "_latLngToNewLayerPoint" on null
+    return original.call(this, e);
+  };
+  (L as any).Marker.__nnPatched = true;
+}
+
+3) (Optional but safer) Disable marker zoom animation on the flagged path
+
+When you create the map, pass these options only if the flag is ON:
+
+const map = L.map(container, {
+  // ...your existing options
+  zoomAnimation: !Flags.fixMobileMarkers,        // disable when flag = ON
+  markerZoomAnimation: !Flags.fixMobileMarkers,  // ditto
+  fadeAnimation: !Flags.fixMobileMarkers,
+});
+
+
+If the map is already constructed elsewhere, you can do a light override after init:
+
+if (Flags.fixMobileMarkers && mapRef.current) {
+  (mapRef.current as any).options.zoomAnimation = false;
+  (mapRef.current as any).options.markerZoomAnimation = false;
+  (mapRef.current as any).options.fadeAnimation = false;
+}
+
+4) Keep the marker creation path as a Marker (not CircleMarker)
+
+We already flipped the fallback to L.marker(divIcon) under the flag. Don’t change the desktop icon path.
+
+5) Re-run this quick check (Console, with ?NN_FIX_MOBILE_MARKERS=1)
+({
+  hasMap: !!window._map,
+  hasCluster: !!window._cluster,
+  clusterOnMap: window._map && window._cluster ? window._map.hasLayer(window._cluster) : false,
+  clusterLayerCount: window._cluster ? window._cluster.getLayers().length : 0
+})
+
+
+Expected: true, true, true, >= 50.
+
+Then drop probes to visually confirm:
+
+// direct (magenta)
+(() => {
+  const m=window._map; if(!m) return;
+  const icon=L.divIcon({className:'nn-divicon-wrapper',
+    html:'<div style="width:18px;height:18px;border-radius:9999px;background:#ff00ff;border:2px solid #fff"></div>',
+    iconSize:[18,18], iconAnchor:[9,9]});
+  L.marker(m.getCenter(),{icon}).addTo(m);
+})();
+
+// clustered (green)
+(() => {
+  const m=window._map, cl=window._cluster; if(!m||!cl) return;
+  const icon=L.divIcon({className:'nn-divicon-wrapper',
+    html:'<div style="width:18px;height:18px;border-radius:9999px;background:#10b981;border:2px solid #065f46"></div>',
+    iconSize:[18,18], iconAnchor:[9,9]});
+  cl.addLayer(L.marker(m.getCenter(),{icon}));
+  console.log('cluster count:', cl.getLayers().length);
+})();
+
+6) If clusters exist but look invisible
+
+Make sure MarkerCluster CSS is in the PWA bundle (flag or not is fine; it’s harmless):
+
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
+
+
+Sanity check via runtime injection (Console):
+
+['MarkerCluster.css','MarkerCluster.Default.css'].forEach(n=>{
+  const l=document.createElement('link'); l.rel='stylesheet';
+  l.href=`https://unpkg.com/leaflet.markercluster/dist/${n}`; document.head.appendChild(l);
+});
+
+Why this won’t break desktop (Progress Law)
+
+Everything is flag-gated (NN_FIX_MOBILE_MARKERS=1 only).
+
+Desktop icon/cluster path is unchanged.
+
+The patch only prevents a Leaflet zoom crash and ensures the cluster is attached exactly once.
+
+Instant rollback: remove the query param or run
+localStorage.NN_FIX_MOBILE_MARKERS='0'; location.reload();
+
+@RDM — once Replit applies the above, ask them to post:
+
+the quick check values,
+
+whether the magenta/green probes are visible,
+
+and a screenshot of clusters/markers on mobile with the flag ON.

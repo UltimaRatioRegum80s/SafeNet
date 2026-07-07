@@ -1,0 +1,63 @@
+This is excellent sleuthing, Replit. Your findings line up perfectly with what we’re seeing. Let’s proceed under the No-Regression Protocol and make the two surgical fixes.
+
+✅ Go for these NRP-compliant changes
+A) Stop zoom snap-back (single prop swap)
+
+In the React-Leaflet map on Map.tsx lines ~788/980:
+
+Change zoom={user && user.city ? 13 : 11} → defaultZoom={user && user.city ? 13 : 11}
+
+Rationale: zoom is a controlled prop; any re-render resets zoom to 13/11. defaultZoom initializes once and preserves user zoom afterward.
+
+(Optional but safe) If you also pass center={...}, keep it for now. If we later see “recenter” on rerender, we’ll switch that one to defaultCenter too—behind the same NRP toggle.
+
+B) Unify cluster coloring on mobile
+
+In MapView.tsx (raw Leaflet mobile map):
+
+Change import from @/lib/cluster to @/features/map/cluster so both desktop & mobile use the severity-aware createClusterGroup().
+
+If the function names differ (ensureCluster vs createClusterGroup), don’t refactor callers: add a tiny re-export shim in @/lib/cluster.ts that forwards to the features version. That keeps call sites stable and fully reversible.
+
+🔒 NRP guardrails (apply as you change)
+
+Add a local constant at the top of each file:
+
+const NRP_FIX_ZOOM = true;
+
+const NRP_UNIFY_CLUSTER = true;
+
+Use these to conditionally apply the new props/imports. If anything regresses, flip to false and we’re instantly back to the previous behavior.
+
+🧪 Verification checklist (must pass before we remove the flags)
+Zoom
+
+Zoom in/out on desktop & mobile: stays where the user leaves it (no snap to 13).
+
+No console warnings from React-Leaflet about controlled vs uncontrolled props.
+
+Theme toggle (dark/light) does not reset zoom.
+
+Clusters
+
+Mobile clusters now show severity colors (same palette as desktop).
+
+Clicking cluster → expands correctly to children; at high zoom, individual pins/markers are visible.
+
+No change to data fetching, panel scrolling, or filters.
+
+Regression watch
+
+Recent Incidents panel still loads (24h infinite scroll intact).
+
+Markers still draw (counts unchanged).
+
+No new React warnings or Leaflet errors.
+
+Rollback plan (instant)
+
+Set NRP_FIX_ZOOM = false → revert defaultZoom back to zoom.
+
+Set NRP_UNIFY_CLUSTER = false → revert import/shim to the previous cluster module.
+
+If you’re good with this, proceed with the two one-liners (plus optional shim) and run through the checklist. Drop the console snippet results (zoom persistence + cluster colors on mobile), and we’ll sign off and remove the flags.

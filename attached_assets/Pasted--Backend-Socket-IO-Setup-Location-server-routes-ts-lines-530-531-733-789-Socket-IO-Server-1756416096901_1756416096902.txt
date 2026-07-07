@@ -1,0 +1,81 @@
+
+🔧 Backend Socket.IO Setup
+Location: server/routes.ts (lines 530-531 & 733-789)
+Socket.IO Server Creation & Chat Broadcasting:
+
+
+// In chat route - broadcasts messages to room
+io.to(`chat:${room}`).emit("message", message);
+
+// Socket.IO connection handling  
+io.on('connection', (socket) => {
+  console.log('Client connected:', socket.id);
+
+  // Join chat rooms
+  socket.on('join:chat', (room) => {
+    socket.join(`chat:${room}`);
+    console.log(`Client ${socket.id} joined chat room: ${room}`);
+  });
+
+  socket.on('leave:chat', (room) => {
+    socket.leave(`chat:${room}`);
+  });
+
+  // Incident handling
+  socket.on('incident:new', async (data) => {
+    // Creates incident and broadcasts to all clients
+    io.emit('incident:broadcast', incident);
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Client disconnected:', socket.id);
+  });
+});
+
+
+🔧 Frontend Socket.IO Usage
+Location: client/src/lib/socketService.ts
+Existing Socket Client:
+
+
+class SocketService {
+  connect() {
+    this.socket = io(window.location.origin, {
+      path: '/socket.io',
+      transports: ['websocket', 'polling'],
+      forceNew: true,
+      reconnection: true,
+      timeout: 5000
+    });
+  }
+  
+  on(event, callback) { /* event listening */ }
+  emit(event, data) { /* emit to server */ }
+}
+
+export const socketService = new SocketService();
+// Auto-connects when imported
+
+🔧 Chat Feed Query
+Location: client/src/pages/community/Feed.tsx (lines 204-211)
+Current React Query Setup:
+
+
+const { data: chatData } = useQuery({
+  queryKey: ['/api/chat/general'],
+  queryFn: async () => {
+    const response = await fetch('/api/chat/general');
+    if (!response.ok) throw new Error('Failed to fetch chat messages');
+    return response.json();
+  }
+});
+
+
+const { data: chatData } = useQuery({
+  queryKey: ['/api/chat/general'],
+  queryFn: async () => {
+    const response = await fetch('/api/chat/general');
+    if (!response.ok) throw new Error('Failed to fetch chat messages');
+    return response.json();
+  }
+});

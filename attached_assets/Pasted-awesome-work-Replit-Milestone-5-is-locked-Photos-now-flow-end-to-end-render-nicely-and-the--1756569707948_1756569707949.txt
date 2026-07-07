@@ -1,0 +1,362 @@
+awesome work, Replit 🙌 — Milestone 5 is locked. Photos now flow end-to-end, render nicely, and the pipeline is private + performant. here’s a crisp handoff + next steps so we keep momentum and match @RDM’s goals.
+
+quick validation (final)
+
+uploads return stable, cacheable URLs with headers ✅
+
+incidents include photos: string[] across API, sockets, list + map ✅
+
+submit button guards, cancel + retry, friendly error states ✅
+
+propose Milestone 6 — styling polish (fast wins, low risk)
+
+Goal: consistent “glass + blur” feel, premium micro-interactions, rock-solid mobile ergonomics.
+
+Scope
+
+Glass theme tokens
+
+unify opacity/blur/border tokens (glass-surface, glass-card, glass-toolbar) so panel, map popovers, toasts, and FABs match.
+
+Motion (motion-safe)
+
+subtle enter/exit on ReportPanel + popovers; respect prefers-reduced-motion.
+
+Icon set swap
+
+replace PNG circles with a unified set (SVG or high-res PNG) + consistent sizing; map them in incidentTypes.ts.
+
+Tap target audits (mobile)
+
+44px min; spacing for FAB stack & footer controls; safe-area insets everywhere.
+
+Skeletons & lazy fade-in
+
+skeleton states where photos are loading; fade in images on onLoad.
+
+Map popover design
+
+consistent glass card, one-line metadata (type, time), thumbnail row (lazy).
+
+A11y sweep
+
+keyboard traps, aria labels, focus rings; ESC/Enter behavior mirrored.
+
+Tiny drop-ins (snippets)
+
+Glass utilities (Tailwind layer)
+
+/* globals.css */
+@layer utilities {
+  .glass-surface { @apply backdrop-blur bg-slate-900/60 border border-slate-700/60 shadow-lg; }
+  .glass-card    { @apply backdrop-blur bg-slate-900/50 border border-slate-700/50 shadow-md; }
+  .glass-toolbar { @apply backdrop-blur bg-slate-900/70 border border-slate-700/70 shadow-lg; }
+}
+
+
+Motion-safe wrapper
+
+const prefersReduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+const animateProps = prefersReduced ? {} : { initial:{opacity:0, y:8}, animate:{opacity:1,y:0}, exit:{opacity:0,y:8} };
+
+
+Unified Image component
+
+export function NNImage({ src, alt, className }: {src:string; alt:string; className?:string}) {
+  const [ok, setOk] = useState(true);
+  return ok ? (
+    <img
+      src={src} alt={alt} loading="lazy" decoding="async"
+      onError={() => setOk(false)}
+      className={clsx("rounded-lg object-cover transition-opacity duration-300", className)}
+    />
+  ) : (
+    <div className={clsx("rounded-lg bg-slate-800/60 border border-slate-700/60", className)} aria-label="image unavailable" />
+  );
+}
+
+
+QA checklist (15 min)
+
+panel, toasts, popovers all use the same glass tokens.
+
+animations feel subtle; prefers-reduced-motion disables smoothly.
+
+thumbs lazy-load; skeletons show on slow 3G; no layout shift.
+
+FABs, buttons, and photo chips meet 44px tap area; safe-area insets OK.
+
+keyboard + screen reader: titles, labels, ESC close, Enter confirm.
+
+preview Milestone 7 — push notifications (so @RDM can decide)
+
+Backend
+
+topics: nh:{id} + type:{incidentType}; send on incident creation.
+
+payload: { id, type, status, lat, lng, createdAt, neighborhoodId }.
+
+rate limits + collapse keys per incident to prevent spam.
+
+Frontend
+
+opt-in flow (quiet UI → explicit allow): store consent + per-type toggles.
+
+service worker: show notification, tap → deep link /community/report?focus=<id>.
+
+mute controls per type + quiet hours.
+
+QA
+
+permission denied path UX.
+
+foreground vs background handling.
+
+deep link opens panel/map correctly.
+
+your move
+
+want me to prep a Milestone 6 PR checklist with exact file touches (tokens, panel/popover updates, skeletons, icon mapping)?
+
+or jump to a Milestone 7 design doc + minimal working push (service worker + topic routing)?
+
+either way, I’ll keep changes surgical and aligned with our current architecture.
+
+You said:
+
+want me to prep a **Milestone 6 PR checklist with exact file touches** (tokens, panel/popover updates, skeletons, icon mapping)?
+
+yes
+NN Builder & Coder said:
+
+awesome — here’s a tight, copy-pasteable Milestone 6 PR checklist with exact file touches. It keeps changes surgical and consistent with our stack (Tailwind + shadcn/ui + Leaflet + Zustand).
+
+PR Title
+
+Milestone 6: Styling polish — glass tokens, micro-motion, icon mapping, a11y & mobile ergonomics
+
+Summary
+
+Unify the glass aesthetic, add motion-safe micro-animations, swap/centralize incident icons, improve image UX (skeletons, lazy fade-in), and ensure 44px tap targets + safe-area insets across panel, map popovers, and FABs.
+
+1) Design tokens: glass utilities & motion-safe helpers
+
+File: client/src/styles/globals.css (or your main tailwind CSS)
+
+/* --- Milestone 6 tokens --- */
+@layer utilities {
+  .glass-surface { @apply backdrop-blur bg-slate-900/60 border border-slate-700/60 shadow-lg; }
+  .glass-card    { @apply backdrop-blur bg-slate-900/50 border border-slate-700/50 shadow-md; }
+  .glass-toolbar { @apply backdrop-blur bg-slate-900/70 border border-slate-700/70 shadow-lg; }
+  .tap-target    { @apply min-h-[44px] min-w-[44px]; }
+  .safe-bottom   { padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem); }
+}
+
+
+Replace ad-hoc classes like bg-slate-900/70 border-slate-800 with these tokens.
+
+2) Unified image component (lazy, fade-in, fallback)
+
+New File: client/src/components/NNImage.tsx
+
+import { useState } from "react";
+import clsx from "clsx";
+
+export default function NNImage({
+  src, alt, className, onClick,
+}: { src: string; alt: string; className?: string; onClick?: () => void }) {
+  const [loaded, setLoaded] = useState(false);
+  const [ok, setOk] = useState(true);
+
+  if (!ok) {
+    return (
+      <div
+        role="img" aria-label="image unavailable"
+        className={clsx("rounded-lg bg-slate-800/60 border border-slate-700/60", className)}
+      />
+    );
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      onLoad={() => setLoaded(true)}
+      onError={() => setOk(false)}
+      onClick={onClick}
+      className={clsx(
+        "rounded-lg object-cover transition-opacity duration-300",
+        loaded ? "opacity-100" : "opacity-0",
+        className
+      )}
+    />
+  );
+}
+
+
+Replace raw <img> usages in list/popovers with <NNImage />.
+
+3) Skeletons for photo slots
+
+If you already have shadcn Skeleton, reuse it; otherwise:
+
+New File: client/src/components/Skeleton.tsx
+
+export default function Skeleton({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded-lg bg-slate-800/50 ${className}`} />;
+}
+
+
+Example usage (list card):
+
+{/* while data loading */}
+<Skeleton className="h-24 w-full" />
+
+4) Centralize incident icons (SVG/PNG) & mapping
+
+File (existing): client/src/features/report/incidentTypes.ts
+
+export const INCIDENT_TYPES = [
+  { id: "car_accident", label: "Car Accident", severity: "medium", iconSrc: "/assets/incident-icons/car-accident.svg" },
+  // ... update all 12 to new set
+] as const;
+
+
+Place new icons in /public/assets/incident-icons/ (SVG preferred). Keep size ~24–32px; consistent padding.
+
+Replace any hardcoded icon paths elsewhere to import from here.
+
+5) ReportPanel: glass token + motion-safe + tap targets
+
+File: client/src/features/report/ReportPanel.tsx
+
+Replace the SheetContent className with the token:
+
+<SheetContent
+  side="bottom"
+  className="sm:max-w-md rounded-t-2xl glass-surface"
+>
+
+
+Ensure buttons are easy to tap:
+
+<Button className="tap-target">Submit</Button>
+<Button variant="ghost" className="tap-target">Cancel</Button>
+
+
+Respect reduced motion (if you added framer motion elsewhere, gate animations):
+
+const prefersReduced = typeof window !== "undefined" &&
+  window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
+// wrap any animated bits; if prefersReduced, skip animations
+
+
+Add safe-bottom to the actions container if it sits low on small screens.
+
+6) Map popover/card: glass token + photo row
+
+File: client/src/components/MapView.tsx
+
+Wherever you assemble popover content, apply glass:
+
+<div className="glass-card rounded-xl p-2 w-64">
+  <div className="text-sm font-medium">{incident.typeLabel}</div>
+  <div className="text-xs opacity-70">{incident.timeAgo}</div>
+
+  {incident.photos?.length ? (
+    <div className="mt-2 grid grid-cols-3 gap-2">
+      {incident.photos.slice(0,3).map((url, i) => (
+        <NNImage key={i} src={url} alt={`Incident photo ${i+1}`} className="h-16 w-full object-cover" />
+      ))}
+    </div>
+  ) : null}
+</div>
+
+
+Ensure popover buttons/links have .tap-target.
+
+7) FAB stack & toolbars: tokens + safe area
+
+File: client/src/pages/community/Map.tsx (or FAB container)
+
+<div className="absolute inset-x-0 bottom-3 px-3 pointer-events-none">
+  <div className="flex flex-col gap-2 pointer-events-auto safe-bottom">
+    {/* each FAB */}
+    <button className="glass-toolbar rounded-2xl px-4 py-3 tap-target">Report</button>
+    {/* ...other FABs */}
+  </div>
+</div>
+
+8) A11y & keyboard polish
+
+Thumbnail buttons:
+
+<button
+  className="focus:outline-none focus:ring-2 focus:ring-sky-500 rounded-lg"
+  aria-label={`Open photo ${i+1}`}
+  onClick={() => openLightbox(i)}
+>
+  <NNImage src={url} alt={`Incident photo ${i+1}`} className="h-20 w-20" />
+</button>
+
+
+Ensure ESC closes popover/panel (shadcn Sheet does; verify Map popover).
+
+9) Clean up old styles (search & replace)
+
+Find and replace scattered:
+
+bg-slate-900/70 border-slate-800 → glass-surface
+
+bg-slate-900/60 border-slate-700 → glass-card or glass-toolbar depending on context
+
+Ensure no component overrides token colors with conflicting opacity.
+
+10) QA checklist (15 min)
+
+Panel, toasts, popovers, FABs visually consistent (same blur/opacity/border).
+
+Images lazy-load and fade in; broken images show placeholder.
+
+Motion feels subtle; disabling reduced motion removes animation.
+
+Tap targets meet 44px on mobile; safe area respected in bottom bars.
+
+Icon set shows crisp on all DPIs; no mismatched sizes.
+
+Keyboard: Enter submits, ESC cancels; thumbnails open on Enter.
+
+Dark/light mode (if you have it): tokens look correct; borders visible.
+
+(Optional) srcSet for responsive images
+
+If you add server thumbs later, be ready:
+
+<NNImage
+  src={best.medium ?? best.full}
+  alt="Incident photo"
+  className="h-24 w-full"
+  // when NNImage supports forwarding props:
+  // srcSet={`${thumb} 320w, ${medium} 1024w, ${full} 1600w`}
+  // sizes="(max-width: 640px) 320px, (max-width: 1200px) 1024px, 1600px"
+/>
+
+Files touched (at a glance)
+
+client/src/styles/globals.css (+)
+
+client/src/components/NNImage.tsx (+)
+
+client/src/components/Skeleton.tsx (+, if needed)
+
+client/src/features/report/incidentTypes.ts (icon paths)
+
+client/src/features/report/ReportPanel.tsx (tokens, tap-targets, motion-safe)
+
+client/src/components/MapView.tsx (glass card, photo row)
+
+client/src/pages/community/Map.tsx (FAB container tokens, safe-area)
+
+(search/replace) scattered components swapping to tokens

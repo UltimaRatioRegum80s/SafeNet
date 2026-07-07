@@ -1,0 +1,73 @@
+Yes—ship Option 1. Here’s a tight, drop-in patch for client/src/components/MobileFloatingTopMenu.tsx that:
+
+replaces nn-glass with theme-aware glass,
+
+fixes icon contrast in light mode,
+
+keeps the dark mode look intact,
+
+adds a subtle border for separation on pale tiles.
+
+1) Replace the container classes
+- <div className="nn-glass ... px-3 py-2 rounded-2xl ...">
++ <div
++   className="
++     rounded-2xl px-3 py-2
++     backdrop-blur-md shadow-lg
++     border border-border/50
++     bg-white/85 dark:bg-background/60
++     supports-[backdrop-filter]:bg-white/70
++     dark:supports-[backdrop-filter]:bg-background/40
++   "
++ >
+
+
+Rationale: in light mode we use a higher-opacity white glass; in dark we keep semi-transparent background. Border keeps it readable over light tiles.
+
+2) Fix icon contrast (remove text-white/80)
+
+If you’re using shadcn <Button> for each icon:
+
+- <Button variant="ghost" size="icon" className="text-white/80 ...">
++ <Button
++   variant="ghost"
++   size="icon"
++   className="
++     h-10 w-10
++     text-foreground/90 hover:text-foreground
++     dark:text-white/90 dark:hover:text-white
++     focus-visible:ring-2 focus-visible:ring-ring
++   "
++ >
+   <Home className="h-5 w-5" />
+ </Button>
+
+
+If they’re plain icons, apply similar classes to the wrapper:
+
+<button
+  className="
+    h-10 w-10 inline-flex items-center justify-center rounded-xl
+    text-foreground/90 hover:text-foreground
+    dark:text-white/90 dark:hover:text-white
+    focus-visible:ring-2 focus-visible:ring-ring
+  "
+>
+  <Home className="h-5 w-5" />
+</button>
+
+3) Keep your existing top gradient (line 53)
+
+No changes needed—the higher base opacity + border will prevent the menu from washing out while still playing nice with your current gradient.
+
+Quick test checklist (mobile & tablet)
+
+Toggle light/dark: menu stays readable over bright OSM tiles.
+
+Check iOS/Android: border/tint visible; no z-index clashes.
+
+Verify focus ring and hover states.
+
+Ensure any “disabled” icons use text-foreground/30 dark:text-white/30.
+
+If you’re good with this, go ahead and implement. If anything feels off after you patch, send me a screenshot and I’ll tweak the tokens (opacity/border) to your exact palette.

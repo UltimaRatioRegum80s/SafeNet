@@ -1,0 +1,152 @@
+📩 To: Replit Agent
+
+Hey Replit 👋 — yellow (low-risk) icon assets are uploaded. Let’s wire them in.
+
+✅ What we’re doing
+
+Add 7 low-severity incident types with two icons each:
+
+buttonIcon = round (Quick Report)
+
+mapIcon = pin (Leaflet marker)
+
+Keep existing blue icons for medium/high until we swap amber/red.
+
+📂 Expected file locations (already uploaded)
+client/public/icons/low/
+  blocked_road_round.png
+  blocked_road_pin.png
+  construction_round.png
+  construction_pin.png
+  heavy_traffic_round.png
+  heavy_traffic_pin.png
+  lost_found_round.png
+  lost_found_pin.png
+  lost_pet_round.png
+  lost_pet_pin.png
+  noise_complaint_round.png
+  noise_complaint_pin.png
+  police_traffic_stop_round.png
+  police_traffic_stop_pin.png
+
+🔧 Step 1 — Update config (shared/incidentTypes.ts)
+
+Add this block and merge into your existing export (keep medium/high as-is for now):
+
+// shared/incidentTypes.ts
+const ICON_BASE = "/icons";
+
+export const LOW_YELLOW = [
+  {
+    id: "blocked_road",
+    label: "Blocked Road",
+    severity: "low",
+    buttonIcon: `${ICON_BASE}/low/blocked_road_round.png`,
+    mapIcon: `${ICON_BASE}/low/blocked_road_pin.png`,
+  },
+  {
+    id: "construction",
+    label: "Construction",
+    severity: "low",
+    buttonIcon: `${ICON_BASE}/low/construction_round.png`,
+    mapIcon: `${ICON_BASE}/low/construction_pin.png`,
+  },
+  {
+    id: "heavy_traffic",
+    label: "Heavy Traffic",
+    severity: "low",
+    buttonIcon: `${ICON_BASE}/low/heavy_traffic_round.png`,
+    mapIcon: `${ICON_BASE}/low/heavy_traffic_pin.png`,
+  },
+  {
+    id: "lost_found",
+    label: "Lost & Found",
+    severity: "low",
+    buttonIcon: `${ICON_BASE}/low/lost_found_round.png`,
+    mapIcon: `${ICON_BASE}/low/lost_found_pin.png`,
+  },
+  {
+    id: "lost_pet",
+    label: "Lost Pet",
+    severity: "low",
+    buttonIcon: `${ICON_BASE}/low/lost_pet_round.png`,
+    mapIcon: `${ICON_BASE}/low/lost_pet_pin.png`,
+  },
+  {
+    id: "noise_complaint",
+    label: "Noise Complaint",
+    severity: "low",
+    buttonIcon: `${ICON_BASE}/low/noise_complaint_round.png`,
+    mapIcon: `${ICON_BASE}/low/noise_complaint_pin.png`,
+  },
+  {
+    id: "police_traffic_stop",
+    label: "Police Traffic Stop",
+    severity: "low",
+    buttonIcon: `${ICON_BASE}/low/police_traffic_stop_round.png`,
+    mapIcon: `${ICON_BASE}/low/police_traffic_stop_pin.png`,
+  },
+] as const;
+
+// Merge with your current INCIDENT_TYPES
+export const INCIDENT_TYPES = [
+  // ...existing (blue) medium/high/critical items
+  ...LOW_YELLOW,
+];
+
+
+(If you already export helpers like INCIDENT_TYPES_BY_ID, no changes needed.)
+
+🔧 Step 2 — Quick Report (round icons)
+
+client/src/components/QuickReportPanel.tsx
+Use buttonIcon when present; fallback to current assets.
+
+import { INCIDENT_TYPES } from "@/shared/incidentTypes";
+
+{INCIDENT_TYPES.filter(t => t.severity === "low").map(t => (
+  <button key={t.id} /* existing props */>
+    <img
+      src={t.buttonIcon ?? `/attached_assets/${t.id}.png`}
+      alt={t.label}
+      className="h-10 w-10"
+      loading="lazy"
+      decoding="async"
+    />
+    <span className="text-xs">{t.label}</span>
+  </button>
+))}
+
+🔧 Step 3 — Map markers (pin icons)
+
+client/src/components/MapView.tsx
+
+import L from "leaflet";
+import { INCIDENT_TYPES_BY_ID } from "@/shared/incidentTypes";
+
+function markerIconFor(typeId: string) {
+  const t = INCIDENT_TYPES_BY_ID[typeId];
+  const url = t?.mapIcon ?? `/attached_assets/${typeId}.png`;
+  return L.icon({
+    iconUrl: url,
+    iconSize: [36, 36],
+    iconAnchor: [18, 34],
+    popupAnchor: [0, -28],
+  });
+}
+
+🧪 Step 4 — QA checklist (2–3 mins)
+
+Quick Report grid shows the 7 yellow types with round icons.
+
+Create a test incident for each → pins use the yellow map marker.
+
+Old blue icons still appear for medium/high types (no regression).
+
+Alt text = label; mobile tap targets OK.
+
+🔮 After this
+
+Once yellow is live, we’ll repeat the same pattern for amber (medium) under /public/icons/medium/…, then red (high).
+
+If any filename differs from the list above, tell me and I’ll adjust the mapping instantly.

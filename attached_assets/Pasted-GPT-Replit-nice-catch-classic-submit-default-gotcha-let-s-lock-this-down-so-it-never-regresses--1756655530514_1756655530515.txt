@@ -1,0 +1,94 @@
+GPT → Replit
+
+nice catch! classic submit-default gotcha. let’s lock this down so it never regresses.
+
+1) Make all non-submit buttons explicit
+diff --git a/client/src/features/report/QuickReportCard.tsx b/client/src/features/report/QuickReportCard.tsx
+@@
+- <Button variant="secondary" onClick={getCurrentPositionAndSet}>
++ <Button variant="secondary" type="button" onClick={getCurrentPositionAndSet}>
+    Use my current location
+  </Button>
+@@
+- <Button
++ <Button
++   type="button"
+    variant="secondary"
+    onClick={() => { closeSheet(); startReportMode(); }}
+  >
+    Drop a pin
+  </Button>
+@@
+- <Button variant="ghost" onClick={closeSheet}>Cancel</Button>
++ <Button variant="ghost" type="button" onClick={closeSheet}>Cancel</Button>
+
+
+(If you have any other non-submit actions in this card—e.g., “Refine location on map”—make them type="button" too.)
+
+2) ESLint rule to enforce this everywhere
+diff --git a/.eslintrc.cjs b/.eslintrc.cjs
+@@
+ module.exports = {
+   // …
+   plugins: ["react", "jsx-a11y", "@typescript-eslint"],
+   rules: {
++    // require explicit type on native <button>
++    "react/button-has-type": "error",
+   },
++  settings: {
++    // if you sometimes use native <button> via shadcn's asChild, the rule still applies to the underlying element
++  }
+ };
+
+
+Note: this rule catches native <button>. For <Button> from shadcn, we already fixed the key cases above. If you ever render <button> directly, the linter will enforce type.
+
+3) E2E to guard “Drop a pin” behavior
+
+Append to tests/report.desktop.spec.ts:
+
+test("Drop a pin closes sheet and re-enters report mode", async ({ page }) => {
+  await page.goto("/map");
+  await page.getByRole("button", { name: "Report" }).click();
+
+  // first pin
+  const map = page.locator("#map");
+  const b = await map.boundingBox();
+  if (!b) throw new Error("map not found");
+  await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
+  await expect(page.getByText(/Location set:/i)).toBeVisible();
+
+  // re-enter pin mode
+  await page.getByRole("button", { name: /^Drop a pin$/i }).click();
+  await expect(page.getByText(/Click the map to set the incident location/i)).toBeVisible();
+
+  // second pin
+  await page.mouse.click(b.x + b.width / 2 + 60, b.y + b.height / 2 + 60);
+  await expect(page.getByText(/Location set:/i)).toBeVisible();
+});
+
+4) Optional: type-safe helper so devs don’t forget
+// client/src/components/ui/SafeButton.tsx
+import { Button, type ButtonProps } from "@/components/ui/button";
+
+// Defaults to type="button" unless caller overrides to "submit" or "reset"
+export function SafeButton(props: ButtonProps & { type?: "button" | "submit" | "reset" }) {
+  const { type = "button", ...rest } = props;
+  return <Button type={type} {...rest} />;
+}
+
+
+Then swap non-submit actions to <SafeButton> over time.
+
+5) Quick sanity check (you can do right now)
+
+Open the sheet → click Drop a pin → sheet closes → crosshair + overlay appears.
+
+Press Esc → overlay disappears and focus returns to the Report button.
+
+Open DevTools → run:
+
+import('@/state/useQuickReportStore').then(m => m.useQuickReportStore.getState())
+
+
+confirm { reportMode: false } after Esc; { reportMode: true } after clicking Drop a pin.

@@ -1,0 +1,88 @@
+🔥 stellar work, team — that’s a full end-to-end save. Photos now compress → upload → attach → render. Let’s lock this down with a final sweep and a few tiny upgrades so @RDM gets a crisp “Milestone 5: DONE”.
+
+Final verification (quick)
+
+Create incident with 2 photos (HEIC + big JPEG) → correct orientation; both show in list + map popovers.
+
+Anonymous + photos → incident visible; socket payload hides userId.
+
+Cancel mid-upload → toast; form preserved; retry works.
+
+Bad file (SVG) → friendly error; no incident created.
+
+Size ceiling path (oversized image) → 413 surfaced clearly.
+
+Micro-polish (safe, high impact)
+
+Lazy loading & fallbacks (faster lists, fewer crashes):
+
+// wherever you render photos (list/popover/detail)
+<img
+  src={url}
+  loading="lazy"
+  decoding="async"
+  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; /* or swap to placeholder */ }}
+  alt={alt ?? "Incident photo"}
+  className="rounded-lg object-cover"
+/>
+
+
+Keyboard + a11y (gallery):
+
+Ensure thumbnails are buttons with aria-label="Open photo N" and Enter key opens.
+
+Esc closes lightbox.
+
+Double-submit guard (belt + suspenders):
+
+You added it—just confirm the button re-enables only after both upload and incident mutation resolve.
+
+Emit photos in realtime:
+
+Confirm incident:created payload includes photos: string[] so sockets update UI without a refetch.
+
+CSP tune (optional):
+
+If you use a CDN later, add Content-Security-Policy: img-src 'self' https://cdn.example.com data:.
+
+Thumbs (optional, drop-in later):
+
+If you decide to add 320/1024 variants, wire srcSet:
+
+<img
+  src={best.medium ?? best.full}
+  srcSet={`${best.thumb ?? best.medium} 320w, ${best.medium ?? best.full} 1024w, ${best.full} 1600w`}
+  sizes="(max-width: 640px) 320px, (max-width: 1200px) 1024px, 1600px"
+/>
+
+Observability (for @RDM’s goals)
+
+Track:
+
+upload_start / upload_done (ms + bytes saved),
+
+report_submit { has_photos },
+
+report_abandon (panel closed w/ files selected).
+
+That tells us if performance tweaks reduce abandons and how much compression saves.
+
+Tiny regression tests (dev checklist)
+
+Socket duplicate guard: optimistic temp item reconciles with real one, not duplicated when photos arrive.
+
+Image cache: revisit the incident—images load from cache; /uploads/* headers show immutable & long max-age.
+
+Error paths: network drop during upload → single auto-retry → then clear toast.
+
+What I suggest next
+
+If everything above checks out, mark Milestone 5: COMPLETE ✅.
+
+Choose next focus:
+
+Milestone 6: Styling polish (glass consistency, icon swap, panel micro-animations, touch target audits), or
+
+Milestone 7: Notifications (push for all incidents, per-severity filters, “mute type” UX).
+
+If you want, I can draft a minimal “photo gallery” component (grid + lightbox) that drops into both list cards and map popovers, using your Tailwind/shadcn stack.

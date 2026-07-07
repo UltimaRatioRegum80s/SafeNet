@@ -1,0 +1,214 @@
+Do not change the color palette, logos, or unrelated parts of the app. Use only local Replit resources (current Node/Express/Leaflet stack, local DBs); install any needed NPM packages locally (no CDNs).
+
+Scope (MVP: 4–6 weeks condensed)
+
+Incidents + Map: clustering and time filters (12h/24h), never show >24h on map.
+
+Alerts: risk-scored alerts for Fire only (sound/vibration), client-side.
+
+Chat: Neighbourhood chat (one room per neighbourhood).
+
+Moderation: RBAC-protected actions (verify, moderate, resolve).
+
+Anonymous reports: Anonymous queue with stricter rate limits & review.
+
+A. Data & backend (local only)
+
+DB schema (local)
+
+If not present, add fields to incidents:
+
+isAnonymous (boolean, default false)
+
+state (enum/string: new|validated|acknowledged|resolved|closed, default new)
+
+createdAt (timestamp), closedAt (nullable)
+
+source (string: gps|network|manual, optional)
+
+Create table chat_messages (local DB):
+
+id (pk), room (string; e.g., city:Windhoek:Vineta), userId (string), message (text, sanitized), createdAt (timestamp)
+
+Keep last 500 messages per room; prune on insert.
+
+RBAC middleware (server)
+
+Add requireAuth (session or x-user-id) and requireModerator.
+
+Moderator roles allowed: police|municipal|security|fire|medical|ngo.
+
+Protect endpoints:
+
+POST /api/incidents/:id/moderate → requireModerator
+
+POST /api/users/:id/verify → requireModerator
+
+POST /api/incidents/:id/resolve → requireModerator (add if missing; sets state=resolved and closedAt=now)
+
+Anonymous reporting queue
+
+POST /api/incidents:
+
+Accept isAnonymous flag. Sanitize title/description (strip HTML/control chars; cap 2k chars).
+
+Rate-limit stricter if isAnonymous=true: e.g., 1 report / 20s per user/IP (others 1 / 10s).
+
+If isAnonymous=true, set state=validated and add to an anonymous moderation queue (e.g., fetch with GET /api/mod/anonymous for moderators).
+
+Duplicate merge (lightweight): if same type within ~100 m and ≤10 min, increment a duplicateCount on the existing incident instead of inserting a new row.
+
+Nearby + time window
+
+Update GET /api/incidents/nearby to accept sinceHours with defaults:
+
+Default map filter 12h; allow 24h.
+
+Never return incidents older than 24h for map use.
+
+Ensure numeric guards for lat/lng (use Number.isFinite), not falsy checks.
+
+Chat API (Socket.IO + REST)
+
+Socket rooms: join on neighbourhood (e.g., city:Swakopmund:Kramersdorf).
+
+Events:
+
+chat:join { room } → join room & fetch last 100 messages.
+
+chat:message { room, text } → sanitize, save to chat_messages, echo to room.
+
+REST fallback:
+
+GET /api/chat/history?room=... → last 100 messages.
+
+Rate limit messages: 1 msg / 2s per user to prevent spam.
+
+B. Frontend (no external CDNs; keep styling)
+
+Map: clustering & time filters
+
+Add client-side clustering at zoom ≤ 14. Use a local dependency:
+
+Option A: leaflet.markercluster
+
+Option B: supercluster + Leaflet layer bridge
+(Install via NPM only; no CDN.)
+
+Add time filter control with two toggles: 12h (default) / 24h. Request incidents with sinceHours and hide any older than 24h.
+
+Category icons: Use distinct icons for at least: Fire, Crime, Infrastructure, Nuisance, Community. Non-disruptive, consistent with current palette.
+
+Cluster badges: When multiple nearby, show one icon with a count badge; on expand, render individual markers.
+
+Alerts (client-side, Fire only)
+
+Subscribe to incident stream (existing Socket.IO or polling). For each new Fire within user’s alert radius:
+
+Compute RiskScore = (categoryWeight 1.0 * 0.7) + (localDensity 0..1 * 0.3) – (ageMinutes * 0.01).
+
+For MVP, set categoryWeight=1.0 for Fire; localDensity = fraction of fire incidents in last 30 min within 500 m (capped at 1); age decay small.
+
+If RiskScore ≥ 0.7, trigger:
+
+Vibration if supported: navigator.vibrate([150, 100, 150])
+
+Audio beep using a short bundled wav (local asset) or WebAudio beep; request user interaction first to unlock audio; provide per-category toggle and quiet hours in settings.
+
+Cooldown: per cluster, 1 alert / 20 min.
+
+Neighbourhood chat UI
+
+Add a Chat tab/panel on the main screen. The room is the user’s neighbourhood (derived from profile). Show:
+
+Message list (virtualized), input box, send button.
+
+Soft moderation: delete own message; report message.
+
+Persist last room in local state; fetch last 100 on open.
+
+Indicate online users count in room header.
+
+Moderation UI (RBAC)
+
+If user has moderator role:
+
+Add a Moderation panel with two tabs: Anonymous Queue and All Reports.
+
+For each incident card: Acknowledge, Resolve, Remove (with reason). Actions call RBAC-protected endpoints. Update map/feed in real time.
+
+Anonymous report UX
+
+In report flow, add “Report anonymously” toggle with a note: “Identity hidden from public & non-verified users. Reports are reviewed before public visibility.”
+
+Anonymous reports go to queue immediately; do not place photos on the public map. Show them in feed after moderator validation.
+
+Time windows on map
+
+Top-right control with 12h / 24h buttons; default 12h; disable map rendering of incidents older than 24h (still visible in feed search if implemented).
+
+C. Security, performance, and UX constraints
+
+Sanitize all user text (reports & chat). Strip HTML tags and control chars; cap lengths (2k report fields, 1k chat).
+
+Rate limits:
+
+Incidents: 1/10s per user; Anonymous: 1/20s per user/IP.
+
+Chat: 1 message / 2s per user.
+
+RBAC enforcement: All moderation/verification routes must require verified moderator roles.
+
+No external services (no Firebase/Redis/CDN). All deps via package.json and stored locally in Replit.
+
+Battery/data: Pause heat/cluster recomputation when tab hidden; throttle Socket events.
+
+Accessibility: Ensure buttons are keyboard focusable; provide ARIA labels for toggles.
+
+D. Tests & “definition of done”
+
+Backend tests (Jest/Supertest)
+
+/api/incidents rejects unsanitized HTML and over-length descriptions.
+
+Anonymous incident → appears in /api/mod/anonymous, not in main public fetch until approved.
+
+RBAC: non-moderator gets 403 on moderate/verify/resolve; moderator succeeds.
+
+Nearby w/ time filter: sinceHours=12 excludes older records; never returns >24h.
+
+Client checks
+
+Map shows clusters at low zoom; toggling 12h/24h updates markers; no incident older than 24h renders.
+
+New Fire near me triggers vibration + beep after consent, with cooldown enforced.
+
+Chat: sending message updates room, persists history (last 100), and rate-limit feedback appears.
+
+Performance
+
+Map pan/zoom ~60fps on mid-range Android; cluster expand/collapse under 100ms for 1–2k points.
+
+E. Guardrails
+
+Do not alter theme colors, logos, or unrelated pages.
+
+Keep existing routes and types; extend minimally.
+
+If a choice is needed between a heavy dependency and a light one, pick the lighter (prefer supercluster over large UI libs).
+
+Keep everything runnable inside a single Replit workspace; no external accounts/keys.
+
+Deliverables
+
+Updated backend routes/middleware (RBAC, anonymous queue, time filters).
+
+New chat API + Socket events.
+
+Frontend map with clustering + 12h/24h filter UI.
+
+Fire alert (risk-scored) with vibration/audio + settings.
+
+Moderation panel (RBAC-gated).
+
+Jest/Supertest covering RBAC, anonymous queue, and time filtering.

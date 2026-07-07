@@ -1,0 +1,264 @@
+perfect callout — let’s adapt Milestone 4 to Leaflet cleanly. Below are drop-in snippets that:
+
+use map.latLngToContainerPoint() / containerPointToLatLng()
+
+avoid collisions with existing marker clicks via a full-screen overlay while picking
+
+keep bounds guard + keyboard shortcuts
+
+replace road-snap with a simple, robust pixel-grid snap (optional toggle)
+
+No backend changes needed.
+
+1) Geo helpers (Leaflet-friendly)
+
+client/src/lib/geo.ts
+
+export type LngLat = { lng: number; lat: number };
+
+/** Southern Africa rough bounds (tune if needed) */
+export const SA_BOUNDS = {
+  minLat: -35, maxLat: -10,
+  minLng:  10, maxLng:  40,
+};
+
+export function inSouthernAfrica({ lat, lng }: { lat: number; lng: number }) {
+  return (
+    lat >= SA_BOUNDS.minLat && lat <= SA_BOUNDS.maxLat &&
+    lng >= SA_BOUNDS.minLng && lng <= SA_BOUNDS.maxLng
+  );
+}
+
+export function fmtCoord(n: number) {
+  return n.toFixed(5);
+}
+
+/**
+ * Pixel-grid snap:
+ *  - Snap click to an N-pixel grid in screen space, then convert back to lat/lng.
+ *  - This gives a pleasant “snap near feature” feel without querying rendered features.
+ *  - Works with Leaflet at any zoom; gridPx ~ 8–16 feels good.
+ */
+export function pixelGridSnap(map: any, lng: number, lat: number, gridPx = 12) {
+  if (!map?.containerPointToLatLng || !map?.latLngToContainerPoint) return { lng, lat };
+  const p = map.latLngToContainerPoint({ lat, lng });
+  const snapped = {
+    x: Math.round(p.x / gridPx) * gridPx,
+    y: Math.round(p.y / gridPx) * gridPx,
+  };
+  const ll = map.containerPointToLatLng(snapped);
+  return { lng: ll.lng, lat: ll.lat };
+}
+
+2) Map: ghost-pin picking with overlay (no marker conflicts)
+
+This approach places an absolute overlay above the map while picking.
+All clicks go to the overlay, so existing marker handlers are untouched.
+We convert overlay click coordinates → Leaflet lat/lng using the map container’s bounding rect.
+
+// client/src/pages/community/Map.tsx
+import { useEffect, useRef, useState } from "react";
+import { useReportPanel } from "@/features/report/useReportPanel";
+import { INCIDENT_TYPES } from "@/features/report/incidentTypes";
+import { beginLocationPick, emitLocationPicked } from "@/lib/events";
+import { inSouthernAfrica, fmtCoord, pixelGridSnap } from "@/lib/geo";
+import { track } from "@/lib/analytics";
+
+export default function MapPage() {
+  const mapRef = useRef<any>(null); // your Leaflet map instance assigned on init
+  const containerRef = useRef<HTMLDivElement>(null); // wrapper around map for overlay math
+  const { openWith } = useReportPanel();
+
+  const [isPicking, setIsPicking] = useState(false);
+  const [ghost, setGhost] = useState<{ lng: number; lat: number } | null>(null);
+  const [snapEnabled, setSnapEnabled] = useState(true);
+
+  // start picking from panel button
+  useEffect(() => {
+    const onBegin = () => {
+      setIsPicking(true);
+      setGhost(null);
+      track("pick_start");
+    };
+    window.addEventListener("nn:begin-location-pick", onBegin as EventListener);
+    return () => window.removeEventListener("nn:begin-location-pick", onBegin as EventListener);
+  }, []);
+
+  // keyboard shortcuts during picking
+  useEffect(() => {
+    if (!isPicking) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsPicking(false); setGhost(null);
+        track("pick_cancel");
+      } else if (e.key === "Enter" && ghost) {
+        emitLocationPicked(ghost.lat, ghost.lng);
+        setIsPicking(false); setGhost(null);
+        track("pick_confirm", { lat: ghost.lat, lng: ghost.lng });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [isPicking, ghost]);
+
+  // overlay click → compute lat/lng using Leaflet conversion
+  function handleOverlayClick(e: React.MouseEvent) {
+    const map = mapRef.current;
+    const container = containerRef.current;
+    if (!isPicking || !map || !container) return;
+
+    const rect = container.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const latLng = map.containerPointToLatLng({ x, y });
+    let next = { lng: latLng.lng, lat: latLng.lat };
+
+    if (!inSouthernAfrica(next)) {
+      // optional: toast a friendly “out of bounds”
+      console.warn("Out of bounds:", next);
+      return;
+    }
+
+    if (snapEnabled) {
+      next = pixelGridSnap(map, next.lng, next.lat, 12);
+    }
+
+    setGhost(next);
+  }
+
+  function confirmPick() {
+    if (!ghost) return;
+    emitLocationPicked(ghost.lat, ghost.lng);
+    setIsPicking(false);
+    setGhost(null);
+    track("pick_confirm", { lat: ghost.lat, lng: ghost.lng });
+  }
+  function cancelPick() {
+    setIsPicking(false);
+    setGhost(null);
+    track("pick_cancel");
+  }
+
+  // compute ghost’s screen position for absolute marker rendering
+  const ghostScreen = (() => {
+    const map = mapRef.current;
+    if (!ghost || !map?.latLngToContainerPoint) return null;
+    const p = map.latLngToContainerPoint({ lat: ghost.lat, lng: ghost.lng });
+    return { x: p.x, y: p.y };
+  })();
+
+  return (
+    <div ref={containerRef} className="relative h-full">
+      {/* Your Leaflet map goes here; set mapRef.current on init */}
+      {/* <LeafletMap whenCreated={(m) => (mapRef.current = m)} ... /> */}
+
+      {/* Ghost marker rendered in overlay space */}
+      {isPicking && ghostScreen && (
+        <div
+          className="absolute -translate-x-1/2 -translate-y-full pointer-events-none"
+          style={{ left: ghostScreen.x, top: ghostScreen.y }}
+        >
+          <div className="h-6 w-6 rounded-full bg-sky-400 ring-4 ring-white/30 shadow" />
+        </div>
+      )}
+
+      {/* Full-screen clickable overlay (only while picking) */}
+      {isPicking && (
+        <div
+          className="absolute inset-0 cursor-crosshair z-[60]"
+          onClick={handleOverlayClick}
+          // prevent wheel/drag from moving map while picking (optional)
+          onWheel={(e) => e.preventDefault()}
+          onMouseDown={(e) => e.preventDefault()}
+        />
+      )}
+
+      {/* Glass footer controls */}
+      {isPicking && (
+        <div className="absolute inset-x-0 bottom-3 px-3 pointer-events-none z-[61]">
+          <div
+            className="backdrop-blur bg-slate-900/60 border border-slate-700 text-white shadow-lg rounded-2xl px-3 py-2 flex items-center gap-3 justify-between pointer-events-auto"
+            style={{ paddingBottom: "calc(env(safe-area-inset-bottom) / 2 + 0.25rem)" }}
+          >
+            <div className="text-xs sm:text-sm opacity-90">
+              {ghost ? (
+                <>Chosen: <span className="font-mono">{fmtCoord(ghost.lat)}, {fmtCoord(ghost.lng)}</span></>
+              ) : (
+                <>Tap on the map to drop a pin</>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-xs flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={snapEnabled}
+                  onChange={(e) => setSnapEnabled(e.target.checked)}
+                />
+                Snap to grid
+              </label>
+
+              <button
+                className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 transition"
+                onClick={cancelPick}
+              >
+                Cancel (Esc)
+              </button>
+
+              <button
+                className="px-3 py-1.5 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-50 transition"
+                onClick={confirmPick}
+                disabled={!ghost}
+              >
+                Confirm (Enter)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Existing FABs (including Report) */}
+      {/* ... */}
+    </div>
+  );
+}
+
+
+Why the overlay? It cleanly sidesteps Leaflet marker click conflicts while picking; all interaction goes to the overlay, and we convert pixel → lat/lng using Leaflet’s converters.
+
+3) Panel (optional tiny tweak)
+
+You can disable the panel’s Submit while isPicking to avoid confusion:
+
+// ReportPanel.tsx
+// const [isPicking] = usePickingStore(...) or expose from location store if you have one.
+// Or keep as-is; UX already flows fine since confirming emits nn:location-picked.
+
+4) QA checklist
+
+Click “Drop a pin” → overlay appears (crosshair), markers don’t steal clicks.
+
+Tap anywhere → ghost pin shows; coords update in footer.
+
+Toggle “Snap to grid” → pin jumps to neat positions.
+
+Esc cancels; Enter confirms → panel location updates; Submit enabled.
+
+Click beyond SA bounds → click ignored (optional toast).
+
+Mobile → footer respects safe-area; overlay prevents accidental map drags.
+
+Road-snap (future)
+
+Leaflet doesn’t expose rendered feature queries; real road-snap would need:
+
+a vector tiles source w/ road data + query (e.g., MapLibre), or
+
+a server/Overpass API call (too slow for UX), or
+
+preloaded road polylines in a Leaflet layer and a nearest-point-on-line calc (turf.js).
+
+We can add a turf.js nearest-point-on-line approach if you have a roads layer loaded; for now, the pixel grid gives a crisp, low-cost approximation.
+
+If you’re happy, go ahead and wire this in. I can also supply the turf.js snap variant later if you confirm you’ve got a roads GeoJSON layer in Leaflet.

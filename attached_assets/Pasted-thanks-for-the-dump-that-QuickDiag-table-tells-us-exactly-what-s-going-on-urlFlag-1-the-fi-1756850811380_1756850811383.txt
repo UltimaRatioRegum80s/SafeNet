@@ -1,0 +1,117 @@
+thanks for the dump — that QuickDiag table tells us exactly what’s going on:
+
+urlFlag: '1' ✅ (the fix is enabled)
+
+hasMap: false, hasCluster: false ❌ (the map + cluster objects aren’t exposed to the page’s global scope)
+
+Because of that, the probe couldn’t add test markers (directProbe: 'no map')
+
+So this is a debugging access issue, not necessarily a rendering issue yet
+
+We’ll fix that safely by exposing the map + cluster to window only when the flag is ON (so desktop behavior stays untouched). This lets us run the probes properly and verify visibility.
+
+@Replit — copy-paste patch (tiny & Progress-Law safe)
+
+File: client/src/components/MapView.tsx (where you create the Leaflet map + clusterRef)
+
+Add the debug export right after the map is created and after the cluster group is created/attached. Keep it strictly behind the flag.
+
+// imports at top if not present
+import { Flags } from '@/lib/flags';
+
+// ... inside the effect where the Leaflet map instance is created:
+if (Flags.fixMobileMarkers && mapRef.current) {
+  // expose for console-only diagnostics
+  (window as any)._map = mapRef.current;
+}
+
+// ... where you create/assign the MarkerClusterGroup:
+if (!clusterRef.current) {
+  clusterRef.current = L.markerClusterGroup(/* your existing options */);
+}
+
+// ensure the cluster group is actually on the map (no duplicates)
+if (Flags.fixMobileMarkers && mapRef.current && clusterRef.current) {
+  if (!mapRef.current.hasLayer(clusterRef.current)) {
+    mapRef.current.addLayer(clusterRef.current);
+  }
+  // expose for diagnostics
+  (window as any)._cluster = clusterRef.current;
+}
+
+
+Do not change any other logic. This doesn’t affect runtime behavior—it only exposes references when the flag is ON and makes sure the cluster is attached (idempotently).
+
+Commit message:
+
+chore(debug): expose map/cluster to window behind NN_FIX_MOBILE_MARKERS + ensure cluster attached
+
+Test (in Replit preview)
+
+Open the map with the flag: ?NN_FIX_MOBILE_MARKERS=1
+
+Open DevTools → Console.
+
+Run this quick check:
+
+({
+  hasMap: !!window._map,
+  hasCluster: !!window._cluster,
+  clusterOnMap: window._map && window._cluster ? window._map.hasLayer(window._cluster) : 'n/a',
+  clusterLayerCount: window._cluster ? window._cluster.getLayers().length : 'n/a'
+})
+
+
+You should see:
+
+hasMap: true
+
+hasCluster: true
+
+clusterOnMap: true (or becomes true after panning once)
+
+clusterLayerCount ≥ 1 once incidents are processed
+
+If those are true, drop one direct and one clustered probe:
+
+// direct (magenta)
+(() => {
+  const m = window._map;
+  const icon = L.divIcon({ className:'nn-divicon-wrapper',
+    html:'<div style="width:18px;height:18px;border-radius:9999px;background:#ff00ff;border:2px solid #fff"></div>',
+    iconSize:[18,18], iconAnchor:[9,9] });
+  L.marker(m.getCenter(), { icon, title:'direct-probe' }).addTo(m);
+})();
+
+// clustered (green)
+(() => {
+  const m = window._map, cl = window._cluster;
+  const icon = L.divIcon({ className:'nn-divicon-wrapper',
+    html:'<div style="width:18px;height:18px;border-radius:9999px;background:#10b981;border:2px solid #065f46"></div>',
+    iconSize:[18,18], iconAnchor:[9,9] });
+  cl.addLayer(L.marker(m.getCenter(), { icon, title:'cluster-probe' }));
+  console.log('cluster count:', cl.getLayers().length);
+})();
+
+
+If you see the magenta dot or the cluster count increases, rendering is working; then we focus on why incident markers aren’t added (filtering, bounds, or timing). If you still don’t see anything:
+
+Force marker pane above tiles (temporary; resets on refresh):
+
+const s=document.createElement('style');
+s.textContent='.leaflet-marker-pane{z-index:999999!important;display:block!important;opacity:1!important}';
+document.head.appendChild(s);
+
+Why this is safe
+
+Desktop flow is completely unchanged.
+
+The new code runs only when NN_FIX_MOBILE_MARKERS=1.
+
+We’re just exposing refs + ensuring the cluster layer is attached idempotently.
+
+Instant rollback: remove the query param or set localStorage.NN_FIX_MOBILE_MARKERS='0'.
+
+If probes work but incidents still don’t show
+
+Reply with the results. If probes show visible markers, the next likely culprit is the filtering step (e.g., bounds-based filter running before mapReady on mobile, resulting in 0 “map incidents”). I’ll give you a tiny, flag-gated one-liner to bypass bounds filtering on mobile while we sort it, without touching desktop.

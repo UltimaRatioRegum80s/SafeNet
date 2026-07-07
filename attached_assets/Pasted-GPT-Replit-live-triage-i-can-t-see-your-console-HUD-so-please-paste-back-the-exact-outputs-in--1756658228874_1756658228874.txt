@@ -1,0 +1,106 @@
+GPT → Replit (live triage)
+
+i can’t see your console/HUD, so please paste back the exact outputs in this template. here’s what I expect vs. what each outcome means.
+
+✅ What we expect after clicking Report (desktop ≥1024px)
+
+Store/HUD right after click:
+
+sheetOpen: false
+reportMode: true
+pendingReportMode: false
+
+
+Console step 0:
+
+isDesktop? true
+featureFlag? true (or undefined if not used)
+
+
+Console step 1 DOM checks:
+
+#map                       → true
+.crosshair on #map         → true
+overlay role="status" text → true (contains "Click the map to set the incident location")
+
+📋 Please paste results in this exact format
+
+Step 0
+
+isDesktop? ___
+
+featureFlag? ___
+
+Step 1 (immediately after clicking Report)
+
+HUD: { sheetOpen: ___, reportMode: ___, pendingReportMode: ___ }
+
+Store dump: (paste object)
+
+!!document.querySelector('#map'): ___
+
+!!document.querySelector('#map.cursor-crosshair, .cursor-crosshair'): ___
+
+!!document.querySelector('*:is([role="status"])')?.textContent?.includes('Click the map'): ___
+
+🧭 Instant diagnostics by outcome
+
+isDesktop = false → our desktop path isn’t active.
+
+Confirm viewport ≥1024px.
+
+Check useIsDesktop() uses (min-width: 1024px) and not a custom breakpoint.
+
+If SSR causes mismatch, gate desktop-only UI behind a mounted flag (run once after useEffect).
+
+HUD shows sheetOpen: true after Report → Report button still calls openSheet() on desktop.
+
+Fix handler:
+
+const handleReportClick = () => (isDesktop ? startReportMode() : openSheet());
+
+
+Ensure no parent effect reopens the sheet (scan for openSheet() in useEffect).
+
+HUD shows reportMode: true but .cursor-crosshair is false → CSS not applied to the correct element.
+
+Verify the class is on the actual map container (the one Leaflet draws into). If your container is not #map, update the selector or the class application.
+
+HUD reportMode: true, overlay query false → overlay isn’t rendering or text differs.
+
+Ensure the overlay JSX is inside Map.tsx and wrapped in reportMode && (...).
+
+Confirm it has role="status" and the message contains “Click the map”.
+
+All DOM checks true, but click does nothing → click is intercepted.
+
+Inspect if any Radix portal/backdrop still covers the map (z-index).
+
+Ensure overlay has pointer-events-none.
+
+Raise map container z-index:
+
+<div id="map" class="relative z-[1] h-full w-full ...">
+
+
+Double-click still opens sheet / places pin → once-handler not active.
+
+Confirm the effect uses map.once('click', onClick) while reportMode is true.
+
+🔎 One-line sanity probes you can run right now
+
+Force-enter report mode:
+
+import('@/state/useQuickReportStore').then(m => m.useQuickReportStore.getState().startReportMode())
+
+
+Expect overlay + crosshair immediately.
+
+Force-open sheet with fake coords:
+
+import('@/state/useQuickReportStore').then(m => m.useQuickReportStore.getState().confirmTempPin({lat:1,lng:2}))
+
+
+Expect right-side sheet + “Location set: …”.
+
+send me the values in the template above (Step 0 + Step 1). with that, I’ll give you the exact micro-patch (likely a 1–3 line fix) to land.

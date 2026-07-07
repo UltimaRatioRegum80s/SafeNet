@@ -1,0 +1,54 @@
+Message to Replit (AI Coding Lead / Technical Implementer)
+
+Hi Replit — I need a frank root-cause analysis.
+
+As we build and “improve” the app, we sometimes end up with undesired/unintentional changes:
+
+UI/UX regressions (layouts, flows, buttons moving, styling drifting)
+
+behavior changes (auth flow, offline sync state machine, incident creation checks)
+
+architecture drift (new abstractions, refactors that weren’t requested, changes to file structure)
+
+“fixes” that silently break other parts (side effects, untested paths)
+
+1) Why does this happen in AI-assisted development?
+Please explain the most common root causes (e.g., ambiguous instructions, partial context window, over-eager refactors, missing constraints, hidden coupling, lack of tests, lack of design tokens, etc.). Be blunt: what are you as an AI agent most likely doing that causes this?
+
+2) Where is it happening in our codebase specifically?
+Identify the “hot zones” that are most prone to accidental changes (examples: shared components, styling system, routing, auth/session middleware, service worker/PWA caching, IndexedDB sync logic, server endpoints, env flag gating like INCIDENT_CREATION_ENABLED / OFFLINE_SYNC_ENABLED, etc.).
+If you can, name the patterns you see (tight coupling, unclear boundaries, duplicated logic).
+
+3) Give me a prevention system (process + tooling) we can adopt immediately.
+I want a practical playbook, not theory. Include:
+
+Change control rules: when refactors are allowed vs forbidden; “no unrelated edits” rule
+
+Definition of done: what must be checked before merging (screens, flows, tests)
+
+Guardrails for you (the agent): what you should never change without explicit approval
+
+Testing: minimum test suite that catches regressions (unit/integration/e2e) + what to prioritize first
+
+Visual regression: screenshot tests / UI snapshots (if feasible)
+
+Architecture boundaries: where logic should live so changes don’t ripple
+
+Small PR discipline: how to break tasks into safe increments
+
+Spec format: how I should write prompts so you can’t misinterpret them (acceptance criteria, “must not change” list)
+
+CI checks: lint/typecheck/test/build, and any PWA-specific checks
+
+Rollback strategy: if something regresses, what’s the quickest revert path?
+
+4) Output format I want from you
+Please answer in this structure:
+
+A. Root causes (ranked by likelihood)
+B. Our hotspots + why they’re risky
+C. The “prevention checklist” we adopt from today
+D. The “agent rules” you will follow going forward
+E. The minimum tests we add first (highest ROI)
+
+Goal: Stop accidental changes, keep the app stable in closed beta, and move forward in a predictable, controlled way.

@@ -1,0 +1,27 @@
+
+This session (direct work):
+
+Mobile keyboard fix — When tapping the textarea on the QuickReportCard bottom sheet, the keyboard now shifts the sheet upward so the textarea and Submit button stay visible = fixed 
+
+FAB style consistency — The "+" floating action button on the Feed page now matches the Map page exactly (same blue colour, rounded-square shape, PlusCircle icon)
+Merged tasks (background agents): = fixed 
+
+Rate limit reduced to 3s — Incident submission cooldown cut from 10s (authenticated) / 20s (anonymous) down to 3s for both user types = will verify with field resting 
+
+Press-and-hold quick submit (2s) — Long-press gesture on report types for faster direct submission = not working / failed 
+
+Map markers appear immediately after submit — Fixed the delay where newly reported incidents weren't showing on the map right away  =  will verify with field testing 
+
+Dashboard personal stats + community pie chart — Added a doughnut chart showing community report breakdown by category, plus a "Your reports today" card with per-category counts = success 
+
+"Navigate to" button on map markers — Each incident marker and the incidents panel now has a Navigate button that opens Apple Maps (iOS), Google Maps (Android), or Google Maps on desktop = failed - not appearing - also misunderstood - Navigate button must not open Apple Maps (iOS), Google Maps (Android), or Google Maps - naivation must happen in our app on our maps - out outside as suggested - 
+
+Earlier in the session (before these tasks):
+
+GPS dependency overhaul — city-coordinate fallback for reading (Feed/Dashboard/Map), GPS-only gate for posting  = seems good 
+
+Soft informational banners on Feed and Dashboard when using city fallback instead of blank screens = will verify 
+
+Legacy "Quick Report" drawer removed from Feed; "+" FAB now goes to the full v2 report form = seems good 
+
+Note - if we move to fix outstanding issue - we will address it one by one in a systematic way that makes coding and engineering sense - im not sure if running parallel agents is productive 

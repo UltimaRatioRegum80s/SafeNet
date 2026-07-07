@@ -1,0 +1,132 @@
+Love it — desktop is solid. Let’s finish mobile with the same “tiny + reversible” mindset. From your logs:
+
+[Mobile] incidents count: 50 ✅ (data is there)
+
+You see [Mobile] creating cluster group but no “cluster created/added” or “built markers” logs ❌
+→ the flow is bailing out between “create cluster” and “add markers”.
+
+That almost certainly means the mobile path is using ensureCluster() and either:
+
+returns undefined (wrong import / wrong factory), or
+
+exits early due to a guard (e.g., !mapReady, !hasSidebar, etc.), or
+
+creates the group but never adds it to the map.
+
+We won’t touch desktop or any fetching/UI. Here’s the minimal, NRP-safe way to pin it down and fix:
+
+🔧 Replit — surgical, reversible steps
+1) Show me ensureCluster() (just the small function)
+
+Please paste the function body of ensureCluster() and where it’s imported in MapView.tsx.
+
+We need to confirm it ultimately calls the severity-aware factory from @/features/map/cluster (not the old @/lib/cluster).
+
+If it conditionally returns null/undefined on mobile, we’ll know why the sequence stops.
+
+2) Add a defensive create+attach (2-3 lines)
+
+Right after [Mobile] creating cluster group in MapView.tsx, add (temporarily):
+
+try {
+  const existing = clusterRef.current;
+  const cluster =
+    existing ??
+    (clusterRef.current = createClusterGroup?.() ?? ensureCluster?.(map));
+
+  console.log("[Mobile] cluster created:", !!cluster);
+
+  if (cluster && map && !map.hasLayer(cluster)) {
+    map.addLayer(cluster);
+    console.log("[Mobile] cluster added to map:", map.hasLayer(cluster));
+  }
+} catch (e) {
+  console.error("[Mobile] cluster creation error:", e);
+}
+
+
+This does not change desktop, and is fully reversible. It simply guarantees we either get a cluster or we see the error.
+
+3) Force marker add path to run once we have the cluster
+
+Where you currently build markers:
+
+if (map && clusterRef.current && Array.isArray(incidents)) {
+  console.log("[Mobile] add markers run. with:", incidents.length);
+  const markers = incidents.map(buildMobileMarker).filter(Boolean);
+  console.log("[Mobile] built markers:", markers.length);
+
+  clusterRef.current.clearLayers();
+  clusterRef.current.addLayers(markers);
+  console.log("[Mobile] after addLayers, childCount:",
+              clusterRef.current.getLayers().length);
+
+  // one-time peek at layers
+  let peek = 0;
+  map.eachLayer(l => {
+    const n = l?.constructor?.name || "layer";
+    if (/Marker|Cluster/i.test(n) && peek++ < 5) {
+      console.log("[Mobile] layer:", n, l);
+    }
+  });
+}
+
+4) Verify imports (one-liner)
+
+At top of MapView.tsx, confirm:
+
+import { createClusterGroup } from "@/features/map/cluster";
+// ❌ do not import from "@/lib/cluster" on mobile
+
+
+If ensureCluster is still referenced, keep it but re-export it to the features version (shim in lib/cluster.ts) to avoid touching call sites.
+
+5) Rule out a guard skipping mobile
+
+Search for early returns around cluster creation/update:
+
+rg -n -B 4 -A 6 "ensureCluster|createClusterGroup|addLayers|clearLayers|clusterRef" client/src/components/MapView.tsx
+
+
+If you see conditions like if (!hasSidebar) return; or if (!isDesktop) return;, that’s the skip. Replace with a mobile-friendly guard:
+
+if (!mapReady || !map) return;
+// remove desktop-only guards for the cluster path
+
+✅ Acceptance checklist (mobile)
+
+Console should show:
+
+[Mobile] incidents count: 50
+
+[Mobile] cluster created: true
+
+[Mobile] cluster added to map: true
+
+[Mobile] add markers run. with: 50
+
+[Mobile] built markers: <N>
+
+[Mobile] after addLayers, childCount: <N>
+
+Markers / clusters visible exactly like desktop (same severity styling).
+
+Zoom/pan remain stable (no snap-backs).
+
+No change to desktop behavior or sidebar.
+
+Why we’re not removing clustering
+
+Clustering isn’t the cause; an incomplete creation path is.
+
+It’s critical for performance/clarity as incidents grow.
+
+Our fix is just ensuring the same cluster path runs on mobile.
+
+What I need from you next, Replit
+
+Paste the ensureCluster() function and its import line.
+
+Run with the defensive logs above and paste the new console lines (created? added? childCount?).
+
+With that, I’ll point to the exact 1–2 lines to keep permanently (and we can remove the extra logs).

@@ -1,0 +1,35 @@
+.nn-popup { max-width: 240px; font: 12px/1.4 system-ui, sans-serif; color: #e5e7eb; }
+.nn-popup__header { display:flex; justify-content:space-between; gap:8px; align-items:center; margin-bottom:6px; }
+.nn-popup__type { text-transform: capitalize; font-weight:700; }
+.nn-popup__sev { font-size:10px; padding:2px 6px; border-radius:999px; background:#1f2937; color:#fff; text-transform:uppercase; letter-spacing:.04em; }
+.nn-popup__sev--low { background:#064e3b; }
+.nn-popup__sev--medium { background:#92400e; }
+.nn-popup__sev--high { background:#7c2d12; }
+.nn-popup__sev--critical { background:#7f1d1d; }
+
+.nn-popup__status { font-size:11px; padding:6px 8px; border-radius:10px; margin:6px 0; }
+.nn-popup__status--optimistic { background:rgba(34,211,238,.12); color:#67e8f9; border:1px solid rgba(34,211,238,.25); }
+.nn-popup__status--offline { background:rgba(251,191,36,.12); color:#fcd34d; border:1px dashed rgba(251,191,36,.35); }
+.nn-popup__desc { white-space:pre-wrap; color:#e5e7eb; }
+.nn-popup__meta { color:#9ca3af; margin-top:6px; font-size:11px; }
+.nn-popup__navigate {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(59,130,246,.4);
+  background: rgba(59,130,246,.15);
+  color: #93c5fd;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+  width: 100%;
+  justify-content: center;
+}
+.nn-popup__navigate:hover {
+  background: rgba(59,130,246,.28);
+  color: #bfdbfe;
+}

@@ -1,0 +1,286 @@
+Perfect—thanks for the detailed architecture, that’s exactly what we need.
+Below is a drop-in implementation for the “Quick Report” flow that:
+
+Opens a small bottom sheet with an optional text box + Submit.
+
+On submit, grabs current GPS, POSTs to /api/incidents, and redirects to /map so the user immediately sees their pin.
+
+Uses your existing stack: Vite + React + TS + Wouter + Zustand + shadcn/ui + React Query + Leaflet backend/socket.
+
+🤖 GPT → Implementation
+1) Geolocation helper
+
+client/src/lib/geolocation.ts
+
+// client/src/lib/geolocation.ts
+export type GeoPoint = { lat: number; lng: number; accuracy?: number };
+
+export class GeolocationError extends Error {
+  code?: number;
+  constructor(message: string, code?: number) {
+    super(message);
+    this.name = "GeolocationError";
+    this.code = code;
+  }
+}
+
+export function getCurrentPosition(
+  opts: Partial<PositionOptions> = {}
+): Promise<GeoPoint> {
+  const options: PositionOptions = {
+    enableHighAccuracy: true,
+    timeout: 8000,
+    maximumAge: 0,
+    ...opts,
+  };
+
+  return new Promise((resolve, reject) => {
+    if (!("geolocation" in navigator)) {
+      return reject(new GeolocationError("Geolocation not supported"));
+    }
+    const onSuccess = (pos: GeolocationPosition) => {
+      resolve({
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude,
+        accuracy: pos.coords.accuracy,
+      });
+    };
+    const onError = (err: GeolocationPositionError) => {
+      reject(new GeolocationError(err.message, err.code));
+    };
+    navigator.geolocation.getCurrentPosition(onSuccess, onError, options);
+  });
+}
+
+2) Quick-report Zustand store (isolated slice)
+
+client/src/state/useQuickReportStore.ts
+
+// client/src/state/useQuickReportStore.ts
+import { create } from "zustand";
+import type { IncidentType, IncidentSeverity } from "@/features/report/incidentTypes";
+
+type QuickReportState = {
+  isOpen: boolean;
+  type?: IncidentType;
+  severity?: IncidentSeverity;
+  note: string;
+  open: (p: { type: IncidentType; severity: IncidentSeverity }) => void;
+  close: () => void;
+  setNote: (note: string) => void;
+  reset: () => void;
+};
+
+export const useQuickReportStore = create<QuickReportState>((set) => ({
+  isOpen: false,
+  type: undefined,
+  severity: undefined,
+  note: "",
+  open: ({ type, severity }) => set({ isOpen: true, type, severity, note: "" }),
+  close: () => set({ isOpen: false }),
+  setNote: (note) => set({ note }),
+  reset: () => set({ isOpen: false, type: undefined, severity: undefined, note: "" }),
+}));
+
+3) React Query mutation for creating an incident
+
+client/src/features/report/api/useCreateIncident.ts
+
+// client/src/features/report/api/useCreateIncident.ts
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { IncidentType, IncidentSeverity } from "@/features/report/incidentTypes";
+
+export type CreateIncidentDTO = {
+  type: IncidentType;
+  severity: IncidentSeverity;
+  latitude: number;
+  longitude: number;
+  description?: string;
+};
+
+async function postIncident(dto: CreateIncidentDTO) {
+  const res = await fetch("/api/incidents", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dto),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Failed to create incident (${res.status})`);
+  }
+  return (await res.json()) as { id: string };
+}
+
+export function useCreateIncident() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: postIncident,
+    onSuccess: () => {
+      // refresh any lists/feeds if present
+      qc.invalidateQueries({ queryKey: ["incidents"] }).catch(() => {});
+    },
+  });
+}
+
+4) QuickReportCard bottom sheet
+
+client/src/features/report/QuickReportCard.tsx
+
+// client/src/features/report/QuickReportCard.tsx
+import * as React from "react";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { useQuickReportStore } from "@/state/useQuickReportStore";
+import { getCurrentPosition } from "@/lib/geolocation";
+import { useCreateIncident } from "./api/useCreateIncident";
+import { useLocation } from "wouter";
+import { useToast } from "@/components/ui/use-toast";
+import { INCIDENT_TYPES } from "@/features/report/incidentTypes";
+
+export default function QuickReportCard() {
+  const { isOpen, type, severity, note, setNote, close, reset } = useQuickReportStore();
+  const { toast } = useToast?.() ?? { toast: (_: any) => {} }; // safe if toast not installed
+  const [, setLocation] = useLocation();
+  const createIncident = useCreateIncident();
+
+  const label =
+    (type && INCIDENT_TYPES?.[type]?.label) ||
+    (type ? type.replace(/_/g, " ") : "Report");
+
+  const onSubmit = async () => {
+    if (!type || !severity) return;
+
+    try {
+      const { lat, lng } = await getCurrentPosition();
+      await createIncident.mutateAsync({
+        type,
+        severity,
+        latitude: lat,
+        longitude: lng,
+        description: note?.trim() || undefined,
+      });
+
+      // Let the socket/server broadcast; redirect user to map to see the pin.
+      reset();
+      toast?.({ title: "Incident reported", description: "Redirecting to map…" });
+      setLocation("/map");
+    } catch (err: any) {
+      toast?.({
+        title: "Couldn’t get your location",
+        description: err?.message ?? "Please enable location and try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  return (
+    <Sheet open={isOpen} onOpenChange={(o) => (!o ? close() : null)}>
+      <SheetContent side="bottom" className="rounded-t-2xl bg-neutral-950 text-white">
+        <SheetHeader>
+          <SheetTitle className="text-white">{label}</SheetTitle>
+          <p className="text-xs text-white/60">
+            Optional: add a short note, then submit to pin your location.
+          </p>
+        </SheetHeader>
+
+        <div className="mt-4 space-y-4">
+          <div className="space-y-2">
+            <label className="text-sm text-white/80">Short note (optional)</label>
+            <Textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="What happened?"
+              className="min-h-[90px] resize-none bg-neutral-900 text-white"
+            />
+          </div>
+        </div>
+
+        <SheetFooter className="mt-6 flex items-center gap-2">
+          <Button variant="ghost" className="text-white/70" onClick={close}>
+            Cancel
+          </Button>
+          <Button
+            className="ml-auto bg-teal-500 text-black hover:bg-teal-400"
+            onClick={onSubmit}
+            disabled={createIncident.isPending || !type || !severity}
+          >
+            {createIncident.isPending ? "Submitting…" : "Submit"}
+          </Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+5) Wire the quick card to the incident grid (bypass heavy form)
+
+Edit client/src/features/report/CategorySheets.tsx
+Replace the handler that opens ReportPanel with the quick-open call:
+
+// imports at top
+import { useIncidentStore } from "@/state/useIncidentStore";
+import { useQuickReportStore } from "@/state/useQuickReportStore";
+// (assumes your incidentTypes export is already here)
+
+export function CategorySheets() {
+  const severity = useIncidentStore((s) => s.severity); // existing
+  const openQuick = useQuickReportStore((s) => s.open);
+
+  // wherever you render incident buttons/cards:
+  // OLD onClick: open full ReportPanel
+  // NEW onClick:
+  const onIncidentClick = (type: IncidentType) => {
+    if (!severity) return; // or prompt to pick severity first
+    openQuick({ type, severity });
+  };
+
+  // ...JSX...
+  // <button onClick={() => onIncidentClick("blocked_road")}>Blocked Road</button>
+}
+
+6) Mount the QuickReportCard once on the report page
+
+Edit client/src/pages/community/ReportIncident.tsx
+
+// client/src/pages/community/ReportIncident.tsx
+import QuickReportCard from "@/features/report/QuickReportCard";
+
+export default function ReportIncidentPage() {
+  return (
+    <>
+      {/* existing severity + CategorySheets UI */}
+      <QuickReportCard />
+    </>
+  );
+}
+
+🔁 Behavior summary
+
+User picks severity → taps an incident type.
+
+QuickReportCard opens (bottom sheet) with optional note + Submit.
+
+Submit → get GPS → POST /api/incidents with { type, severity, latitude, longitude, description }.
+
+Server stores & broadcasts incident:new.
+
+Client redirects to /map where your map listens to realtime events or queries, so the marker appears with the correct icon.
+
+No changes were required in the Leaflet code because the server + socket flow handles the new pin. (If you want an instant optimistic marker before redirect, say the word and I’ll add a tiny in-memory “pending” marker overlay.)
+
+🛠 Replit — integration notes & checks
+
+Fits architecture: Uses Zustand (isolated store), shadcn Sheet, and React Query mutation; no changes to your existing map logic.
+
+Risk: Low. We bypass ReportPanel only for the quick path; the full form remains untouched.
+
+Redirect UX: Added wouter redirect to /map after success.
+
+Assets: Not needed for the card; markers still use your existing icon mapping on the map side.
+
+Follow-ups (optional):
+
+Add a “More options” link on the quick card to open the full ReportPanel.
+
+Toast provider: ensure <Toaster /> is mounted once (shadcn).

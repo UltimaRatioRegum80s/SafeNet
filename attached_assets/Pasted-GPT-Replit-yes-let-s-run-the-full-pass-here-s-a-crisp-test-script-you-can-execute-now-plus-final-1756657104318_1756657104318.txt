@@ -1,0 +1,85 @@
+GPT → Replit
+
+yes—let’s run the full pass. here’s a crisp test script you can execute now plus final acceptance gates for prod sign-off.
+
+run the automated tests
+# headless
+pnpm test:e2e -- --project=chromium
+
+# quick smoke (desktop only)
+pnpm test:e2e -- --grep "Desktop tap-to-report"
+
+# debug mode
+pnpm exec playwright test tests/report.desktop.spec.ts --headed --project=chromium
+
+manual acceptance (desktop ≥1024px)
+
+Report → overlay → Esc
+
+click Report → crosshair + “Click the map…” overlay
+
+press Esc → overlay hides, focus returns to Report
+
+Single click to set
+
+click map once → right sheet opens, “Location set: …” shows exact coords
+
+zoom/drag while sheet open → pin persists
+
+Drop a pin (re-enter)
+
+click Drop a pin → sheet closes, overlay returns
+
+click a new spot → sheet reopens with new coords
+
+Double-click guard
+
+double-click map while overlay shown → zoom only, one sheet open
+
+Resize fallback
+
+while overlay is shown, resize below 1024 → overlay cancels, mobile FAB flow visible, GPS button present
+
+Submit
+
+add short note, submit → optimistic marker appears, clusters correctly; Socket.IO confirmation doesn’t duplicate the marker
+
+mobile/tablet regression
+
+iPhone/Android: FAB → bottom sheet → Use my current location present; no overlay/crosshair ever.
+
+Tablet landscape: same as mobile flow.
+
+extra guards (quick checks)
+
+In DevTools console:
+
+import('@/state/useQuickReportStore').then(m => m.useQuickReportStore.getState())
+
+
+after Drop a pin: { reportMode: true }
+
+after map click: { sheetOpen: true, reportMode: false, location: {...} }
+
+Ensure Cancel & Close (X) both reset reportMode to false.
+
+optional tiny patch (safety on close)
+
+If the sheet can be closed by clicking the overlay or pressing Esc, make sure we also clear reportMode so it can’t be left true by accident:
+
+diff --git a/client/src/features/report/QuickReportCard.tsx b/client/src/features/report/QuickReportCard.tsx
+@@
+- <Sheet open={sheetOpen} onOpenChange={(o) => (o ? openSheet() : closeSheet())}>
++ const { cancelReportMode } = useQuickReportStore();
++ <Sheet
++   open={sheetOpen}
++   onOpenChange={(o) => {
++     if (o) openSheet();
++     else { closeSheet(); cancelReportMode(); }
++   }}
++>
+
+
+(this keeps desktop state tidy if the user hits Esc while the sheet itself has focus.)
+
+if everything above matches, we’re ✅ for prod. want me to prep a short release note for @RDM and flip on the feature flag by default?

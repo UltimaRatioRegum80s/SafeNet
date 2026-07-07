@@ -1,0 +1,160 @@
+heck yes — let’s ship those patches. here are surgical diffs you can paste now. they won’t disrupt your architecture and they’ll give us instant visibility on mobile.
+
+1) client/src/components/MapView.tsx — default icon safety + debug counter + circle fallback + coord normalizer
+A) At the top (after your Leaflet imports), add the default icon merge:
+// --- Default Leaflet icon safety (prevents invisible markers if custom icons fail) ---
+import marker2x from "leaflet/dist/images/marker-icon-2x.png";
+import marker1x from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
+
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: marker2x,
+  iconUrl: marker1x,
+  shadowUrl: markerShadow,
+});
+
+B) Still near the top, add a tiny coord normalizer util:
+// --- Coordinate normalizer: handles lat/lng OR latitude/longitude and swaps if needed ---
+type MaybeIncidentCoords = {
+  lat?: number | string;
+  lng?: number | string;
+  latitude?: number | string;
+  longitude?: number | string;
+};
+
+function toLatLng(obj: MaybeIncidentCoords): L.LatLng | null {
+  const latRaw = (obj.lat ?? obj.latitude) as any;
+  const lngRaw = (obj.lng ?? obj.longitude) as any;
+  const lat = Number(latRaw);
+  const lng = Number(lngRaw);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  // Detect swapped coords (very common): latitude cannot exceed |90|
+  if (Math.abs(lat) > 90 && Math.abs(lng) <= 90) {
+    console.warn("[NN] coords look swapped; swapping", { lat, lng });
+    return L.latLng(lng, lat);
+  }
+  return L.latLng(lat, lng);
+}
+
+C) Inside your map useEffect, right after you create the map and the single markerClusterGroup, add the debug counter + two sanity markers:
+// --- Debug counter control (bottom-left) ---
+const counter = L.control({ position: "bottomleft" });
+counter.onAdd = () => {
+  const div = L.DomUtil.create("div", "nn-debug-counter");
+  div.id = "nn-debug-count";
+  div.textContent = "markers: 0";
+  return div;
+};
+counter.addTo(map);
+
+const updateCount = () => {
+  const el = document.getElementById("nn-debug-count");
+  if (el) el.textContent = `markers: ${clusterRef.current?.getLayers().length ?? 0}`;
+};
+
+// keep the counter in sync with cluster changes
+clusterRef.current?.on("layeradd", updateCount);
+clusterRef.current?.on("layerremove", updateCount);
+
+// --- Known-good sanity items (remove later) ---
+const sanity = L.latLng(-33.9249, 18.4241);
+L.marker(sanity, { title: "sanity-marker" }).addTo(clusterRef.current!);
+L.circleMarker(sanity, { radius: 8, color: "#2563eb", weight: 2, fillOpacity: 0.9 })
+  .addTo(clusterRef.current!)
+  .bindTooltip("sanity-circle");
+updateCount();
+
+// (optional) expose for quick console testing on mobile
+(window as any).__nnCluster = clusterRef.current;
+(window as any).__nnAddDebug = (lat: number, lng: number) => {
+  const m = L.marker([lat, lng]).addTo(clusterRef.current!);
+  updateCount();
+  return m;
+};
+
+D) Wherever you add markers to the cluster (optimistic add and socket confirm), route it through a single function with circle fallback:
+// import { getIncidentIcon } from "@/lib/incidentIcons";  // ensure this exists (see patch #2)
+
+type Incident = {
+  id: string;
+  type: string;
+  title?: string;
+  lat?: number | string;
+  lng?: number | string;
+  latitude?: number | string;
+  longitude?: number | string;
+};
+
+function addIncidentToCluster(inc: Incident) {
+  if (!clusterRef.current) return;
+  const ll = toLatLng(inc);
+  if (!ll) {
+    console.warn("[NN] dropped incident with bad coords", inc);
+    return;
+  }
+  const icon = typeof getIncidentIcon === "function" ? getIncidentIcon(inc.type) : null;
+
+  const layer = icon
+    ? L.marker(ll, { icon, title: inc.title ?? inc.type })
+    : L.circleMarker(ll, { radius: 7, color: "#2563eb", weight: 2, fillOpacity: 0.9 });
+
+  (layer as any).incidentId = inc.id;
+  layer.addTo(clusterRef.current);
+  // if you added updateCount above:
+  const el = document.getElementById("nn-debug-count");
+  if (el) el.textContent = `markers: ${clusterRef.current.getLayers().length}`;
+}
+
+// ✅ use this both for optimistic add AND for socket 'incident:created'
+
+
+Replace your existing marker creation calls with addIncidentToCluster(incident).
+
+2) client/src/lib/incidentIcons.ts — expose a safe accessor
+
+(You said your 12 icons are already imported & sized — great. Just make sure we export a function getIncidentIcon that returns L.Icon | null.)
+
+import L from "leaflet";
+// assuming you already have something like:
+export const ICONS_BY_TYPE: Record<string, L.Icon> = {
+  // CAR_ACCIDENT: L.icon({ iconUrl: ... }),
+  // EMERGENCY_ALARM: L.icon({ iconUrl: ... }),
+  // ...
+};
+
+// --- Add this helper export ---
+export function getIncidentIcon(type?: string): L.Icon | null {
+  const key = (type ?? "").toUpperCase();
+  return ICONS_BY_TYPE[key] ?? null; // null -> MapView will fallback to circle marker
+}
+
+
+If you already export something equivalent, you can skip this and just import your existing accessor from MapView.tsx.
+
+3) client/src/index.css — tiny style for the counter (optional but nice)
+/* debug counter for map */
+.nn-debug-counter {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  background: rgba(255, 255, 255, 0.85);
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 2px rgba(0,0,0,.15);
+  user-select: none;
+}
+
+How to verify (takes 30 seconds)
+
+Reload on mobile. You should see:
+
+a blue circle and a default Leaflet marker around Cape Town.
+
+a bottom-left pill reading markers: 2.
+
+Report a new incident:
+
+The counter should increment.
+
+If no icon appears but the counter goes up (and you can see a circle), that’s an icon asset/type issue (now safely visible thanks to circle fallback).
+
+If nothing appears and the counter stays 2, we’re likely blocked by z-index or container height; ping me and I’ll give the next micro-patch (pane order / overlay).

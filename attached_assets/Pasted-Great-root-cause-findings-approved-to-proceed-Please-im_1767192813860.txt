@@ -1,0 +1,84 @@
+Great root-cause findings — approved to proceed. Please implement fixes with the following specific approach (minimal + safe):
+
+========================
+FIX #1 — FEED FLICKER (GPS jitter → new React Query key → empty flashes)
+========================
+Root cause confirmed: query key includes exact lat/lng and GPS updates slightly every tick → new key → React Query drops cached data → empty state flashes.
+
+Implement ALL of these:
+
+A) Quantize / bucket coordinates for query keys
+- Before building the query key, round the coordinates to a stable grid.
+- Example: 3 decimals (~110m) or 4 decimals (~11m). Start with 3 decimals.
+- Use quantizedLat/quantizedLng in the query key and in the API request params.
+
+Pseudo:
+  const qLat = round(feedLocation.lat, 3)
+  const qLng = round(feedLocation.lng, 3)
+
+B) keepPreviousData (or equivalent) to prevent empty-state flashing
+- Ensure React Query keeps prior results while fetching new ones.
+- (If using useQuery) set:
+  keepPreviousData: true
+  staleTime: e.g. 10–30s
+  refetchOnWindowFocus: false (optional)
+- Also ensure the UI does NOT render the empty state when isFetching and previous data exists.
+  Show the previous cards + a subtle “updating…” indicator instead.
+
+C) Debounce location-driven refetch
+- In useFeedIncidents.ts, do NOT refetch on every tiny location update.
+- Debounce location changes (e.g. 800–1500ms) OR only trigger when quantized coords change.
+- If you already add quantization, then dependency should be [qLat, qLng] rather than raw currentLocation.
+
+Definition of done:
+- Feed should remain stable (no rapid empty-state flashes) while GPS updates.
+- Cards should not disappear during refetch; at most show a small loading indicator.
+
+========================
+FIX #2 — MAP ZOOM REBOUND (effects refitting on every incidents array change)
+========================
+Root cause confirmed: MapView.tsx effect depends on incidents array reference + center prop; refetches create new arrays so effect re-runs and triggers setView/fitBounds; plus localStorage fallback setView isn’t gated enough.
+
+Implement:
+
+A) Make auto-centering/fitBounds one-shot (or focus-driven only)
+- Auto-fit/auto-center should only run:
+  1) on initial map load, OR
+  2) when focus param changes (focus=incidentId), OR
+  3) when the user explicitly clicks “recenter” (if such a control exists)
+- It must NOT run on every incidents refetch.
+
+B) Add user-interaction lockout
+- Track a ref like hasUserInteracted.current.
+- Set it true on:
+  zoomstart / movestart / dragstart (Leaflet events).
+- If hasUserInteracted is true, DO NOT call setView/flyTo/fitBounds from incident-update effects.
+
+C) Remove incidents array reference from dependencies where possible
+- Do not use [incidents] directly if it causes refit on every fetch.
+- If you must react to incident changes, use a stable derived value like:
+  incidents.length (or a stable hash) AND still guard with didInitialAutoFit + !hasUserInteracted.
+
+D) Gate the localStorage fallback setView (line ~981)
+- Ensure fallback setView runs ONLY once and only if:
+  - no focus params AND
+  - no valid GPS/lastGood AND
+  - map has not been centered yet
+- Never allow it to run after user interaction.
+
+Definition of done:
+- User zoom/pan NEVER gets overridden by automatic effects.
+- Map does not “snap back” to include all incidents while the user is navigating.
+- focus=incidentId still centers once reliably.
+
+========================
+REQUEST: please implement now + report back
+========================
+When finished, send:
+- files + line ranges changed (Feed.tsx, useFeedIncidents.ts, MapView.tsx + any helpers)
+- what rounding precision you used for quantization and why
+- React Query options used (keepPreviousData, staleTime, debounce strategy)
+- which map events you used to detect user interaction
+- quick test checklist for mobile Kenya (GPS updates) and Namibia
+
+Once patched, I’ll re-test immediately in Mombasa on mobile.

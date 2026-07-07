@@ -1,0 +1,125 @@
+awesome detail, Replit — thanks!
+You’re right: in your current screen the actionable stack is on the right (Report / Locate / List). The overlap I called out earlier was based on the older screenshots that also showed a left utility column (+ / – / sun / expand). Since we’ve removed + / –, collisions now mainly happen when the top bar grows/wraps on small devices and encroaches on the Leaflet “top” zone (where any top-left/right controls would live). We can fix this cleanly without a ResizeObserver.
+👍 Let’s go with Option B (Fixed Height) — CSS-only first
+Set a predictable top-bar height and push the Leaflet “top” region below it. This is the least disruptive and matches your theming/layout approach.
+1) Map page wrapper: define a CSS var for the menu height
+Use a wrapper class around the map page. (If you already have one, reuse it.)
+// client/src/pages/community/Map.tsx
+export default function Map() {
+  return (
+    <div
+      className="map-shell relative h-[100dvh]"
+      style={{
+        // keep safe-area; we’ll use it in calc() below
+        paddingTop: 'max(env(safe-area-inset-top), 0px)',
+      }}
+    >
+      <MobileFloatingTopMenu />
+      <MapView />
+      {/* Right-side FAB stack stays as-is */}
+    </div>
+  );
+}
+
+2) Globals: push Leaflet’s “top” layer down by the menu height
+This protects you even if later you re-introduce any top-left/right Leaflet controls.
+/* client/src/styles/globals.css (or equivalent) */
+
+.map-shell {
+  /* Default compact mobile height for the top menu (icons only) */
+  --nn-topbar-h: 56px;
+}
+
+/* When Leaflet positions controls in the "top" slots, offset them */
+.map-shell .leaflet-top {
+  /* top bar + a small breathing gap + safe area */
+  margin-top: calc(var(--nn-topbar-h) + max(env(safe-area-inset-top), 0px) + 8px);
+}
+
+/* Tablet+ can afford a hair more height if you show labels */
+@media (min-width: 768px) {
+  .map-shell { --nn-topbar-h: 60px; }
+}
+
+If you don’t have any top Leaflet controls right now, this still future-proofs the layout and costs nothing.
+3) Top menu: lock its height so it never grows unpredictably
+Prevents wrapping from changing the vertical math.
+// client/src/components/MobileFloatingTopMenu.tsx
+<div
+  className="
+    absolute z-[55] left-3 right-3 md:left-5 md:right-5
+    top-[max(env(safe-area-inset-top),0px)]
+    flex justify-center pointer-events-auto
+  "
+>
+  <div
+    className="
+      h-[56px] md:h-[60px]  /* matches --nn-topbar-h */
+      rounded-2xl px-2 sm:px-3
+      flex items-center gap-2 sm:gap-3
+      overflow-x-auto no-scrollbar
+      backdrop-blur-md border border-border/50
+      bg-white/85 dark:bg-background/60
+      shadow-lg
+    "
+  >
+    {/* icon buttons */}
+  </div>
+</div>
+
+If you need to squeeze on XS screens, allow horizontal scroll (overflow-x-auto no-scrollbar) instead of wrapping (wrapping increases height → collisions).
+4) (Optional polish) Reserve side gutters so the menu never hits side stacks
+If you later add a left column again, keep side “lanes” free with a max-width:
+<div className="w-[min(680px,calc(100vw-112px))] h-full flex items-center ...">
+  {/* icons */}
+</div>
+
+(112px ≈ two 56px lanes; adjust to your button size.)
+
+About ResizeObserver & Grid
+ResizeObserver: only needed if your menu content can truly vary in height (e.g., labels appear/disappear, long text). Given “5 icons” and fixed height, we don’t need it.
+
+
+CSS Grid: also works, but you’d still need to offset Leaflet’s .leaflet-top region. The CSS-var approach addresses the actual collision site directly.
+
+
+
+Sheet-expanded hiding
+Yes — let’s include it. It reduces visual noise when the incident sheet is >50% open.
+Plumb the state (example):
+// Map.tsx
+const [sheetOpen, setSheetOpen] = useState(false);
+return (
+  <div className="map-shell relative h-[100dvh]">
+    <MobileFloatingTopMenu hiddenBySheet={sheetOpen} />
+    <MapView />
+    <IncidentList open={sheetOpen} onOpenChange={setSheetOpen} />
+  </div>
+);
+
+Menu receives the flag:
+// MobileFloatingTopMenu.tsx
+export default function MobileFloatingTopMenu({ hiddenBySheet = false }: { hiddenBySheet?: boolean }) {
+  return (
+    <div className={cn(
+      "absolute z-[55] left-3 right-3 md:left-5 md:right-5 top-[max(env(safe-area-inset-top),0px)] flex justify-center",
+      "transition-opacity duration-150",
+      hiddenBySheet ? "opacity-0 pointer-events-none" : "opacity-100"
+    )}>
+      {/* menu content */}
+    </div>
+  );
+}
+
+
+Quick QA
+iPhone SE/XR/16*, Pixel 9/Pro XL, Galaxy S25*: menu never overlaps; Leaflet “top” space respects --nn-topbar-h.
+
+
+Rotate device: still fine (fixed height).
+
+
+Incident sheet >50%: menu fades out and doesn’t steal taps.
+
+
+If that matches your expectations, implement the CSS-var + fixed-height combo. If we later introduce dynamic menu content, we can drop in a tiny ResizeObserver to update --nn-topbar-h without changing any other code.

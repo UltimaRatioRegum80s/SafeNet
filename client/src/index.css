@@ -1,0 +1,514 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+@import "./styles/map.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* --- Milestone 6 tokens --- */
+@layer utilities {
+  .glass-surface { @apply backdrop-blur bg-slate-900/60 border border-slate-700/60 shadow-lg; }
+  .glass-card    { @apply backdrop-blur bg-slate-900/50 border border-slate-700/50 shadow-md; }
+  .glass-toolbar { @apply backdrop-blur bg-slate-900/70 border border-slate-700/70 shadow-lg; }
+  .tap-target    { @apply min-h-[44px] min-w-[44px]; }
+  .safe-bottom   { padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem); }
+  
+  /* debug counter for map */
+  .nn-debug-counter {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    background: rgba(255, 255, 255, 0.85);
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 2px rgba(0,0,0,.15);
+    user-select: none;
+  }
+  
+  /* No scrollbar utility for TopBar secondary content */
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /* Thin, modern scrollbars for Recent Incidents panel */
+  .custom-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255,255,255,.25) transparent;
+  }
+  .custom-scroll::-webkit-scrollbar { width: 8px; }
+  .custom-scroll::-webkit-scrollbar-thumb {
+    background: linear-gradient(to bottom, rgba(255,255,255,.18), rgba(255,255,255,.06));
+    border-radius: 999px;
+  }
+  .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+  
+  /* ---- Leaflet control rail reset: don't cover tiles ---- */
+  .leaflet-control-container,
+  .leaflet-top,
+  .leaflet-bottom,
+  .leaflet-left,
+  .leaflet-right {
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  /* Some custom themes add pseudo-elements; nuke them */
+  .leaflet-control-container::before,
+  .leaflet-top::before,
+  .leaflet-bottom::before,
+  .leaflet-left::before,
+  .leaflet-right::before {
+    content: none !important;
+  }
+
+  /* Prevent a full-height rail capturing clicks */
+  .leaflet-left,
+  .leaflet-right {
+    pointer-events: none;             /* container ignores events */
+    width: auto !important;
+    height: auto !important;
+  }
+
+  /* Allow the actual controls to be interactive */
+  .leaflet-left .leaflet-control,
+  .leaflet-right .leaflet-control,
+  .leaflet-top .leaflet-control,
+  .leaflet-bottom .leaflet-control {
+    pointer-events: auto;
+    background: transparent;          /* keep buttons' own backgrounds only */
+    box-shadow: none;
+  }
+
+  /* Custom fullscreen control styling to match NaborNet design */
+  .leaflet-control-fullscreen {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+  }
+
+  .fullscreen-btn {
+    @apply glass-surface;
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 8px;
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .fullscreen-btn:hover {
+    @apply glass-toolbar;
+    transform: scale(1.05);
+    color: #f8fafc;
+  }
+
+  .fullscreen-btn:active {
+    transform: scale(0.95);
+  }
+
+  /* Critical incident pulsing animation for red markers */
+  @keyframes criticalPulse {
+    0% { 
+      box-shadow: 0 0 0 0 rgba(255, 0, 0, 0.7);
+      background-color: #ff0000;
+      opacity: 1;
+    }
+    25% {
+      box-shadow: 0 0 0 8px rgba(255, 0, 0, 0.4);
+      background-color: #ff0000;
+      opacity: 1;
+    }
+    50% {
+      box-shadow: 0 0 0 15px rgba(255, 0, 0, 0.2);
+      background-color: transparent;
+      opacity: 0.2;
+    }
+    75% {
+      box-shadow: 0 0 0 8px rgba(255, 0, 0, 0.4);
+      background-color: #ff0000;
+      opacity: 1;
+    }
+    100% { 
+      box-shadow: 0 0 0 0 rgba(255, 0, 0, 0);
+      background-color: #ff0000;
+      opacity: 1;
+    }
+  }
+
+  /* Apply pulsing to critical incident markers */
+  .critical-incident-pulse {
+    animation: criticalPulse 2.5s ease-in-out infinite;
+  }
+
+  /* Radius pulsing animation that doesn't move the marker */
+  @keyframes radiusPulse {
+    0% { 
+      width: 0px;
+      height: 0px;
+      opacity: 0.8;
+    }
+    50% {
+      width: 20px;
+      height: 20px;
+      opacity: 0.3;
+    }
+    100% { 
+      width: 0px;
+      height: 0px;
+      opacity: 0;
+    }
+  }
+
+  /* Highlight marker pulse animation - more visible than simple opacity */
+  @keyframes highlightPulse {
+    0% {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: translate(-50%, -50%) scale(1.4);
+      opacity: 0.6;
+    }
+    100% {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+    }
+  }
+
+  .leaflet-control {
+    margin: 0.25rem 0.25rem;          /* tidy spacing */
+  }
+
+  /* Keep Leaflet UI layering sane */
+  .leaflet-pane,
+  .leaflet-top,
+  .leaflet-bottom { z-index: 400; }   /* markers/controls */
+  .leaflet-popup-pane { z-index: 600; }
+  
+  /* Force chips to viewport top-right no matter where they render */
+  #nn-status-stack,
+  .nn-status-stack {
+    position: fixed !important;
+    top: 12px !important;
+    right: 12px !important;
+    left: auto !important;
+    bottom: auto !important;
+    z-index: 2147483000 !important;
+  }
+}
+
+:root {
+  --background: hsl(0, 0%, 100%);
+  --foreground: hsl(210, 25%, 7.8431%);
+  --card: hsl(190, 60%, 98%);
+  --card-foreground: hsl(210, 25%, 7.8431%);
+  --popover: hsl(0, 0%, 100%);
+  --popover-foreground: hsl(210, 25%, 7.8431%);
+  --primary: hsl(195, 100%, 50%);
+  --primary-foreground: hsl(0, 0%, 100%);
+  --secondary: hsl(210, 100%, 25%);
+  --secondary-foreground: hsl(0, 0%, 100%);
+  --muted: hsl(190, 25%, 92%);
+  --muted-foreground: hsl(210, 25%, 7.8431%);
+  --accent: hsl(190, 75%, 95%);
+  --accent-foreground: hsl(210, 100%, 35%);
+  --destructive: hsl(356, 77%, 59%);
+  --destructive-foreground: hsl(0, 0%, 100%);
+  --border: hsl(190, 30%, 85%);
+  --input: hsl(190, 40%, 96%);
+  --ring: hsl(195, 100%, 50%);
+  --success: hsl(122, 39%, 38%);
+  --success-foreground: hsl(0, 0%, 100%);
+  --warning: hsl(36, 100%, 47%);
+  --warning-foreground: hsl(0, 0%, 100%);
+  --error: hsl(356, 77%, 59%);
+  --error-foreground: hsl(0, 0%, 100%);
+  --chart-1: hsl(195, 100%, 50%);
+  --chart-2: hsl(210, 100%, 40%);
+  --chart-3: hsl(180, 100%, 40%);
+  --chart-4: hsl(200, 100%, 35%);
+  --chart-5: hsl(220, 100%, 45%);
+  --sidebar: hsl(190, 60%, 98%);
+  --sidebar-foreground: hsl(210, 25%, 7.8431%);
+  --sidebar-primary: hsl(195, 100%, 50%);
+  --sidebar-primary-foreground: hsl(0, 0%, 100%);
+  --sidebar-accent: hsl(190, 75%, 95%);
+  --sidebar-accent-foreground: hsl(210, 100%, 35%);
+  --sidebar-border: hsl(190, 30%, 85%);
+  --sidebar-ring: hsl(195, 100%, 50%);
+  --font-sans: 'Roboto', sans-serif;
+  --font-serif: Georgia, serif;
+  --font-mono: Menlo, monospace;
+  --radius: 0.5rem;
+  
+  /* App layout variables */
+  --app-header-height: 64px;     /* desktop */
+  --app-subheader-height: 0px;   /* set if you have a subheader */
+  --app-mobile-header-height: 56px;
+  --app-filterbar-height: 48px;
+  --z-header: 50;
+  --z-filterbar: 40;
+  --z-inputbar: 40;
+  
+  /* Public site design tokens (light mode) */
+  --pub-bg: #F8FAFC;
+  --pub-text: #0F172A;
+  --pub-text-secondary: #475569;
+  --pub-surface: #FFFFFF;
+  --pub-accent: #3DA0CF;
+  --pub-accent-hover: #2C8FBC;
+  --pub-gold: #C8A951;
+  --pub-border: #E2E8F0;
+  --pub-nav-bg: rgba(248, 250, 252, 0.85);
+  --pub-nav-border: rgba(226, 232, 240, 0.8);
+}
+
+.dark {
+  --background: hsl(220, 100%, 5%);
+  --foreground: hsl(190, 20%, 95%);
+  --card: hsl(215, 60%, 12%);
+  --card-foreground: hsl(190, 20%, 90%);
+  --popover: hsl(220, 100%, 8%);
+  --popover-foreground: hsl(190, 20%, 95%);
+  --primary: hsl(180, 100%, 50%);
+  --primary-foreground: hsl(220, 100%, 10%);
+  --secondary: hsl(210, 100%, 20%);
+  --secondary-foreground: hsl(190, 20%, 95%);
+  --muted: hsl(215, 40%, 15%);
+  --muted-foreground: hsl(190, 10%, 60%);
+  --accent: hsl(210, 50%, 20%);
+  --accent-foreground: hsl(180, 100%, 70%);
+  --destructive: hsl(356, 77%, 59%);
+  --destructive-foreground: hsl(0, 0%, 100%);
+  --border: hsl(215, 30%, 25%);
+  --input: hsl(215, 40%, 18%);
+  --ring: hsl(180, 100%, 50%);
+  --success: hsl(122, 39%, 48%);
+  --success-foreground: hsl(0, 0%, 100%);
+  --warning: hsl(36, 100%, 57%);
+  --warning-foreground: hsl(0, 0%, 100%);
+  --error: hsl(356, 77%, 59%);
+  --error-foreground: hsl(0, 0%, 100%);
+  --chart-1: hsl(205, 82%, 44%);
+  --chart-2: hsl(122, 39%, 38%);
+  --chart-3: hsl(36, 100%, 47%);
+  --chart-4: hsl(147.1429, 78.5047%, 41.9608%);
+  --chart-5: hsl(341.4894, 75.2000%, 50.9804%);
+  --sidebar: hsl(228, 9.8039%, 10%);
+  --sidebar-foreground: hsl(0, 0%, 85.0980%);
+  --sidebar-primary: hsl(205, 82%, 44%);
+  --sidebar-primary-foreground: hsl(0, 0%, 100%);
+  --sidebar-accent: hsl(205, 70%, 7.8431%);
+  --sidebar-accent-foreground: hsl(205, 82%, 52%);
+  --sidebar-border: hsl(205, 15.7895%, 26.0784%);
+  --sidebar-ring: hsl(205, 82%, 44%);
+  
+  /* Public site design tokens (dark mode — slate-based, NOT pure black) */
+  --pub-bg: #0F172A;
+  --pub-text: #E5E7EB;
+  --pub-text-secondary: #94A3B8;
+  --pub-surface: #1E293B;
+  --pub-surface-alt: #111827;
+  --pub-accent: #4FB3E1;
+  --pub-accent-hover: #3DA0CF;
+  --pub-gold: #B89A45;
+  --pub-border: rgba(148, 163, 184, 0.15);
+  --pub-nav-bg: rgba(15, 23, 42, 0.85);
+  --pub-nav-border: rgba(148, 163, 184, 0.15);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .floating-btn {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 1000;
+  }
+  
+  .status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  
+  .map-container {
+    background: linear-gradient(45deg, #f0f0f0 25%, transparent 25%), 
+                linear-gradient(-45deg, #f0f0f0 25%, transparent 25%), 
+                linear-gradient(45deg, transparent 75%, #f0f0f0 75%), 
+                linear-gradient(-45deg, transparent 75%, #f0f0f0 75%);
+    background-size: 20px 20px;
+    background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+  }
+
+  /* Chat scrollbars */
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 999px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+
+  /* Overlay pointer events for smooth map panning */
+  .overlay-events-none { pointer-events: none; }
+  .overlay-events-auto { pointer-events: auto; }
+
+  /* Glassy floating action button */
+  .nn-fab {
+    @apply rounded-full w-12 h-12 grid place-items-center
+           glass-toolbar text-white active:scale-95 
+           transition-transform duration-150;
+  }
+
+  /* Translucent "card over map" look */
+  .nn-glass {
+    @apply bg-white/10 border border-white/10 backdrop-blur;
+  }
+
+  /* 44px minimum touch target for mobile ergonomics */
+  .tap-target {
+    @apply min-h-[44px] min-w-[44px];
+  }
+
+  /* Enhanced focus rings for sunlight visibility */
+  .focus-enhanced {
+    @apply focus:ring-2 focus:ring-sky-500 focus:outline-none;
+  }
+
+  /* Image card depth on interaction */
+  .image-card {
+    @apply shadow-lg hover:shadow-xl transition-shadow duration-200;
+  }
+}
+
+/* Marker pulse animation for selected incidents */
+.nn-marker-pulse {
+  box-shadow: 0 0 0 0 rgba(255,255,255,0.5);
+  animation: nn-pulse 1.6s infinite;
+}
+
+@keyframes nn-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255,255,255,0.5); }
+  70% { box-shadow: 0 0 0 14px rgba(255,255,255,0); }
+  100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); }
+}
+
+/* Map Shell Layout Protection */
+.map-shell {
+  /* Default compact mobile height for the top menu (icons only) */
+  --nn-topbar-h: 56px;
+}
+
+/* When Leaflet positions controls in the "top" slots, offset them */
+.map-shell .leaflet-top {
+  /* top bar + a small breathing gap + safe area */
+  margin-top: calc(var(--nn-topbar-h) + max(env(safe-area-inset-top), 0px) + 8px);
+}
+
+/* Tablet+ can afford a hair more height if you show labels */
+@media (min-width: 768px) {
+  .map-shell { --nn-topbar-h: 60px; }
+}
+
+/* Hide scrollbar for horizontal scroll in compact menu */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Status HUD positioning - top-right corner */
+#nn-status-stack {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  bottom: auto;
+  left: auto;
+  z-index: 1000;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+#nn-status-stack > * { 
+  pointer-events: auto; 
+}
+
+/* Move to bottom-right on very small screens */
+@media (max-width: 380px) {
+  #nn-status-stack { 
+    top: auto; 
+    right: 0.5rem; 
+    bottom: 0.5rem; 
+  }
+}
+
+/* Leaflet z-index organization */
+.leaflet-pane,
+.leaflet-top,
+.leaflet-bottom { 
+  z-index: 400; 
+}
+
+.leaflet-popup-pane { 
+  z-index: 600; 
+}
+
+/* Debug counter styles */
+.nn-debug-counter {
+  background: rgba(255, 255, 255, 0.8);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: bold;
+  color: #333;
+}
+
+/* ========== Public Site Visual Elevation ========== */
+
+/* Geometric grid pattern for hero overlay */
+.pub-hero-grid {
+  background-image: 
+    linear-gradient(rgba(61, 160, 207, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(61, 160, 207, 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Glass morphism card style */
+.pub-glass {
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.dark .pub-glass {
+  background: rgba(30, 41, 59, 0.5);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+/* Section parallax via background-attachment */
+.pub-parallax-bg {
+  background-attachment: fixed;
+  background-size: cover;
+  background-position: center;
+}
+
+/* Disable parallax and motion for reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .pub-parallax-bg {
+    background-attachment: scroll !important;
+  }
+  .pub-hero-grid {
+    animation: none !important;
+  }
+}

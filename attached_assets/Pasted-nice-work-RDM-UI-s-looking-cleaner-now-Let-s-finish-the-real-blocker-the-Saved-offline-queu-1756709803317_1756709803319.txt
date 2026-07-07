@@ -1,0 +1,136 @@
+nice work @RDM — UI’s looking cleaner now ✅
+
+Let’s finish the real blocker: the “Saved offline” queueing even when you’re online. That’s almost always a POST failure (route/payload/CORS/SW). Below is a tight, copy-paste set so we can (1) see the exact reason and (2) guarantee the backend accepts our payload.
+
+🟣 GPT → Replit — minimal, safe patches
+1) Backend: health check + tolerant incident endpoint
+
+server/index.ts
+
+// ensure these are present near the top
+import express from "express";
+import cors from "cors";
+app.use(cors({ origin: true, credentials: true }));
+app.use(express.json({ limit: "1mb" }));
+
+// health
+app.get("/api/ping", (_req, res) => res.json({ ok: true, t: Date.now() }));
+
+// helpers
+const toNumber = (v: unknown) => (v === "" || v == null ? NaN : Number(v));
+const pickCoord = (b: any) => {
+  // accept either lat/lng or latitude/longitude
+  let lat = toNumber(b.lat ?? b.latitude);
+  let lng = toNumber(b.lng ?? b.longitude);
+  // detect & fix common swap
+  if (Math.abs(lat) > 90 && Math.abs(lng) <= 90) [lat, lng] = [lng, lat];
+  return { lat, lng };
+};
+
+// POST /api/incidents
+app.post("/api/incidents", async (req, res) => {
+  try {
+    const { type, note } = req.body ?? {};
+    const { lat, lng } = pickCoord(req.body ?? {});
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      console.warn("[NN] 422 invalid coords", req.body);
+      return res.status(422).json({ error: "Invalid coordinates" });
+    }
+
+    // drizzle insert (adjust table import)
+    const row = await db
+      .insert(incidents)
+      .values({
+        type,
+        title: note?.slice(0, 120) ?? null,
+        latitude: lat,
+        longitude: lng,
+      })
+      .returning()
+      .then(r => r[0]);
+
+    io.emit("incident:created", row);
+    res.status(201).location(`/api/incidents/${row.id}`).json(row);
+  } catch (e: any) {
+    console.error("[NN] 500 create incident failed:", e?.message || e);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+
+This accepts both naming schemes, auto-fixes swapped coords, and returns 422 (not 0/“offline”) when coords are missing.
+
+2) Frontend: honest POST wrapper (classify failures)
+
+client/src/lib/http.ts
+
+export class HttpError extends Error { constructor(public status: number, public body?: string){super(`HTTP ${status}`);} }
+
+export async function postJSON<T>(url: string, data: any): Promise<T> {
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new HttpError(res.status, await res.text().catch(()=>undefined));
+    return (await res.json()) as T;
+  } catch (err: any) {
+    const offline = !navigator.onLine;
+    const network = err instanceof TypeError; // CORS/DNS/TLS/SW fetch fail
+    const reason =
+      offline ? "offline" :
+      network ? "network" :
+      err instanceof HttpError ? `http${err.status}` : "unknown";
+    console.warn("[NN] POST failed:", reason, err?.body ?? err?.message ?? err);
+
+    // only queue on network/5xx; don't claim "offline" for 4xx validation
+    if (reason === "network" || (err instanceof HttpError && err.status >= 500)) {
+      (window as any).__nnQueue?.enqueue?.(url, data, "POST");
+      (window as any).__nnBanner?.show?.("Queued (network/server)");
+    } else if (err instanceof HttpError && err.status < 500) {
+      (window as any).__nnBanner?.show?.(`Not saved (server ${err.status})`);
+    }
+    throw err;
+  }
+}
+
+
+Use in your submit:
+
+import { postJSON } from "@/lib/http";
+// ...
+await postJSON("/api/incidents", {
+  type: form.type,
+  note: form.note ?? "",
+  latitude: coords.lat,
+  longitude: coords.lng,
+});
+
+3) Quick console checks (no code)
+
+Is backend reachable?
+
+navigator.onLine, await fetch("/api/ping").then(r=>r.json())
+
+
+See exact failure on submit: open Network → click /api/incidents
+
+If 422 → payload/coords invalid (frontend fix)
+
+If 401/403 → auth/CORS (we’ll align headers)
+
+If (failed) → CORS/SW/network (wrapper already classifies)
+
+4) “In View” vs “All incidents”
+
+Your right panel shows “No incidents” with In View active while the camera is away from Windhoek. Switch to All Time or click All incidents so you’re not filtering yourself into “empty”.
+
+🟠 Replit → GPT (what to report)
+
+Status code for /api/incidents (from Network tab) and a sample Request Payload shown there.
+
+Result of fetch("/api/ping").
+
+After the backend patch, confirm you see 201 responses and markers appear without the “Saved offline” banner.

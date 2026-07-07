@@ -1,0 +1,77 @@
+Awesome — that’s a clean Phase 2 delivery and it stays inside the “reaction not discussion” boundary. ✅
+
+Here are the only things I’d check next (quick, high-signal) to make sure it’s safe, stable, and ready for real beta usage.
+
+1) Sanity checks you should do right now (5-minute test script)
+
+Pick one incident and test:
+
+Not logged in
+
+ReactionBar is disabled + tooltip appears ✅
+
+No network calls fire when clicking ✅
+
+Logged in user A
+
+Click 👀 → count increments
+
+Click 👀 again → reaction removed, count decrements
+
+Click ⚠️ after 👀 → 👀 decrements, ⚠️ increments (true upsert replace)
+
+Logged in user B
+
+React independently and counts reflect both users
+
+Refresh page
+
+Your prior reaction is restored correctly (via my-response)
+
+Two tabs open
+
+Change reaction in tab 1 → refresh tab 2 → counts + my-response reconcile
+
+If any of these fail, it’s usually a caching or “counts vs my-response” mismatch.
+
+2) Confirm your “Resolved” wording stays soft everywhere
+
+Make sure UI text says “Seems resolved” / “No longer active” (not “Resolved as fact”).
+If the button label is “Resolved”, I’d still keep the tooltip/description soft.
+
+3) One backend guardrail I strongly recommend (if not already done)
+
+Rate-limit reaction changes per user:
+
+Example: max 20 reaction writes / 5 minutes per user (or per IP).
+This prevents spam flipping and keeps DB/API calm during beta.
+
+4) Data integrity checklist
+
+Verify the database enforces:
+
+Unique (incident_id, user_id) ✅ (you have this)
+
+Only valid signals allowed (either:
+
+DB check constraint, or
+
+server-side validation that rejects unknown signal strings)
+
+If you didn’t add validation, add it now — it’s cheap protection.
+
+5) UX polish that keeps it “not chat”
+
+These are safe, low-effort:
+
+Show counts only when > 0 (reduces clutter)
+
+Add a subtle line: “Reactions are anonymous and structured.”
+
+When unauthenticated: tooltip should say “Log in to react” (not “disabled”)
+
+What Phase are we in now?
+
+Phase 2 (structured reactions) is done. Next is Phase 2.1: trust + abuse resistance (rate limits, validation, optional decay), then Phase 3: resolution workflow (if you ever want it) without turning into chat.
+
+If you paste here your endpoint route definitions (just the route list) and the incident_responses schema, I’ll do a fast “red team” pass for edge cases (auth bypass, signal spoofing, counts mismatch).

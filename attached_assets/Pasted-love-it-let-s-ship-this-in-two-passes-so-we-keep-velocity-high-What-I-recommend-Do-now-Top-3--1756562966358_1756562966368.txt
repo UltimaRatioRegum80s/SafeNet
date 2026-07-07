@@ -1,0 +1,201 @@
+love it — let’s ship this in two passes so we keep velocity high.
+
+What I recommend
+
+Do now (Top 3): cooldown persistence, location requirement, refine handshake (+ route cleanup because it’s tiny).
+
+Next pass: optimistic updates, GPS-denied callout, extra belts for ImageUpload (quick too — can piggyback now).
+
+Below are copy-paste diffs sized to your current setup (React+TS, wouter, Zustand, your hooks).
+
+1) Cooldown persistence (ReportPanel)
+// client/src/features/report/ReportPanel.tsx
+// ...imports...
+const COOLDOWN_MS = 30_000;
+const COOLDOWN_KEY = "nn:lastIncidentSubmitAt";
+
+export default function ReportPanel() {
+  // replace lastSubmitAt init:
+  const [lastSubmitAt, setLastSubmitAt] = useState<number | null>(() => {
+    const v = localStorage.getItem(COOLDOWN_KEY);
+    return v ? Number(v) : null;
+  });
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    const i = setInterval(tick, 500);
+    window.addEventListener("focus", tick);
+    return () => { clearInterval(i); window.removeEventListener("focus", tick); };
+  }, []);
+
+  const msLeft = Math.max(0, (lastSubmitAt ?? 0) + COOLDOWN_MS - now);
+  const cooldownActive = msLeft > 0;
+  const secondsLeft = Math.ceil(msLeft / 1000);
+
+  const mutation = useMutation({
+    // ...unchanged...
+    onSuccess: () => {
+      const ts = Date.now();
+      setLastSubmitAt(ts);
+      localStorage.setItem(COOLDOWN_KEY, String(ts));
+      // ...your existing reset + close...
+    },
+  });
+}
+
+2) Location requirement (submit gating + helper text)
+// inside ReportPanel component, after chosenCoords calc:
+const hasCoords = !!chosenCoords?.lat && !!chosenCoords?.lng;
+
+// in handleSubmit:
+if (!selected || cooldownActive || !hasCoords) return;
+
+// in the action buttons:
+<Button
+  onClick={handleSubmit}
+  disabled={mutation.isPending || cooldownActive || !hasCoords}
+>
+  {mutation.isPending
+    ? "Submitting…"
+    : cooldownActive
+      ? `Wait ${secondsLeft}s`
+      : hasCoords ? "Submit" : "Set location"}
+</Button>
+
+// under the textarea location line, add:
+{!hasCoords && (
+  <div className="mt-1 text-xs text-amber-400">
+    Tip: tap “Drop a pin” to set an exact spot.
+  </div>
+)}
+
+
+If you want to allow fallback (e.g., Windhoek) later, we can add a small “Skip for now” link that sets a allowNoLocation flag.
+
+3) Robust refine handshake (return path listener)
+In ReportPanel (listen for the picked pin):
+// ReportPanel.tsx
+useEffect(() => {
+  const handler = (e: Event) => {
+    const detail = (e as CustomEvent<{ lat: number; lng: number }>).detail;
+    if (detail && setRefinedCoords) setRefinedCoords(detail);
+  };
+  window.addEventListener("nn:location-picked", handler as EventListener);
+  return () => window.removeEventListener("nn:location-picked", handler as EventListener);
+}, [setRefinedCoords]);
+
+In Map page (dispatch back when user confirms pin):
+// client/src/pages/community/Map.tsx
+// after your pin placement confirm logic:
+function confirmPin(lat: number, lng: number) {
+  window.dispatchEvent(new CustomEvent("nn:location-picked", { detail: { lat, lng } }));
+}
+
+4) Route change cleanup (wouter)
+// ReportPanel.tsx
+import { useLocation } from "wouter";
+import { useReportPanel } from "./useReportPanel";
+
+const [pathname] = useLocation();
+const { close } = useReportPanel();
+useEffect(() => { close(); }, [pathname, close]);
+
+5) Belt-and-suspenders for ImageUpload
+// ReportPanel.tsx where ImageUpload is used
+<ImageUpload
+  value={photos}
+  onChange={(files: string[]) => setPhotos((files ?? []).slice(0, 2))}
+  accept="image/*"
+  capture="environment"
+  maxFiles={2}
+/>
+
+6) (Optional now, or next pass) Optimistic updates using your existing store
+
+If useIncidentStore is already present, extend it (don’t create a new store):
+
+// client/src/store/incidentStore.ts
+type Incident = {
+  id: string;
+  type: string;
+  status: "pending" | "approved" | "rejected";
+  lat?: number; lng?: number; createdAt: string;
+  // ...whatever else you expose to map/feed
+};
+
+type State = {
+  incidents: Incident[];
+  addIncident: (i: Incident) => void;
+  reconcileIncident: (tempId: string, real: Incident) => void;
+};
+
+export const useIncidentStore = create<State>((set) => ({
+  incidents: [],
+  addIncident: (i) => set((s) => ({ incidents: [i, ...s.incidents] })),
+  reconcileIncident: (tempId, real) =>
+    set((s) => ({ incidents: s.incidents.map(x => x.id === tempId ? real : x) })),
+}));
+
+
+In ReportPanel submit:
+
+import { useIncidentStore } from "@/store/incidentStore";
+
+const addIncident = useIncidentStore((s) => s.addIncident);
+const reconcileIncident = useIncidentStore((s) => s.reconcileIncident);
+
+const tempId = `temp-${crypto.randomUUID()}`;
+addIncident({
+  id: tempId,
+  type: selected.id,
+  status: "pending",
+  lat: chosenCoords?.lat,
+  lng: chosenCoords?.lng,
+  createdAt: new Date().toISOString(),
+});
+
+const { mutate } = useMutation({
+  // ...
+  onSuccess: (resp) => {
+    reconcileIncident(tempId, resp.incident);
+    // the rest of your success logic...
+  },
+  onError: () => {
+    // optional: remove temp marker or mark errored
+  }
+});
+
+
+Socket listener (where you bootstrap sockets):
+
+socket.on("incident:created", (incident) => {
+  // if the optimistic entry exists, reconcile; else add fresh
+  const state = useIncidentStore.getState();
+  const temp = state.incidents.find(i =>
+    i.id.startsWith("temp-") && i.type === incident.type &&
+    Math.hypot((i.lat ?? 0) - (incident.lat ?? 0), (i.lng ?? 0) - (incident.lng ?? 0)) < 0.0005
+  );
+  temp ? state.reconcileIncident(temp.id, incident) : state.addIncident(incident);
+});
+
+7) GPS-denied callout (tiny UX)
+// under your location line in ReportPanel
+{!hasPermission && (
+  <div className="text-xs text-slate-300/80">
+    Location is off. You can still <button className="underline" onClick={beginRefineOnMap}>drop a pin</button>.
+  </div>
+)}
+
+Answers to your implementation questions
+
+Do all 7 now or top 3?
+Ship Top 3 + route cleanup + ImageUpload slice now (tiny changes, big win). Add optimistic updates + GPS-denied callout in the next pass (they’re also quick, but let’s keep the current PR tight).
+
+Optimistic store:
+Extend your existing useIncidentStore (avoid store fragmentation). I provided merge-safe additions above.
+
+Route cleanup placement (wouter):
+Put it inside ReportPanel; it’s the one showing UI. This avoids dangling overlays if a route change happens while panel is open from either entry point.
+
+If you give me the go, I’ll assume you’ll paste the Top-3 + tiny extras now. Want me to prep a short test script (steps you can run manually) to validate each change after you drop them in?

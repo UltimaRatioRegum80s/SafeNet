@@ -1,0 +1,71 @@
+Confirmed: after republish + cache clear, map zoom snap-back STILL occurs on mobile.
+
+Observed behavior (very specific):
+- When I zoom in/out, the map snaps back to a certain zoom.
+- When I pan (left/right/up/down), it snaps back to a viewport that includes the incidents currently on the map at a set zoom.
+- It feels like something is repeatedly “re-centering to show all markers” or “re-centering to last neighborhood”.
+
+Potential causes to explicitly investigate:
+A) Code that centers the map over the neighborhood where the user last reported (e.g., stored lastReportLocation / lastNeighborhood).
+B) Code that tries to show ALL reported markers in one screen (fitBounds to all incidents).
+C) Code that tries to show ALL of the user’s OWN markers in one screen (fitBounds to my incidents).
+D) Any “helpful” auto-centering that runs after user interaction (refetch, location update, resize).
+
+This is now NOT acceptable for Kenya testing, Southern Africa beta, or production. Once a user interacts, the viewport must never be overridden.
+
+We need a forensic runtime trace now — not another guard guess.
+
+PLEASE DO THESE EXACT STEPS:
+
+1) Add TEMP runtime logging (dev-only) for ALL viewport changes
+Wrap EVERY call to:
+- map.setView
+- map.fitBounds
+- map.flyTo / flyToBounds
+- map.invalidateSize (and anything triggered after it)
+
+Each log MUST include:
+- a unique label per callsite (e.g. "AUTO_FIT_ALL_INCIDENTS", "AUTO_FIT_MY_INCIDENTS", "LAST_NEIGHBORHOOD_CENTER", "FOCUS_CENTER", "RESIZE_HANDLER", "LOCALSTORAGE_FALLBACK")
+- timestamp
+- hasUserInteracted.current
+- isProgrammaticMove.current
+- file:line (or stack origin)
+
+Example:
+[MAP_MOVE] AUTO_FIT_ALL_INCIDENTS MapView.tsx:1004 hasUserInteracted=true isProgrammaticMove=false
+
+2) Add TEMP logging for user interaction
+Log on:
+- touchstart
+- zoomstart
+- movestart
+- dragstart
+with timestamp and confirmation that hasUserInteracted flipped to true.
+
+Important: pinch-zoom on mobile must be covered — touchstart/movestart are likely critical.
+
+3) Audit NON-OBVIOUS triggers (where snap-back often hides)
+Check for viewport changes coming from:
+- ResizeObserver / orientation changes
+- window resize handlers
+- route/navigation effects
+- parent component effects outside MapView.tsx
+- map.invalidateSize chains
+- “fit to markers” logic after data refetch
+- logic that uses lastReportLocation / localStorage / user preferences to center
+
+4) Add a HARD SAFETY KILL SWITCH (for diagnosis)
+As a temporary diagnostic step:
+IF hasUserInteracted.current === true
+THEN BLOCK ALL viewport setters unconditionally
+(no exceptions — even focus/auto-fit)
+
+If snap-back still happens after this, then the viewport change is coming from OUTSIDE our callsites (Leaflet/container resize behavior) and we handle it differently.
+
+5) Report back with:
+- the exact log line that fires AFTER I pinch-zoom or pan
+- which callsite label is responsible (all incidents vs my incidents vs last neighborhood)
+- whether it originates inside MapView or outside it
+- confirmation whether resize/invalidateSize is involved
+
+We will NOT ship until the map NEVER moves unless the user explicitly commands it.

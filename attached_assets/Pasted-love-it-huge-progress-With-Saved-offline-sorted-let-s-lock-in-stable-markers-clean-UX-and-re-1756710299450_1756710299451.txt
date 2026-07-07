@@ -1,0 +1,169 @@
+love it — huge progress. With “Saved offline” sorted, let’s lock in stable markers + clean UX and remove the temp debug bits (but keep them available when we need them).
+
+🟣 GPT → Replit — hardening patches (copy-paste)
+1) Feature-flag the debug overlays (no more permanent sanity dots)
+
+client/src/lib/debug.ts
+
+export const showDebug = new URLSearchParams(location.search).has("debug");
+
+
+In MapView.tsx, wrap the debug counter + sanity markers:
+
+import { showDebug } from "@/lib/debug";
+
+// ...
+if (showDebug) {
+  const counter = L.control({ position: "topleft" });
+  counter.onAdd = () => {
+    const div = L.DomUtil.create("div", "nn-debug-counter");
+    div.id = "nn-debug-count";
+    div.textContent = "markers: 0";
+    return div;
+  };
+  counter.addTo(map);
+
+  const sanity = L.latLng(-33.9249, 18.4241);
+  L.marker(sanity, { title: "sanity" }).addTo(clusterRef.current!);
+  L.circleMarker(sanity, { radius: 8, color: "#2563eb", weight: 2, fillOpacity: 0.9 })
+    .addTo(clusterRef.current!)
+    .bindTooltip("sanity-circle");
+}
+
+
+Now you only see debug with ?debug=1 in the URL.
+
+2) De-dupe markers by id (prevents double counts from optimistic + socket)
+
+In MapView.tsx (or your marker helper):
+
+const seenIds = useRef<Set<string>>(new Set());
+
+function addIncidentToCluster(inc: { id: string; type: string; latitude?: number; longitude?: number; lat?: number; lng?: number; title?: string; }) {
+  if (!clusterRef.current) return;
+  if (inc.id && seenIds.current.has(inc.id)) return; // de-dup
+  if (inc.id) seenIds.current.add(inc.id);
+
+  const lat = Number(inc.lat ?? inc.latitude);
+  const lng = Number(inc.lng ?? inc.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+
+  const ll = Math.abs(lat) > 90 && Math.abs(lng) <= 90 ? L.latLng(lng, lat) : L.latLng(lat, lng);
+  const icon = getIncidentIcon?.(inc.type);
+  const layer = icon
+    ? L.marker(ll, { icon, title: inc.title ?? inc.type })
+    : (L.circleMarker(ll, { radius: 7, color: "#2563eb", weight: 2, fillOpacity: 0.9 }) as unknown as L.Marker);
+
+  (layer as any).incidentId = inc.id;
+  clusterRef.current.addLayer(layer);
+
+  if (showDebug) {
+    const el = document.getElementById("nn-debug-count");
+    if (el) el.textContent = `markers: ${clusterRef.current.getLayers().length}`;
+  }
+}
+
+
+Use the same addIncidentToCluster for:
+
+initial fetch
+
+optimistic add
+
+socket.on('incident:created', …)
+
+3) “In View” fetch that follows the camera (and auto-fallback)
+Backend: add bbox filtering
+
+server/index.ts
+
+app.get("/api/incidents", async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 300, 1000);
+  const bbox = (req.query.bbox as string | undefined)?.split(",").map(Number);
+  const sinceHours = Number(req.query.sinceHours) || null;
+
+  const whereClauses = [];
+  if (bbox && bbox.length === 4 && bbox.every(Number.isFinite)) {
+    const [minLng, minLat, maxLng, maxLat] = bbox;
+    whereClauses.push(
+      gte(incidents.longitude, minLng),
+      lte(incidents.longitude, maxLng),
+      gte(incidents.latitude,  minLat),
+      lte(incidents.latitude,  maxLat),
+    );
+  }
+  if (sinceHours) {
+    const since = new Date(Date.now() - sinceHours * 3600_000);
+    whereClauses.push(gte(incidents.createdAt, since));
+  }
+
+  const rows = await db
+    .select()
+    .from(incidents)
+    .where(whereClauses.length ? and(...whereClauses) : undefined)
+    .orderBy(desc(incidents.createdAt))
+    .limit(limit);
+
+  res.json(rows);
+});
+
+
+(Drizzle helpers gte/lte/and/desc assumed imported; if not, use your existing style.)
+
+DB tip (optional but good): add a composite index for basic bbox filters:
+
+CREATE INDEX IF NOT EXISTS incidents_lat_lng_idx ON incidents (latitude, longitude);
+
+Frontend: compute bbox on move and refetch
+
+In MapView.tsx:
+
+function bboxString(map: L.Map) {
+  const b = map.getBounds();
+  return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(",");
+}
+
+// initial load
+const fetchInView = async () => {
+  const url = `/api/incidents?bbox=${bboxString(map)}&sinceHours=72`;
+  const items = await fetch(url).then(r => r.json());
+  items.forEach(addIncidentToCluster);
+};
+map.on("moveend zoomend", () => {
+  if (currentScope === "inView") fetchInView();
+});
+
+Auto-fallback if “In View” is empty
+
+If you show “No incidents” while the cluster has points (off-screen), switch to “All incidents”:
+
+if (currentScope === "inView" && items.length === 0 && clusterRef.current!.getLayers().length > 0) {
+  setScope("all");
+  toast.info("No incidents in view — showing all nearby.");
+}
+
+4) Finish the UX polish
+
+Status chips are already top-right (nice). Keep the portal/override you added.
+
+Tile rail CSS reset is in — done.
+
+Ping + HTTP wrapper are live — keep them; they save hours later.
+
+🟠 Quick validation for both of you
+
+Create a new incident:
+
+It should show Submitting… briefly, then complete (no “Saved offline”).
+
+Counter (if ?debug=1) increases.
+
+You see the marker at your GPS point (custom icon or the blue circle fallback).
+
+/api/incidents shows 201 in Network tab.
+
+Pan the map:
+
+With In View selected, markers should update as the camera moves.
+
+If your viewport has none but cluster has some → auto-flip to All incidents.

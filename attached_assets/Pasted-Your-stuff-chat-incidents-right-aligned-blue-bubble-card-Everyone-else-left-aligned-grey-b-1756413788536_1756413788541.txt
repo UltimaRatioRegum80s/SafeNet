@@ -1,0 +1,112 @@
+Your stuff (chat + incidents): right-aligned, blue bubble/card.
+
+Everyone else: left-aligned, grey bubble/card.
+
+Severity colors stay on the badge only (not the whole incident card).
+
+1) Update the types (in all Community Feed files)
+
+Add reportedBy/userId to incidents so we can detect “mine”.
+
+// Extend IncidentItem
+type IncidentItem = BaseItem & {
+  kind: "incident";
+  title: string;
+  description?: string;
+  severity: Severity;
+  type: string;
+  category: string;
+  // NEW 👇 (optional, from backend)
+  userId?: string;
+  reportedBy?: string;
+};
+
+2) Map incident ownership correctly (all feeds)
+In sections 1 & 2 (the desktop/tablet feed), update the incidents mapping:
+// inside incidentsData.forEach(...)
+items.push({
+  id: incident.id,
+  kind: "incident",
+  title: incident.title,
+  description: incident.description,
+  severity: incident.severity || "medium",
+  type: incident.type,
+  category: incident.category || "general",
+  createdAt: incident.createdAt,
+  // NEW ownership hints
+  userId: incident.userId,
+  reportedBy: incident.reportedBy,
+});
+
+In section 3 (MobileCommunityFeed), update the incidentItems:
+const incidentItems: FeedItem[] = incidents.map((incident: any) => ({
+  id: incident.id,
+  kind: "incident" as const,
+  title: incident.title,
+  description: incident.description,
+  severity: incident.severity,
+  type: incident.type,
+  category: incident.category,
+  createdAt: incident.createdAt,
+  // NEW ownership hints
+  userId: incident.userId,
+  reportedBy: incident.reportedBy,
+}));
+
+3) Chat bubbles already do it ✅
+
+Your ChatBubble already right-aligns + blues your messages and left-aligns + grey’s others. No change needed.
+
+4) Make Incident cards WhatsApp-style (all feeds)
+
+Replace your current IncidentCard with this version in all three components:
+
+function IncidentCard({ item, currentUser }: { item: IncidentItem; currentUser: User | null }) {
+  // Determine ownership (supports either reportedBy or userId)
+  const mine = item.userId === currentUser?.id || item.reportedBy === currentUser?.id;
+
+  // Badge colors (unchanged)
+  const severityBadge =
+    item.severity === "high" || item.severity === "critical"
+      ? "bg-red-500 text-white"
+      : item.severity === "medium"
+      ? "bg-amber-500 text-black"
+      : "bg-yellow-400 text-black";
+
+  // Container styles:
+  // - mine: blue-tinted card on the RIGHT
+  // - others: neutral grey card on the LEFT
+  const containerSide = mine ? "flex justify-end" : "flex justify-start";
+  const containerCard = mine
+    ? "bg-blue-600/20 border-blue-500/40"
+    : "bg-zinc-900 border-zinc-700";
+
+  const titleColor = mine ? "text-blue-100" : "text-zinc-100";
+  const descColor = mine ? "text-blue-200" : "text-zinc-300";
+  const timeColor = mine ? "text-blue-300" : "text-zinc-400";
+
+  return (
+    <div className={`px-2 mb-2 ${containerSide}`}>
+      <div className={`max-w-[92%] rounded-2xl border p-3 ${containerCard}`}>
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 opacity-80" />
+          <div className={`font-semibold text-sm ${titleColor}`}>{item.title}</div>
+          <span className={`ml-auto text-[10px] px-2 py-0.5 rounded-full font-semibold ${severityBadge}`}>
+            {item.severity.toUpperCase()}
+          </span>
+        </div>
+        {item.description && <div className={`mt-1 text-sm ${descColor}`}>{item.description}</div>}
+        <div className={`mt-1 text-[10px] ${timeColor}`}>{timeShort(item.createdAt)}</div>
+      </div>
+    </div>
+  );
+}
+
+
+Note: We no longer tint the whole card by severity; we keep severity colors on the badge only, per your requirement. Others’ incidents are neutral grey; yours are blue.
+
+5) (Optional) Remove now-unused severityStyles
+
+If you’re not using severityStyles anywhere else after the change, delete:
+
+const severityStyles: Record<Severity, string> = { ... }

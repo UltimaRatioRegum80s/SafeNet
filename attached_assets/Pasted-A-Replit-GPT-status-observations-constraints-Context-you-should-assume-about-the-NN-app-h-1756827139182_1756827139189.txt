@@ -1,0 +1,235 @@
+A) Replit → GPT (status + observations + constraints)
+
+Context you should assume about the NN app (high-level, no secrets):
+
+Frontend is React + TypeScript + Tailwind + (likely) shadcn/ui.
+
+Map layer uses MapLibre GL JS (or Mapbox GL–compatible lib) with clustering (GeoJSON source { cluster: true }) and a mix of SymbolLayer(s) (for markers) and possibly HTML markers for special pins.
+
+PWA runs on desktop and mobile (Chrome/Safari). Mobile shows basemap but no markers/cluster circles.
+
+Current observations (no code changes made):
+
+Mobile = Canvas visible; layers missing
+
+The map container renders and responds to pan/zoom.
+
+Marker/clustering layers don’t render on iOS Safari and Android Chrome in our PWA shell.
+
+No obvious runtime errors on desktop
+
+Desktop console is clean.
+
+On mobile, we’ve seen one warning occasionally: “WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost” (intermittent).
+
+Responsive CSS looks suspicious
+
+The map container uses Tailwind classes with responsive variants (sm:, md: etc.). There’s at least one overflow-hidden wrapper and a positioned overlay (controls sheet) that sits above the canvas.
+
+On mobile, a full-screen overlay (drawer/sheet) conditionally mounts. Z-index/pointer-events interplay may be relevant.
+
+Sprite & glyphs are remote
+
+Style JSON references a hosted sprite and glyphs. On mobile data-saving mode or slow network, those requests sometimes 404/timeout through the PWA service worker.
+
+Cluster circle layers depend on expressions
+
+There are zoom-based expressions for circle-radius and circle-opacity. On small screens we see opacity expression uses a media-tailored value (via a prop), which could be evaluating to 0 on mobile.
+
+Constraints we’ll protect (Progress Law):
+
+We won’t remove or regress any working desktop behaviour/UX.
+
+We won’t change code during this analysis; only inspect runtime state (React DevTools/Browser DevTools).
+
+If/when we patch, we’ll propose: feature-flagged, small-scope PR, and a reversible changelog entry.
+
+What we can surface without edits (ask us if you want exports):
+
+Computed layout of the map container and overlay wrappers on mobile vs desktop.
+
+Network panel results for sprite.png, sprite.json, glyphs/{fontstack}/{range}.pbf, and GeoJSON fetch.
+
+MapLibre runtime style: list of layers/sources and their visibility after map.on('load').
+
+Service Worker logs: whether assets are cached/blocked.
+
+B) GPT → Replit (analysis plan & hypotheses; zero code changes)
+
+Below is a non-destructive diagnostic checklist you can run right now in mobile emulation or a real device. It’s ordered to catch the most common causes first.
+
+1) Quick CSS/overlay sanity
+
+Open mobile view. In DevTools, toggle off (not editing files, just in Styles panel) these on wrapper elements:
+
+overflow: hidden
+
+any parent transform (e.g., transform: translateZ(0)), filter, or will-change on ancestors of the map container
+
+overlaid components’ pointer-events and z-index
+
+Look for a sibling overlay covering the canvas (even if transparent). If it’s covering the map, HTML markers won’t receive paint/interaction.
+
+Confirm map canvas actual size: in Elements → Layout, check the canvas has non-zero width/height on mobile.
+
+If markers appear when overlays are disabled, we likely have a z-index/overlay cover issue. Root cause candidates:
+
+A mobile-only sheet/drawer with fixed + full-viewport that never unmounts.
+
+A backdrop element with pointer-events: auto intercepting events.
+
+2) Style JSON assets (sprite/glyphs) loading
+
+Network tab → filter “sprite” and “glyphs”: verify 200 OK for:
+
+.../sprite.png
+
+.../sprite.json
+
+.../glyphs/{fontstack}/{range}.pbf
+
+If these fail on mobile (especially under PWA), symbols won’t render.
+
+Check Service Worker tab → Bypass for network temporarily and hard-reload.
+
+Inspect CORS/HTTPS and MIME of sprite.png/sprite.json.
+
+If loading fails only in PWA: SW routing/caching rule mis-match for cross-origin map assets.
+
+3) Runtime style verification
+
+Run in console (after the map reports loaded). No code changes; just paste into DevTools console:
+
+// 1) Ensure map is defined (adjust var name if needed)
+const m = window.__nnMap || window.map || window._map || null; 
+if (!m) console.warn('Map instance not on window. Expose it temporarily for debugging.');
+
+// 2) List sources & cluster config
+m && Object.entries(m.getStyle().sources).forEach(([k,v]) => {
+  console.log('SRC', k, v.type, v.cluster, v.data || v.url);
+});
+
+// 3) List layers (order + visibility)
+m && m.getStyle().layers.forEach(l => {
+  console.log('LYR', l.id, l.type, l.layout && l.layout.visibility, l.filter);
+});
+
+// 4) Inspect a cluster source data
+const srcId = (m && Object.keys(m.getStyle().sources).find(k => m.getSource(k).cluster)) || null;
+if (srcId) {
+  const s = m.getSource(srcId);
+  console.log('Cluster source:', srcId, s);
+  // Check if any features visible at current zoom
+  const feats = m.querySourceFeatures(srcId) || [];
+  console.log('Features in source @ current view:', feats.length);
+}
+
+// 5) Are layers hidden?
+// Sometimes layout.visibility is 'none' due to a reactive toggle:
+const hidden = m && m.getStyle().layers.filter(l => l.layout && l.layout.visibility === 'none');
+console.log('Hidden layers:', hidden);
+
+
+What we’re looking for:
+
+sprite/glyphs OK + sources present + layers present + visibility=visible → rendering pipeline is hooked up.
+
+visibility: none on mobile-specific layers or a media-driven flag that incorrectly hides them.
+
+4) Expressions for opacity/radius
+
+Inspect the style for the symbol/circle layer paint properties in console:
+
+const targetLayers = ['cluster-circles','cluster-count','poi-symbols','incident-markers']; // adjust ids
+targetLayers.forEach(id => {
+  const lyr = m && m.getLayer(id);
+  if (!lyr) return console.log('No layer', id);
+  console.log(id, {
+    layout: lyr.layout,
+    paint: {
+      'circle-radius': m.getPaintProperty(id,'circle-radius'),
+      'circle-opacity': m.getPaintProperty(id,'circle-opacity'),
+      'icon-size': m.getPaintProperty(id,'icon-size'),
+      'text-opacity': m.getPaintProperty(id,'text-opacity'),
+    }
+  });
+});
+
+
+If any opacity resolves to 0 or a step/interpolate uses zoom breakpoints unsuitable for mobile (e.g., min zoom too high), markers may appear “missing”.
+
+5) HTMLMarker vs. style layers
+
+If you’re using new maplibregl.Marker({ element }) for markers:
+
+In Elements panel, search for your marker DOM nodes. If they exist but aren’t visible, check CSS: Tailwind responsive classes (e.g., hidden md:block) might hide them on small screens.
+
+Red flag to spot now: class names like hidden sm:flex on marker container elements.
+
+6) WebGL context & iOS specifics
+
+On iOS Safari, if the WebGL context is lost, the basemap may still show from a previous frame, but dynamic layers fail to redraw.
+
+Console: watch for CONTEXT_LOST_WEBGL. Try Disable low power mode and reload (just a sanity test).
+
+Verify map.painter.context.gl exists and m.isStyleLoaded() returns true.
+
+7) Viewport meta / CSS transforms
+
+A parent applying transform can create a new compositing context affecting fixed/absolute children (MapLibre reprojects HTML markers).
+
+Check for any scaled parent on mobile (e.g., page zoom hack, transform: scale()), which can lead to offscreen placement.
+
+8) Data loading vs. SW
+
+Ensure your GeoJSON (or tiles) request succeeds on mobile (Network tab).
+
+If SW caches an empty or error response (e.g., first offline load), clusters will be zero. Try SW → “Update on reload” + hard reload.
+
+Likely Root Causes (ranked)
+
+Responsive CSS hiding markers/overlays blocking canvas (Tailwind hidden/md: variants; sheet/drawer/backdrop z-index).
+
+Sprite/glyph load failing in PWA on mobile (SW caching or CORS), causing symbol layers not to render.
+
+Paint/opacity expressions evaluate to 0 on mobile (a prop or env flag toggled by viewport).
+
+HTML markers exist but are visually offscreen due to a transformed/scaled parent or container dimensions collapsing on mobile.
+
+WebGL context lost on iOS/low-power; style never re-renders markers.
+
+What GPT needs from Replit (pure info; no edits)
+
+Please post back the results of these specific probes:
+
+Network panel (mobile): status codes for sprite.png, sprite.json, and a sample glyphs/*.pbf. Also the GeoJSON request for incidents/POIs (status + payload size).
+
+Runtime style snapshot: paste the console output for sources and layers (items from step 3 above).
+
+Opacity/radius values: console output for circle-opacity, icon-size, etc. (step 4).
+
+DOM check: Do marker DOM nodes exist? Any hidden/md:* Tailwind classes on them?
+
+Overlays: In DevTools, when you disable the top overlay (drawer/backdrop), do markers appear?
+
+Service Worker: Is “Bypass for network” making markers appear after a hard reload?
+
+With those, I’ll pinpoint the exact cause and propose a minimally invasive fix plan (feature-flagged, no regressions).
+
+Protocol to uphold Progress Law (for when we move past analysis)
+
+Create a diagnostics/map-rendering.md note logging findings.
+
+Any code change goes via a short-lived branch fix/mobile-markers.
+
+Add a feature flag (env or Zustand store) e.g., NN_FIX_MOBILE_MARKERS that can be toggled.
+
+Produce a patch that:
+
+touches only the map component, styles for overlays, or SW rules (whichever is proven culprit);
+
+includes a rollback commit (revert:) ready to apply.
+
+Do a desktop+mobile smoke test checklist before merge (map loads, markers visible, clustering toggles, overlays intact).
+
+@RDM — this keeps your progress safe: we’re only inspecting now. Replit will reply with the probe outputs; then I’ll translate that into a targeted, reversible fix with zero feature loss.

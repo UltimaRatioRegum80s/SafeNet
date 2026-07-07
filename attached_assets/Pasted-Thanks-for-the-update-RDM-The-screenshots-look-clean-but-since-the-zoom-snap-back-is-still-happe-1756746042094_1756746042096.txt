@@ -1,0 +1,67 @@
+Thanks for the update, @RDM. The screenshots look clean, but since the zoom snap-back is still happening, there’s one more common source we haven’t neutralized yet: a controlled center (or a hidden call to setView/fitBounds) that fires on re-renders.
+
+Let’s keep the NRP rule: tiny, reversible steps—no changes to data, UI, or working features.
+
+🎯 What’s most likely still forcing zoom to 13
+
+center={...} is still controlled
+Even if we switched zoom → defaultZoom, passing center={getMapCenter()} on every render can recenter the map (and React-Leaflet will restore the paired zoom). We should use defaultCenter unless we’re intentionally recentering.
+
+A programmatic call (e.g., setView, fitBounds, flyTo) still runs after zoomend (commonly from a “on incidents change” effect or a theme/layer toggle).
+
+We’ll confirm which one is firing with lightweight instrumentation.
+
+🔧 Replit — NRP-safe steps
+A) Swap center to uncontrolled (one-liner)
+
+In Map.tsx where the desktop map’s <MapContainer /> is declared:
+
+Change:
+center={getMapCenter()} → defaultCenter={getMapCenter()}
+
+Keep our earlier defaultZoom change.
+
+This alone often stops snap-backs. It’s reversible and doesn’t touch other behavior.
+
+B) Add a tiny runtime logger to catch any forced view changes
+
+Inside the whenCreated={(m) => { … }} callback (after mapRef.current = m; setMapReady(true);), add this temporary monkey-patch to identify who calls the view/zoom methods:
+
+const logWrap = (name: keyof L.Map) => {
+  const orig = (m as any)[name].bind(m);
+  (m as any)[name] = (...args: any[]) => {
+    // log once every few seconds to avoid spam if needed
+    console.log("[Map] CALL:", name, "args:", args);
+    return orig(...args);
+  };
+};
+["setZoom", "setView", "flyTo", "flyToBounds", "fitBounds"].forEach(logWrap);
+
+m.on("zoomend", () => console.log("[Map] zoomend ->", m.getZoom()));
+
+
+Now, when the snap happens, the console will tell us exactly which function was called (and with what args). We’ll remove this logger after we fix the culprit.
+
+C) Confirm no implicit remounts
+
+Quick check on the same <MapContainer>:
+
+Ensure there is no key={...} prop that can change during renders (theme, filters, etc.). A changing key remounts the map at the initial zoom every time.
+
+🎨 Cluster colors (status)
+
+You reported both desktop and mobile now use the same severity-aware cluster logic—great. Keep the NRP flags for now; we’ll drop them once zoom is stable.
+
+✅ What to report back
+
+After the center → defaultCenter change, does the snap-back stop?
+
+With the monkey-patch logger, when you try to zoom and it still snaps, what logs appear? For example:
+
+[Map] CALL: setView args: … or [Map] CALL: fitBounds args: …
+
+The sequence around [Map] zoomend -> …
+
+This will tell us precisely who’s resetting the view (and we’ll guard that call to run only on first load, or behind a flag).
+
+NRP reminder: these are single-line prop swaps + temporary logging—no architecture or UI disruption.

@@ -1,0 +1,154 @@
+got it — thanks for the straight shot, Replit. You’re right: without wiring compress → upload → use returned URLs in the incident payload, all the polish is moot.
+
+Below is a safe, copy-paste integration for IncidentReport.tsx that:
+
+accepts File[] from ImageUpload
+
+compresses client-side (WebP/JPEG)
+
+uploads via /api/uploads
+
+submits the incident with photos: string[] (URLs)
+
+supports cancel + progress and preserves your existing mutation
+
+1) Imports (top of IncidentReport.tsx)
+import { useRef, useState } from "react";
+import { compressImage, toFile } from "@/lib/image";
+import { uploadImages } from "@/lib/upload";
+import { useToast } from "@/components/ui/use-toast"; // adjust to your toast path
+
+2) Local state & controller (inside component)
+const { toast } = useToast();
+
+const [photos, setPhotos] = useState<File[]>([]); // ImageUpload sets this
+const [uploading, setUploading] = useState(false);
+const controllerRef = useRef<AbortController | null>(null);
+
+
+If you already have photos state, keep it — just make sure it’s File[].
+
+3) Wire ImageUpload (ensure it passes File[])
+<ImageUpload
+  onImagesSelected={(files: File[]) => setPhotos(files)}
+  maxImages={5} // keep current; server enforces 2, or slice below
+/>
+
+4) Drop-in upload helper (inside component)
+async function prepareAndUpload(files: File[], signal?: AbortSignal) {
+  // Enforce server limit (2) defensively; or keep 5 if your server accepts 5
+  const picked = files.slice(0, 2);
+
+  const compressedFiles: File[] = [];
+  for (const f of picked) {
+    try {
+      const blob = await compressImage(f, { maxEdge: 1600, quality: 0.78, preferWebP: true });
+      const ext = blob.type.includes("webp") ? "webp" : "jpg";
+      compressedFiles.push(toFile(blob, f, ext));
+    } catch {
+      // fallback: original file if compression fails
+      compressedFiles.push(f);
+    }
+  }
+
+  // POST to /api/uploads → returns [{ url, ... }]
+  const results = await uploadImages(compressedFiles, signal);
+  return results.map(r => r.url);
+}
+
+5) Patch your submit handler
+
+Replace your current handleSubmit (or equivalent) with this version.
+If you’re using React Query (createIncident.mutate), keep it — just feed the photoUrls.
+
+async function handleSubmit(e?: React.FormEvent) {
+  e?.preventDefault?.();
+
+  try {
+    // build base incident payload (whatever you already collect)
+    const payload: any = {
+      type,              // e.g., selected incident type
+      severity,          // if you set it here
+      description,       // textarea note
+      isAnonymous,       // toggle
+      lat: coords?.lat,
+      lng: coords?.lng,
+      photos: [],        // will fill below
+    };
+
+    // ---- NEW: photos integration ----
+    if (photos.length > 0) {
+      controllerRef.current = new AbortController();
+      setUploading(true);
+
+      const urls = await prepareAndUpload(photos, controllerRef.current.signal);
+      payload.photos = urls; // << use URLs, not count
+    }
+
+    // ---- submit incident (keep your existing mutation) ----
+    // Option A: React Query mutation
+    await createIncident.mutateAsync(payload);
+
+    // Option B: fetch (if you don't use a mutation)
+    // const res = await fetch("/api/incidents", {
+    //   method: "POST",
+    //   headers: { "Content-Type": "application/json" },
+    //   credentials: "include",
+    //   body: JSON.stringify(payload),
+    // });
+    // if (!res.ok) throw new Error("Failed to create incident");
+
+    // success UX
+    toast({ title: "Incident reported", description: payload.photos?.length ? "Photos attached." : "Thanks for the quick report." });
+    setPhotos([]); // reset local state if desired
+    // ...any other post-submit cleanup (close panel, navigate, etc.)
+
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      toast({ variant: "destructive", title: "Upload canceled" });
+    } else {
+      toast({ variant: "destructive", title: "Could not submit", description: err?.message ?? "Please try again." });
+    }
+  } finally {
+    setUploading(false);
+    controllerRef.current = null;
+  }
+}
+
+
+And disable the submit button while uploading:
+
+<button
+  onClick={handleSubmit}
+  disabled={uploading || isSubmitting /* your own flags */}
+>
+  {uploading ? "Uploading…" : isSubmitting ? "Submitting…" : "Submit"}
+</button>
+
+{uploading && (
+  <button className="text-xs underline opacity-80" onClick={() => controllerRef.current?.abort()}>
+    Cancel upload
+  </button>
+)}
+
+6) Minimal type guard (optional)
+
+If your server currently enforces 2 photos but UI allows 5, either:
+
+keep the .slice(0, 2) in prepareAndUpload, or
+
+raise server limit to 5 later.
+
+For now, I kept the client slice to 2 to avoid server rejections.
+
+7) Quick sanity tests (now they’ll pass)
+
+Select 1–2 images → submit → you see them in the incident on the server; socket event includes photos: [url,...].
+
+Select 3+ images → only first 2 are uploaded.
+
+Cancel during upload → toast “Upload canceled”, form preserved.
+
+HEIC/JPEG tests show correct orientation; payload uses URLs.
+
+If you paste this in, your incident creation will finally ship photos end-to-end. After that, we can layer the server protective headers + optional output size ceiling and run the full QA matrix.

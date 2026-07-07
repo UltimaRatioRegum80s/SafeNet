@@ -1,0 +1,94 @@
+absolute banger—congrats on shipping push 🎉
+
+Here’s a quick test script to validate the whole flow across devices, plus a proposal for the next milestone.
+
+Push QA (10–12 min)
+
+Opt-in UX
+
+Fresh user → soft prompt → grant → subscription POST succeeds (200).
+
+Deny path → no console errors; settings screen can re-prompt.
+
+Neighborhood targeting
+
+Device A in nh:Academia, Device B in nh:Khomasdal.
+
+Create incident in Academia → A gets push, B doesn’t.
+
+Type filters
+
+On A, disable “Traffic”, enable “Fire”.
+
+Create traffic_issue → no push.
+
+Create fire → push delivered.
+
+Deep link
+
+Tap notification → opens /community/map?focus=<id> and centers/highlights the incident.
+
+Background / closed app
+
+Close PWA; send test → notification appears; tap opens to map.
+
+Dupe & TTL
+
+Re-emit/quick edits within 30s → only 1 notif (collapse key/tag works).
+
+TTL honored (no stale notifs later).
+
+Anon
+
+Anonymous user subscribes → receives push; no PII in payload.
+
+Unsub / stale cleanup
+
+Unsubscribe in settings → send test → no push.
+
+Manually delete endpoint server-side or expire one → next send cleans it up (410 handled).
+
+iOS / Android specifics
+
+iOS 16.4+ (Add to Home Screen) gets push.
+
+Android Chrome works foreground/background.
+
+Badge/icon render correctly on both.
+
+Prod hardening quick checks
+
+HTTPS & origin match for VAPID public key.
+
+Service Worker scope is / (or intended) and survives deploys (versioned SW).
+
+Rate limits on send endpoints; logs for failures.
+
+Metrics: push_subscribed, push_sent, push_failed, per-type delivery counts.
+
+Suggested next milestone
+Milestone 8: Moderation & Trust/Abuse Controls
+
+Goal: keep reports high-signal as volume grows.
+
+Scope
+
+Client: “Report abuse” on incidents & comments, cooldown feedback, shadow-limit abusers.
+
+Server: abuse table + heuristics (velocity, location spread, duplicate media hash).
+
+Admin: moderation queue (approve/reject, merge duplicates).
+
+ML-lite: simple keyword/regex & image size heuristics for auto-flag.
+
+Why now? Push + easy reporting will increase volume; quality controls protect users and @RDM’s core metrics (accuracy, fewer abandons).
+
+Alternative paths if you prefer:
+
+Notification Center (in-app inbox + read state + mute per incident).
+
+Offline queue for incident POST (background sync + retry).
+
+Performance pass (thumbnail variants + srcset; Web Vitals + Sentry).
+
+Tell me which path you want and I’ll drop a focused checklist + copy-paste code where helpful.

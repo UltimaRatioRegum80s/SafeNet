@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NaborNet - Logo Test</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: var(--bg-color);
+            color: var(--text-color);
+            transition: all 0.3s ease;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        :root {
+            --bg-color: #f8fafc;
+            --text-color: #1e293b;
+            --card-bg: white;
+            --border-color: #e2e8f0;
+        }
+        .dark {
+            --bg-color: #0f172a;
+            --text-color: #f1f5f9;
+            --card-bg: #1e293b;
+            --border-color: #334155;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 0;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 30px;
+        }
+        .logo-section {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .logo-light, .logo-dark {
+            width: 40px;
+            height: 40px;
+            transition: opacity 0.3s ease;
+        }
+        .logo-light { display: block; }
+        .logo-dark { display: none; }
+        .dark .logo-light { display: none; }
+        .dark .logo-dark { display: block; }
+        .brand {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--text-color);
+        }
+        .theme-toggle {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            padding: 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            transition: all 0.2s;
+        }
+        .theme-toggle:hover {
+            transform: scale(1.05);
+        }
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 30px;
+            margin: 20px 0;
+        }
+        .demo-logos {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin: 30px 0;
+        }
+        .logo-demo {
+            text-align: center;
+            padding: 20px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+        }
+        .status { color: #22c55e; }
+        .large-logo { width: 80px; height: 80px; margin: 0 auto 15px; }
+        .welcome-section {
+            text-align: center;
+            padding: 40px 20px;
+            background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+            color: white;
+            border-radius: 12px;
+            margin: 20px 0;
+        }
+        .welcome-logo {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header with logo switching -->
+        <div class="header">
+            <div class="logo-section">
+                <img src="/attached_assets/Logo_1755373407688.png" alt="NaborNet" class="logo-light">
+                <img src="/attached_assets/Logo dark mode_1755373493360.png" alt="NaborNet" class="logo-dark">
+                <div class="brand">NaborNet</div>
+            </div>
+            <button class="theme-toggle" onclick="toggleTheme()">
+                <span id="theme-icon">🌙</span>
+            </button>
+        </div>
+
+        <!-- Welcome section -->
+        <div class="welcome-section">
+            <img src="/attached_assets/Logo_1755373407688.png" alt="NaborNet" class="welcome-logo logo-light">
+            <img src="/attached_assets/Logo dark mode_1755373493360.png" alt="NaborNet" class="welcome-logo logo-dark">
+            <h1>Welcome to NaborNet</h1>
+            <p>Your neighborhood safety community platform</p>
+        </div>
+
+        <!-- Status card -->
+        <div class="card">
+            <h2>NaborNet Logo Implementation Status</h2>
+            <p class="status">✓ Theme-aware logo switching implemented</p>
+            <p class="status">✓ Light mode: Blue house logo</p>
+            <p class="status">✓ Dark mode: White house logo</p>
+            <p class="status">✓ Smooth transitions between themes</p>
+            <p class="status">✓ Consistent branding across all pages</p>
+        </div>
+
+        <!-- Logo demonstration -->
+        <div class="card">
+            <h3>Logo Demonstration</h3>
+            <div class="demo-logos">
+                <div class="logo-demo">
+                    <img src="/attached_assets/Logo_1755373407688.png" alt="Light Logo" class="large-logo">
+                    <h4>Light Mode Logo</h4>
+                    <p>Blue house design for light backgrounds</p>
+                </div>
+                <div class="logo-demo">
+                    <img src="/attached_assets/Logo dark mode_1755373493360.png" alt="Dark Logo" class="large-logo">
+                    <h4>Dark Mode Logo</h4>
+                    <p>White house design for dark backgrounds</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test instructions -->
+        <div class="card">
+            <h3>Test Instructions</h3>
+            <p>1. Click the theme toggle button (🌙/☀️) in the top right</p>
+            <p>2. Watch all logos switch automatically between blue and white versions</p>
+            <p>3. Notice the smooth transitions and proper contrast</p>
+            <p>4. Refresh the page - theme preference should persist</p>
+            <br>
+            <p><strong>Current theme:</strong> <span id="current-theme">Light</span></p>
+            <p><strong>Main app:</strong> <a href="http://localhost:5000" target="_blank">Open NaborNet App</a></p>
+        </div>
+    </div>
+
+    <script>
+        function toggleTheme() {
+            const body = document.body;
+            const isDark = body.classList.contains('dark');
+            const themeIcon = document.getElementById('theme-icon');
+            const currentThemeSpan = document.getElementById('current-theme');
+            
+            if (isDark) {
+                body.classList.remove('dark');
+                themeIcon.textContent = '🌙';
+                currentThemeSpan.textContent = 'Light';
+                localStorage.setItem('theme', 'light');
+            } else {
+                body.classList.add('dark');
+                themeIcon.textContent = '☀️';
+                currentThemeSpan.textContent = 'Dark';
+                localStorage.setItem('theme', 'dark');
+            }
+        }
+
+        // Initialize theme
+        function initTheme() {
+            const savedTheme = localStorage.getItem('theme');
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            
+            if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+                document.body.classList.add('dark');
+                document.getElementById('theme-icon').textContent = '☀️';
+                document.getElementById('current-theme').textContent = 'Dark';
+            }
+        }
+
+        initTheme();
+        console.log('NaborNet logo test page loaded');
+    </script>
+</body>
+</html>

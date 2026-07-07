@@ -1,0 +1,213 @@
+Great investigation, Replit — thank you. The timing bug (map not ready → loader never runs) explains the empty “Recent Incidents” panel.
+
+Here’s a minimal, UI-safe patch that keeps your current endpoints and styles intact, but decouples data loading from map readiness and then starts the bbox watchdog when the map is ready.
+
+1) Small client util to normalize responses (array vs paginated)
+// src/lib/incidentsApi.ts
+export type Incident = {
+  id: string;
+  title: string;
+  createdAt: string;
+  lat: number;
+  lng: number;
+  // ...whatever you already use for markers/cards
+};
+
+type Paginated<T> = { items: T[]; total: number; nextCursor?: string };
+
+/** Both `/api/incidents?bbox=...` (array) and `/api/incidents` (paginated) → Incident[] */
+export async function fetchIncidentsAny(url: string): Promise<Incident[]> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed: ${res.status}`);
+  const data = await res.json();
+  if (Array.isArray(data)) return data as Incident[];
+  if (data && Array.isArray((data as Paginated<Incident>).items)) {
+    return (data as Paginated<Incident>).items;
+  }
+  return [];
+}
+
+2) Map.tsx — load incidents before map is ready, then attach markers; start watchdog after map exists
+// src/pages/Map.tsx (or wherever your map component lives)
+import { useEffect, useMemo, useRef, useState } from "react";
+import { MapContainer } from "react-leaflet";
+import L from "leaflet";
+import { fetchIncidentsAny, Incident } from "@/lib/incidentsApi";
+
+export default function MapPage() {
+  const mapRef = useRef<L.Map | null>(null);
+
+  // Keep incidents separately from markers so we can load data without a map
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const markersRef = useRef<Map<string, L.Marker>>(new Map());
+  const watchdogRef = useRef<number | null>(null);
+
+  // ---- 1) Initial data load: independent of map readiness ----
+  useEffect(() => {
+    let canceled = false;
+
+    (async () => {
+      try {
+        // your existing order: live first, then fallback (no bbox)
+        const liveUrl = `/api/incidents/live`;
+        let items = await fetchIncidentsAny(liveUrl);
+
+        if (!items.length) {
+          items = await fetchIncidentsAny(`/api/incidents?limit=50`);
+        }
+
+        if (!canceled) {
+          setIncidents((prev) => dedupeById([...items, ...prev]));
+        }
+      } catch (e) {
+        // optional: silent; we keep UI unchanged
+        console.warn("Initial incidents load failed", e);
+      }
+    })();
+
+    return () => {
+      canceled = true;
+    };
+  }, []);
+
+  // ---- 2) When map becomes ready OR incidents change → (re)draw markers ----
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    upsertMarkers(map, incidents, markersRef.current);
+  }, [incidents]);
+
+  // If your MapContainer is created later, rerun drawing once it exists
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    // draw whatever we already have
+    upsertMarkers(map, incidents, markersRef.current);
+  }, [mapRef.current]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- 3) Start bbox watchdog AFTER map exists; stop on unmount ----
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const tick = async () => {
+      const b = map.getBounds();
+      const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(",");
+      const url = `/api/incidents?bbox=${bbox}&sinceHours=72&limit=300`;
+      try {
+        const items = await fetchIncidentsAny(url);
+        if (items.length) {
+          setIncidents((prev) => dedupeById([...items, ...prev]));
+        }
+      } catch (e) {
+        console.warn("Watchdog fetch failed", e);
+      }
+    };
+
+    // run once now (map ready) + on moveend + on interval
+    tick();
+    map.on("moveend", tick);
+    watchdogRef.current = window.setInterval(tick, 20_000);
+
+    return () => {
+      map.off("moveend", tick);
+      if (watchdogRef.current) {
+        clearInterval(watchdogRef.current);
+        watchdogRef.current = null;
+      }
+    };
+  }, [mapRef.current]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- UI & existing layout remain unchanged ----
+  return (
+    <div className="grid grid-cols-12 gap-4">
+      <div className="col-span-7">
+        <MapContainer
+          whenCreated={(m) => (mapRef.current = m)}
+          // keep your existing props (center, zoom, className, tile layers, etc.)
+        >
+          {/* existing layers/controls unchanged */}
+        </MapContainer>
+      </div>
+
+      <div className="col-span-5">
+        {/* Your existing "Recent Incidents" box – we only feed it data */}
+        <RecentIncidentsBox incidents={incidents} />
+      </div>
+    </div>
+  );
+}
+
+// --- helpers (no UI impact) ---
+
+function upsertMarkers(
+  map: L.Map,
+  items: Incident[],
+  bag: Map<string, L.Marker>
+) {
+  for (const it of items) {
+    if (!bag.has(it.id)) {
+      const m = L.marker([it.lat, it.lng]); // use your existing marker/icon logic here
+      m.bindPopup(`<strong>${escapeHtml(it.title)}</strong>`);
+      m.addTo(map);
+      bag.set(it.id, m);
+    }
+  }
+}
+
+function dedupeById(items: Incident[]) {
+  const seen = new Set<string>();
+  const out: Incident[] = [];
+  for (const i of items) {
+    if (!seen.has(i.id)) {
+      seen.add(i.id);
+      out.push(i);
+    }
+  }
+  return out;
+}
+
+function escapeHtml(s: string) {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+}
+
+// Stub – keep your existing component (styles unchanged)
+function RecentIncidentsBox({ incidents }: { incidents: Incident[] }) {
+  if (!incidents.length) return <div className="card"><div className="card-body">No incidents.</div></div>;
+  return (
+    <div className="card">
+      <div className="card-body space-y-2">
+        {incidents.slice(0, 20).map((i) => (
+          <div key={i.id} className="rounded-xl bg-neutral-800 p-3">
+            <div className="font-medium">{i.title}</div>
+            <div className="text-xs opacity-70">
+              {new Date(i.createdAt).toLocaleTimeString()}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+Why this fixes it
+
+Initial incidents load regardless of mapRef state → the right panel immediately has data (mirrors Feed).
+
+Markers are added once the map exists, without reloading data.
+
+Watchdog (bbox + sinceHours) only starts after the map is created, matching your current logic — just reliably.
+
+Optional next step (later, not required now)
+
+Migrate these fetches to React Query with shared keys so the Feed and Map share cache. No UI changes, just better caching.
+
+Replit → GPT: sanity checks
+
+Your existing marker creation (custom icons, clusters?)—plug that line into upsertMarkers so we don’t change visuals.
+
+Confirm RecentIncidentsBox already exists; if it does, keep it and just pass the incidents state into it.
+
+Any Socket.io “live” channel? If yes, we can swap the watchdog interval with socket upserts using the same setIncidents(dedupeById([...eventItems, ...prev])) pattern.
+
+If any part of Map.tsx is structured differently (e.g., you use a separate layer group or clustering lib), paste the relevant snippet and I’ll adapt the patch to your exact structure without altering the UI.

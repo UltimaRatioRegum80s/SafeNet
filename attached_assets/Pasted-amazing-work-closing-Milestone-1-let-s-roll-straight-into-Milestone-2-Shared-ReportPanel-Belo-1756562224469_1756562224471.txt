@@ -1,0 +1,324 @@
+amazing work closing Milestone 1 🚀 — let’s roll straight into Milestone 2: Shared ReportPanel. Below are copy-paste snippets that plug into your current stack (Express+Socket.IO already set; client uses React+TS, Zustand, React Query, Tailwind/shadcn, your useEnhancedLocation + ImageUpload). Minimal form, GPS default + optional refine, 2 photos, anon toggle, no accuracy badge, soft client cooldown.
+
+1) Global panel state (Zustand)
+
+client/src/features/report/useReportPanel.ts
+
+import { create } from "zustand";
+
+export type IncidentType = {
+  id: string;
+  label: string;
+  severity: "low" | "medium" | "high" | "critical";
+  iconSrc?: string; // we'll swap icon set later
+};
+
+type ReportPanelState = {
+  open: boolean;
+  selected: IncidentType | null;
+  openWith: (t: IncidentType) => void;
+  close: () => void;
+};
+
+export const useReportPanel = create<ReportPanelState>((set) => ({
+  open: false,
+  selected: null,
+  openWith: (t) => set({ open: true, selected: t }),
+  close: () => set({ open: false, selected: null }),
+}));
+
+2) Shared ReportPanel component (glass sheet + minimal form)
+
+client/src/features/report/ReportPanel.tsx
+
+import { useEffect, useMemo, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { useReportPanel } from "./useReportPanel";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/components/ui/use-toast";
+import ImageUpload from "@/components/ImageUpload";
+import useEnhancedLocation from "@/hooks/useEnhancedLocation";
+
+type CreateIncidentDTO = {
+  type: string;
+  severity: "low" | "medium" | "high" | "critical";
+  description?: string;
+  isAnonymous: boolean;
+  lat?: number;
+  lng?: number;
+  photos?: string[];
+};
+
+// 30s soft cooldown between submits
+const COOLDOWN_MS = 30_000;
+
+export default function ReportPanel() {
+  const { open, selected, close } = useReportPanel();
+  const [isAnonymous, setAnonymous] = useState(false); // default OFF per spec
+  const [description, setDescription] = useState("");
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [lastSubmitAt, setLastSubmitAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const { toast } = useToast();
+
+  const { coords, request, hasPermission, refinedCoords, setRefinedCoords } = useEnhancedLocation?.() ?? {
+    coords: undefined, request: () => {}, hasPermission: false, refinedCoords: undefined, setRefinedCoords: (_: any) => {}
+  };
+  // NOTE: if your hook doesn't expose refinedCoords/setRefinedCoords, keep coords only. We'll still emit the pick event.
+
+  useEffect(() => {
+    if (open && !hasPermission && request) request();
+  }, [open, hasPermission, request]);
+
+  // cooldown logic & ticking countdown
+  useEffect(() => {
+    if (!lastSubmitAt) return;
+    const t = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(t);
+  }, [lastSubmitAt]);
+  const msLeft = Math.max(0, (lastSubmitAt ?? 0) + COOLDOWN_MS - now);
+  const cooldownActive = msLeft > 0;
+  const secondsLeft = Math.ceil(msLeft / 1000);
+
+  const mutation = useMutation({
+    mutationFn: async (dto: CreateIncidentDTO) => {
+      const res = await fetch("/api/incidents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(dto),
+      });
+      if (!res.ok) throw new Error("submit failed");
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Incident reported", description: "Thanks for the quick heads-up." });
+      setDescription(""); setPhotos([]); setAnonymous(false);
+      setLastSubmitAt(Date.now());
+      // optional: clear refined pin
+      if (setRefinedCoords) setRefinedCoords(undefined);
+      close();
+    },
+    onError: (e: any) => {
+      const msg = e?.message ?? "Could not submit";
+      toast({ variant: "destructive", title: "Submission failed", description: msg });
+    },
+  });
+
+  const chosenCoords = useMemo(() => refinedCoords ?? coords, [refinedCoords, coords]);
+
+  function handleSubmit() {
+    if (!selected || cooldownActive) return;
+    const { id, severity } = selected;
+    mutation.mutate({
+      type: id,
+      severity, // fixed by type per spec
+      description: description.trim() || undefined,
+      isAnonymous,
+      lat: chosenCoords?.lat,
+      lng: chosenCoords?.lng,
+      photos: photos.length ? photos.slice(0, 2) : undefined,
+    });
+  }
+
+  function beginRefineOnMap() {
+    // decoupled handshake — Map listens and enables pin drop
+    window.dispatchEvent(new CustomEvent("nn:begin-location-pick"));
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={(o) => !o && close()}>
+      <SheetContent side="bottom" className="sm:max-w-md rounded-t-2xl backdrop-blur bg-slate-900/70 border-slate-800">
+        <SheetHeader className="mb-2">
+          <SheetTitle className="flex items-center gap-2">
+            {selected ? selected.label : "Report"}
+          </SheetTitle>
+        </SheetHeader>
+
+        <div className="space-y-4">
+          {/* Anonymous toggle */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Switch id="anon" checked={isAnonymous} onCheckedChange={setAnonymous} />
+              <Label htmlFor="anon" className="text-sm">Report anonymously</Label>
+            </div>
+          </div>
+
+          {/* Description */}
+          <div>
+            <Label className="text-sm">Short note (optional)</Label>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              maxLength={500}
+              placeholder="What happened?"
+              className="mt-2"
+            />
+            <div className="mt-1 text-xs opacity-60">
+              {chosenCoords
+                ? `Location ready (${chosenCoords.lat.toFixed(5)}, ${chosenCoords.lng.toFixed(5)})`
+                : "Location not available yet"}
+            </div>
+          </div>
+
+          {/* Photos (max 2) */}
+          <div>
+            <Label className="text-sm">Photos (optional, up to 2)</Label>
+            <div className="mt-2">
+              <ImageUpload
+                value={photos}
+                onChange={(files: string[]) => setPhotos(files.slice(0, 2))}
+                accept="image/*"
+                capture="environment"
+                maxFiles={2}
+              />
+            </div>
+          </div>
+
+          {/* Refine location */}
+          <div className="flex items-center justify-between rounded-xl border border-slate-800/70 p-3">
+            <div className="text-sm opacity-80">Refine location on map</div>
+            <Button size="sm" variant="outline" onClick={beginRefineOnMap}>
+              Drop a pin
+            </Button>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-2 justify-end">
+            <Button variant="ghost" onClick={close}>Cancel</Button>
+            <Button onClick={handleSubmit} disabled={mutation.isPending || cooldownActive}>
+              {mutation.isPending ? "Submitting…" : cooldownActive ? `Wait ${secondsLeft}s` : "Submit"}
+            </Button>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+3) Quick grid page opens the shared panel
+
+Update your quick page to use the panel (keeps your 12 types; we’ll swap icon set later).
+client/src/pages/community/ReportIncident.tsx
+
+import { useReportPanel } from "@/features/report/useReportPanel";
+import ReportPanel from "@/features/report/ReportPanel";
+
+// Assuming you already have this list somewhere; import your existing one.
+// For now, retype minimal structure:
+const INCIDENT_TYPES = [
+  { id: "lost_pet", label: "Lost Pet", severity: "low", iconSrc: "/assets/icons/lost-pet.png" },
+  { id: "lost_found", label: "Lost & Found", severity: "low", iconSrc: "/assets/icons/lost-found.png" },
+  { id: "car_accident", label: "Car Accident", severity: "medium", iconSrc: "/assets/icons/car-accident.png" },
+  { id: "burglary", label: "Break In / Burglary", severity: "medium", iconSrc: "/assets/icons/burglary.png" },
+  { id: "suspicious_person", label: "Suspicious Person", severity: "medium", iconSrc: "/assets/icons/suspicious.png" },
+  { id: "traffic_issue", label: "Traffic Issue", severity: "low", iconSrc: "/assets/icons/traffic.png" },
+  { id: "construction", label: "Construction Work", severity: "medium", iconSrc: "/assets/icons/construction.png" },
+  { id: "emergency_alarm", label: "Emergency Alarm", severity: "high", iconSrc: "/assets/icons/alarm.png" },
+  { id: "fire", label: "Fire Emergency", severity: "high", iconSrc: "/assets/icons/fire.png" },
+  { id: "sos", label: "SOS / Need Help", severity: "critical", iconSrc: "/assets/icons/sos.png" },
+  { id: "violence", label: "Violence / Fight", severity: "high", iconSrc: "/assets/icons/violence.png" },
+  { id: "hit_run", label: "Hit & Run", severity: "high", iconSrc: "/assets/icons/hitrun.png" },
+] as const;
+
+export default function ReportIncidentPage() {
+  const { openWith } = useReportPanel();
+
+  return (
+    <div className="relative mx-auto max-w-6xl p-4">
+      <h1 className="text-2xl font-semibold mb-4">Quick Report</h1>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
+        {INCIDENT_TYPES.map((t) => (
+          <button
+            key={t.id}
+            className="rounded-2xl p-4 bg-slate-800/40 hover:bg-slate-800 transition shadow-sm border border-slate-700/40"
+            onClick={() => openWith(t)}
+          >
+            <div className="flex flex-col items-center gap-3">
+              <img src={t.iconSrc} alt={t.label} className="h-12 w-12" />
+              <div className="text-sm text-center">{t.label}</div>
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {/* Panel renders here and on Map page (reuse) */}
+      <ReportPanel />
+    </div>
+  );
+}
+
+4) Map page: floating button + refine handshake
+
+Add a launcher and wire the nn:begin-location-pick event to your map’s pin-drop mode.
+client/src/pages/map/MapPage.tsx (adjust to your file)
+
+import { useEffect } from "react";
+import { useReportPanel } from "@/features/report/useReportPanel";
+import ReportPanel from "@/features/report/ReportPanel";
+import { Button } from "@/components/ui/button";
+
+export default function MapPage() {
+  const { openWith } = useReportPanel();
+
+  useEffect(() => {
+    const handler = () => {
+      // TODO: enable your map's pin placement mode, then, when user confirms,
+      // write the chosen coords into your location store or dispatch a custom event
+      // Example (if your location hook can accept refinement):
+      // setRefinedCoords({ lat, lng });
+    };
+    window.addEventListener("nn:begin-location-pick", handler);
+    return () => window.removeEventListener("nn:begin-location-pick", handler);
+  }, []);
+
+  return (
+    <div className="relative h-full">
+      {/* your map component here */}
+
+      <div className="absolute bottom-4 right-4">
+        <Button
+          className="rounded-2xl backdrop-blur bg-slate-900/60 border border-slate-700 shadow-lg"
+          onClick={() => openWith({ id: "lost_pet", label: "Lost Pet", severity: "low" })}
+        >
+          Report
+        </Button>
+      </div>
+
+      <ReportPanel />
+    </div>
+  );
+}
+
+5) Notes on integrations (so you’re unblocked)
+
+No accuracy badge: purposely omitted. If your useEnhancedLocation shows it by default, hide it in the panel context.
+
+Photos: ImageUpload capped at 2. If your component also enforces server limits, keep them in sync.
+
+Anon default OFF: set by useState(false). Server already hides userId in broadcasts per your Milestone 1 changes.
+
+Status aliasing: frontend doesn’t need to care; API returns status: "pending".
+
+Cooldown: client shows a countdown and disables submit; server rate limiting still applies.
+
+6) Tiny QA checklist for Milestone 2
+
+Open from Quick Grid and Map button → same panel.
+
+Submit with 0–2 photos → succeeds; panel closes + toast.
+
+Anon ON → API response includes status: "pending", broadcast hides userId.
+
+Cooldown shows “Wait Ns” and blocks within 30s.
+
+“Drop a pin” triggers your map’s refine mode; chosen coords appear in subsequent submissions.
+
+Glass aesthetic matches your map overlays.
+
+If you want, I can also provide a small useIncidents store to optimistically append the just-submitted incident to the map/feed (using the incident:created socket you finished in Milestone 1). Ready to proceed or tweak any piece?

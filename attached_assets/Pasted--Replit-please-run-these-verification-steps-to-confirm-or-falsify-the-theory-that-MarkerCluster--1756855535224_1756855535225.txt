@@ -1,0 +1,104 @@
+@Replit — please run these verification steps to confirm (or falsify) the theory that MarkerCluster CSS isn’t loading in the mobile build/PWA, which would make cluster icons zero-size (invisible).
+No code changes yet—console + screenshots only. Progress Law preserved.
+
+1) Open the correct frame
+
+Open the app in a new tab (not the embedded preview iframe).
+
+Add ?NN_FIX_MOBILE_MARKERS=1 to the URL.
+
+Open DevTools → Console.
+
+Confirm you’re in the app frame:
+
+!!window._map && !!window._cluster   // should be true/true
+
+2) One-paste CSS presence check (copy/paste)
+// NN MarkerCluster CSS Verify (read-only)
+(() => {
+  const out = {};
+  out.clusterLayers = window._cluster?.getLayers().length ?? 'no _cluster';
+  out.clusterEls = document.querySelectorAll('.marker-cluster').length;
+
+  // find any loaded rule that targets .marker-cluster
+  out.hasMCStyles = false;
+  out.sampleRule = null;
+  try {
+    for (const s of Array.from(document.styleSheets)) {
+      const rules = s.cssRules || [];
+      for (const r of Array.from(rules)) {
+        const sel = (r.selectorText || '');
+        if (sel.includes('.marker-cluster')) {
+          out.hasMCStyles = true;
+          out.sampleRule = r.cssText.slice(0, 160);
+          throw 'found';
+        }
+      }
+    }
+  } catch(_) {}
+
+  const el = document.querySelector('.marker-cluster');
+  out.computed = el ? {
+    width:  getComputedStyle(el).width,
+    height: getComputedStyle(el).height,
+    display:getComputedStyle(el).display
+  } : null;
+
+  console.table(out);
+  return out;
+})();
+
+
+What to report back:
+
+clusterLayers (expect 50)
+
+clusterEls (should be > 0 even if invisible)
+
+hasMCStyles (true/false)
+
+computed.width/height for a cluster (should NOT be 0px)
+
+3) Runtime CSS injection test (no code change; proves root cause)
+
+If hasMCStyles is false or computed.width is 0px, paste this:
+
+// Inject official CSS at runtime (temporary)
+[
+  'https://unpkg.com/leaflet/dist/leaflet.css',
+  'https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css',
+  'https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css'
+].forEach(href => {
+  const link = document.createElement('link');
+  link.rel = 'stylesheet'; link.href = href; document.head.appendChild(link);
+});
+setTimeout(() => {
+  // nudge
+  window._map?.invalidateSize();
+  window._cluster?.refreshClusters?.();
+  // re-check
+  const el = document.querySelector('.marker-cluster');
+  console.log('[NN] after inject:',
+    'clusters DOM =', document.querySelectorAll('.marker-cluster').length,
+    'size =', el ? getComputedStyle(el).width + ' x ' + getComputedStyle(el).height : 'n/a'
+  );
+}, 500);
+
+
+Tell us: after this injection, do cluster bubbles appear? What does the log print for “size”?
+
+4) Confirm where CSS is imported in the repo (two facts to report)
+
+Which file(s) currently import MarkerCluster CSS? (e.g., client/src/main.tsx, MapView.tsx, or somewhere else?)
+
+Is there any <link> to MarkerCluster CSS in client/index.html? (yes/no)
+
+(This helps determine if bundling/code-splitting is excluding the CSS from the PWA route.)
+
+Expected outcomes
+
+If CSS injection makes clusters appear and hasMCStyles flips to true:
+✔ Theory confirmed. We’ll move the CSS to index.html <head> (global) or to a guaranteed-loaded entry file. (Tiny change; desktop unaffected.)
+
+If CSS is already present (hasMCStyles=true and computed sizes >0) yet clusters are still invisible:
+We’ll pivot to a high-z pane routing for both cluster icons and markers (flag-gated). But first please post the numbers from Step 2.

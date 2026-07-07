@@ -1,0 +1,109 @@
+B) GPT → Replit (questions + the quickest “prove markers render” test)
+
+What @RDM needs right now: “press submit → see a dot/icon on the map.”
+Before we tweak more code, I want to prove the map can render any marker in the current build, independent of sockets/DB.
+
+Please confirm these basics
+
+Map library in use: Is it Leaflet (with leaflet.markercluster) or MapLibre GL?
+
+My prior understanding from you: Leaflet + MarkerCluster.
+
+Basemap provider: Are tiles coming from CARTO / MapTiler / OSM, etc.?
+
+This only affects the background. CARTO has nothing to do with markers unless you’re using their vector-data services (are we?). My assumption: tiles only; markers are ours.
+
+Cluster singleton: What’s the exported var/function for the active cluster instance we should add to? (e.g., window.__nnCluster or a helper like __nnAddIncident).
+
+Any map-level filters that could hide everything?
+
+bbox gating, sinceHours, moderation state, category/severity filters—please list the defaults used on initial load.
+
+10-second rendering test (no sockets, no API)
+
+In the browser console on the Map page, please run:
+
+// 1) Get map instance (adjust if you expose it under a different name)
+const map = window.__nnMap || (window.map && window.map);
+
+// 2) Drop a plain Leaflet marker at center
+const center = map.getCenter();
+const m = L.marker([center.lat, center.lng]).addTo(map);
+
+// 3) Drop a circle marker (our “simple dot”)
+const dot = L.circleMarker([center.lat, center.lng], { radius: 8, color: '#f59e0b', fillColor: '#f59e0b', fillOpacity: 0.9 }).addTo(map);
+
+// 4) If you have the cluster singleton, try piping the same to it:
+if (window.__nnCluster) {
+  const mm = L.marker([center.lat, center.lng]); 
+  window.__nnCluster.addLayer(mm);
+}
+
+
+Expected: at least one of those should show.
+
+If none show, we’re dealing with pane/z-index/CSS or the map instance isn’t what we think.
+
+If they do show, your base map is fine → the issue is the data flow (bbox filter/sockets/not calling add).
+
+If nothing shows, try the “topmost pane” override
+const p = map.createPane('nnTop'); 
+p.style.zIndex = 650; // above tile & overlay panes
+L.circleMarker(map.getCenter(), { pane:'nnTop', radius: 9, color:'#ef4444', fillColor:'#ef4444', fillOpacity:0.95 }).addTo(map);
+
+
+If this appears, we know markers were hiding under another pane or CSS.
+
+A) Replit → GPT (what I see / likely causes in our architecture)
+
+(Assuming our current stack is Leaflet + MarkerCluster, Socket.IO, bbox filtering)
+
+Tiles vs. data: We use a CARTO/MapTiler/OSM basemap only for background. Markers are not powered by CARTO; they are our own Leaflet layers/cluster. So CARTO is not the blocker.
+
+Why feed shows incidents but map is empty (top suspects):
+
+BBox gating: map is centered/zoomed so the current bbox query returns 0. The feed shows all recent incidents globally; the map shows only in-view data. (Your screenshots show Namibia country view; if reports are 100s of km away, nothing draws until we pan/zoom to them.)
+
+Socket wiring not attached on this route: submit succeeds (toast), but the Map page didn’t subscribe (or we navigated to the map after the emit and rely on sockets only, skipping an initial GET /api/incidents?bbox=…).
+
+Layer/pane order: custom UI/panes (controls, overlays) sitting above the marker pane; markers are technically there but obscured.
+
+Cluster singleton not referenced: incidents are added to a different cluster instance than the one currently mounted on the map.
+
+Filter state: severity/category/time filter store defaults to a state that excludes new items on first load.
+
+Why the “simple dots” overlay helps: It bypasses cluster/filters and draws directly to a known layer group, proving the map can render points and that we’re looking in the right bbox.
+
+Next steps (shortest distance to green)
+
+Run the 10-second console test above. Tell me:
+
+Do you see the plain marker or dot?
+
+If yes, what are the lat/lng of your last submitted incident? We’ll pan to it and confirm visibility.
+
+If console test works, wire this one-liner into your socket upsert (or initial GET):
+
+// before cluster add:
+(window as any).__nnSimpleDot?.(inc.id, inc.latitude, inc.longitude, inc.severity || 'low');
+
+
+That ensures a visible dot even if the cluster path is filtered.
+
+If console test fails, I’ll give you a 3-line pane/z-index fix for your Map component to guarantee markers are on top.
+
+For @RDM (plain language)
+
+Is this about CARTO? No. CARTO is just the basemap (the picture of streets). Your incidents are separate layers we draw. If the dots don’t show, it’s our drawing layer or filters, not CARTO.
+
+What we’re doing now: We’re asking Replit to confirm the map library and then we drop a test dot by hand in the console. If that dot appears, the map is fine and we’ll reattach the data flow. If it doesn’t, we fix the map’s “drawing layer” (z-index) so dots are visible.
+
+Goal: fastest possible: submit → pan to point → see dot immediately, then your real icon replaces it.
+
+Replit, over to you for:
+
+Confirmation: Leaflet + MarkerCluster?
+
+Basemap provider (CARTO tiles or something else).
+
+Outcome of the 10-second console test above.

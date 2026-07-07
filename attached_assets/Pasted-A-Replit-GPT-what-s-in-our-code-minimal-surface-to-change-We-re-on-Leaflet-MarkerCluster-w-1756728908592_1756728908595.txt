@@ -1,0 +1,179 @@
+A) Replit → GPT (what’s in our code + minimal surface to change)
+
+We’re on Leaflet + MarkerCluster with CARTO tiles (tiles only; CARTO is not related to markers).
+
+We already set Leaflet default icons (so classic pins won’t be invisible).
+
+Current marker code (MapView.tsx):
+
+If a custom icon exists → L.marker(ll, { icon })
+
+Else → fallback L.circleMarker(ll, { radius: 7, color: "#2563eb" ... }) (blue)
+
+We also have your severity color map ready (yellow/amber/red/critical).
+
+Root cause found earlier: inViewOnly: true + bbox: null hid everything. We’re flipping to false.
+
+What will not be disrupted: cluster singleton, sockets, DB, auth, custom icons.
+What we’ll add: a topmost singleton layer of circle markers colored by severity, always attached, used for both initial load and socket upserts. This guarantees “see a dot now,” even if icon/cluster filters misbehave.
+
+B) GPT → Replit (copy-paste patches)
+1) MapView.tsx — install a topmost “simple dots” layer + severity colors
+
+Place this right after the map instance is created (and before any data render):
+
+// === Simple severity dots (always on, sits above everything) ===
+const nnPane = map.createPane("nnTop");
+nnPane.style.zIndex = "650";          // above markerPane(600)
+nnPane.style.pointerEvents = "none";
+
+(function ensureSimpleDots() {
+  const w = window as any;
+  if (!w.__nnSimpleDots) {
+    const group = L.layerGroup();
+    const byId = new Map<string, L.CircleMarker>();
+
+    const severityColor: Record<string, string> = {
+      low: "#facc15",      // yellow
+      medium: "#f59e0b",   // amber
+      high: "#ef4444",     // red
+      critical: "#b91c1c", // darker red
+    };
+
+    function add(id: string, lat: number, lng: number, severity: string = "low") {
+      if (byId.has(id)) return;
+      const color = severityColor[severity] || "#f59e0b";
+      const m = L.circleMarker([lat, lng], {
+        pane: "nnTop",
+        radius: 9,
+        color,
+        weight: 2,
+        fillColor: color,
+        fillOpacity: 0.95,
+      }).addTo(group);
+      byId.set(id, m);
+    }
+
+    function remove(id: string) {
+      const m = byId.get(id);
+      if (!m) return;
+      group.removeLayer(m);
+      byId.delete(id);
+    }
+
+    w.__nnSimpleDots = { group, add, remove };
+  }
+  const dots = (window as any).__nnSimpleDots;
+  if (!map.hasLayer(dots.group)) dots.group.addTo(map);
+})();
+
+
+This does not touch your cluster; it only ensures we always have a visible layer for severity-colored dots.
+
+2) Use the dots both on initial load and on socket upsert
+
+Where you currently render incidents (initial GET) and where you upsert on socket events, call the dot adder in addition to your existing cluster logic:
+
+// BEFORE cluster add:
+(window as any).__nnSimpleDots?.add(
+  inc.id,
+  inc.latitude,
+  inc.longitude,
+  inc.severity || "low"
+);
+
+// then your existing:
+//   - de-dupe
+//   - custom icon (if any)
+//   - cluster.addLayer(marker)
+
+
+And when the real marker is added, clear the dot for that id so the icon is the only thing left:
+
+(window as any).__nnSimpleDots?.remove(inc.id);
+
+
+For maximum confidence, do both calls in:
+
+the initial population loop (GET /api/incidents?bbox=… or global fetch when inViewOnly=false)
+
+the socket upsert handler.
+
+3) Make the fallback circle marker also honor severity (if/when it’s used)
+
+You already have:
+
+const layer = icon
+  ? L.marker(ll, { icon, title: inc.title ?? inc.type })
+  : L.circleMarker(ll, { radius: 7, color: "#2563eb", weight: 2, fillOpacity: 0.9 });
+
+
+Change the fallback to use severity colors:
+
+const severityColor: Record<string, string> = {
+  low: "#facc15",
+  medium: "#f59e0b",
+  high: "#ef4444",
+  critical: "#b91c1c",
+};
+
+const layer = icon
+  ? L.marker(ll, { icon, title: inc.title ?? inc.type })
+  : L.circleMarker(ll, {
+      pane: "nnTop",                  // ensure visibility
+      radius: 9,
+      color: severityColor[inc.severity || "low"] || "#f59e0b",
+      weight: 2,
+      fillColor: severityColor[inc.severity || "low"] || "#f59e0b",
+      fillOpacity: 0.95,
+    });
+
+
+(You can keep pane: "markerPane" if you prefer; we use nnTop to guarantee they’re not hidden.)
+
+4) Ensure initial filter doesn’t hide everything
+
+Where useIncidentStore (or equivalent) initializes, set:
+
+// BEFORE: inViewOnly: true
+inViewOnly: false,
+
+
+This shows incidents immediately on first load. Users can toggle “In view only” later.
+
+Quick test for @RDM (no devtools needed)
+
+Open the Map page.
+
+Press Submit on any incident.
+
+You should see a colored dot instantly (yellow for Low, amber for Medium, red for High/Critical).
+
+Within a moment, your real icon appears and the dot disappears.
+
+If you zoom out to Namibia-wide and submit again, you still see a dot because inViewOnly=false prevents the empty-bbox issue.
+
+Notes on CARTO
+
+CARTO supplies the background tiles only. Markers (pins/dots) are 100% Leaflet layers we control. So the visibility fix lives entirely in our Leaflet code, not in CARTO settings.
+
+Optional UX polish (1 line of CSS)
+
+Add a subtle pulse so the new dot is obvious on mobile:
+
+@keyframes nnPulse { 0%{transform:scale(1);opacity:.9} 70%{transform:scale(1.3);opacity:.35} 100%{transform:scale(1);opacity:.9} }
+.leaflet-pane#nnTop .leaflet-interactive { animation: nnPulse 1.4s ease-in-out 2; }
+
+Summary
+
+We keep your production architecture intact.
+
+We add a singleton severity-dot layer that renders immediately.
+
+We call it on initial load and socket upsert.
+
+Fallback circle markers now respect severity.
+
+inViewOnly=false removes the empty-map-on-load trap.
+
+If you tell me the exact function name where you upsert into the cluster (e.g., addIncidentToCluster), I’ll give the 2-line insertion spot for the dot add/remove.

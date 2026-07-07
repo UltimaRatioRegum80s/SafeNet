@@ -1,0 +1,103 @@
+We need to implement a controlled geography expansion for NaborNet.
+
+Goal
+Keep current beta geography as Southern Africa (default), but temporarily allow the app to operate in Kenya for an owner-led field test while De Wet is traveling. In Kenya, the only testers will be De Wet, his wife, and possibly in-laws (already whitelisted). No public rollout.
+
+Requirements
+
+Geo policy layer
+
+Add a server-side “GeoPolicy” that determines whether a user can:
+
+VIEW incidents
+
+CREATE incidents
+
+SYNC offline incidents
+
+Policy must be enforced server-side (not just UI).
+
+Default behavior
+
+If no special flags are set, keep current behavior (Southern Africa only).
+
+Kenya temporary allow
+
+Add an environment flag:
+
+KENYA_FIELD_TEST_ENABLED (default false)
+
+When KENYA_FIELD_TEST_ENABLED=true:
+
+Kenya is allowed for VIEW + CREATE + OFFLINE SYNC (unless you think create/sync should remain off — but I want it on for my personal testing).
+
+This must still require email verification + whitelist (unchanged).
+
+No public visibility of Kenyan incidents
+We want Kenya testing without “opening Kenya” publicly.
+Implement:
+
+If incident.country == "KE" (or geocoded Kenya), then by default it should be visible only to whitelisted tester emails (the same whitelist list).
+Two acceptable implementation options:
+
+Option A (preferred): add visibility_scope column on incidents (public_beta vs private_whitelist) and set Kenya incidents to private_whitelist.
+
+Option B: do not change schema; enforce in queries:
+
+If requester email is NOT on whitelist, exclude Kenya incidents from all feeds / map queries.
+
+If requester email IS on whitelist, allow Kenya incidents.
+
+Owner-led travel test framing
+
+Add a small UI badge (non-intrusive) if user is in Kenya and field test is enabled:
+
+“Kenya Field Test (Private Beta)”
+
+This is optional but helpful.
+
+Country detection
+
+Decide the most reliable way we currently detect geography:
+
+If we already store lat/lng and use reverse geocode, use that.
+
+If not, implement a simple country check using coordinates:
+
+Use a country-bounds check (Kenya bbox is fine for now) OR use an existing lightweight library/service we already have.
+
+Must be deterministic and not expensive.
+
+Rollback
+
+Setting KENYA_FIELD_TEST_ENABLED=false instantly returns to Southern Africa-only behavior with no deployments required besides env change.
+
+Existing Kenya incidents can remain in DB, but must not be returned to non-whitelisted users.
+
+Deliverables
+
+Code changes (backend + minimal frontend if adding badge)
+
+Clear list of files changed
+
+Quick test plan:
+
+Whitelisted user in Kenya can create + view + sync
+
+Non-whitelisted user (or user outside allowed region) cannot create
+
+Kenya incidents are not visible to non-whitelisted users
+
+Namibia/Southern Africa behavior unchanged
+
+Notes / Constraints
+
+Keep all existing safety controls: verified email required, idempotency, rate limiting, kill switches.
+
+Do not open public signup.
+
+Do not add push notifications.
+
+Do not add media uploads.
+
+Implement this now and report back with what you changed + how to toggle it via env vars.

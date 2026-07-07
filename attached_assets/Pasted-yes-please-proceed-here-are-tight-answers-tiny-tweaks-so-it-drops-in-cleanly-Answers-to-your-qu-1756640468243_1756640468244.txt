@@ -1,0 +1,99 @@
+yes—please proceed. here are tight answers + tiny tweaks so it drops in cleanly:
+
+Answers to your quick questions
+
+Icons: keep using your existing lucide-react import pattern. My examples are compatible; no need to change how you import/use icons.
+
+Theme integration: replace one default action with your existing ThemeToggle component. I’ve added an explicit render hook to actions below so you can inject components, not just icons.
+
+MobileFloatingTopMenu: 👍 give it a quick review and then pass it into AppLayout.footer. No logic changes needed—just remove any duplicated fixed-positioning wrappers inside pages to avoid double stacking.
+
+Minor tweak to TopBar to allow custom renderers
+
+Update TopBar so an action can be:
+
+an icon (as before), or
+
+a full custom component via render: () => React.ReactNode.
+
+// components/layout/TopBar.tsx
+type Action = {
+  key: string;
+  aria: string;
+  onClick?: () => void;
+  icon?: React.ReactNode;
+  render?: () => React.ReactNode;  // NEW: lets you inject ThemeToggle, etc.
+};
+
+...
+
+<div className="flex items-center gap-1.5">
+  {items.map((a) => (
+    a.render ? (
+      <div key={a.key} className="flex">
+        {a.render()}
+      </div>
+    ) : (
+      <Button
+        key={a.key}
+        variant="ghost"
+        size="icon"
+        className="h-9 w-9"
+        aria-label={a.aria}
+        onClick={a.onClick}
+      >
+        {a.icon}
+      </Button>
+    )
+  ))}
+</div>
+
+
+No other changes needed.
+
+Example: wiring your ThemeToggle + footer in App.tsx
+// App.tsx (excerpt)
+import ThemeToggle from "@/components/ThemeToggle";
+import { Share2, Search, Bell } from "lucide-react";
+
+const headerActions = [
+  { key: "share", aria: "Share", icon: <Share2 className="h-5 w-5" /> },
+  { key: "search", aria: "Search", icon: <Search className="h-5 w-5" /> },
+  { key: "bell", aria: "Notifications", icon: <Bell className="h-5 w-5" /> },
+  { key: "theme", aria: "Toggle theme", render: () => <ThemeToggle size="icon" /> }, // your component
+];
+
+<Route path="/report">
+  <AppLayout
+    header={{
+      title: "Report Incident",
+      actions: headerActions,
+      secondary: <IconTabs />,
+    }}
+    footer={<MobileFloatingTopMenu />}
+  >
+    <ReportIncident />
+  </AppLayout>
+</Route>
+
+Quick migration checklist (so nothing gets missed)
+
+Create components/layout/{TopBar.tsx,TopBarMap.tsx,AppLayout.tsx}.
+
+App.tsx routing: wrap all non-map routes with AppLayout; pass footer={<MobileFloatingTopMenu />}.
+
+Pages cleanup: in Dashboard.tsx, Chat.tsx, Report…tsx
+
+remove header/toolbar containers;
+
+keep content only; ensure no fixed top offsets remain.
+
+Footer conflicts: if MobileFloatingTopMenu currently uses position: fixed with its own full-width wrapper, drop extra wrappers so the layout’s footer slot controls stacking.
+
+Utility class: if not present, add .no-scrollbar utility (Tailwind plugin or global CSS) used by the secondary bar:
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+
+QA: verify sticky header height (56–64px), content padding, and that Map page still fills viewport.

@@ -1,0 +1,94 @@
+Got it, @RDM. We’ll keep everything that’s working and isolate the two lingering problems:
+
+Zoom/center snap still happening (to zoom 12 + Windhoek).
+
+Mobile map not matching desktop (no severity colors; stuck on Windhoek cluster).
+
+And a quick answer to your question: don’t remove clustering right now. It’s not the root cause of the snap; it’s valuable for performance & UX, and we already unified it under the NRP flag. If we ever need to A/B test, we’ll do it behind a toggle—no regressions.
+
+Replit → targeted follow-up (NRP-safe)
+
+The guards you added were right, but something else is still calling a view change. Let’s capture who:
+
+1) Which call is still forcing the view?
+
+You already have the wrapper logger—please paste the exact console lines when the snap occurs (one pan + one zoom):
+
+The CALL line with args:
+
+[Map] CALL: setView … or fitBounds … (look for { maxZoom: 12 }).
+
+The trace top 3 frames (file + line), e.g. MapView.tsx:706.
+
+This will tell us precisely which effect/handler still needs a guard.
+
+2) Center-effect still firing?
+
+The snap to Windhoek suggests the center-effect (line ~604) still runs. Add a tiny log inside that effect:
+
+console.log("[CenterEffect] firing with center=", center, "zoom=", zoom, "reason:", { deps: { center, zoom } });
+
+
+If this prints when you pan/zoom (and you didn’t pass a center prop), it’s our culprit—likely because center is derived each render (new array) and considered “changed.” In that case we’ll:
+
+only run when props.center !== undefined, and
+
+also short-circuit if we already auto-centered from prop.
+
+(If you already added that guard, the log will confirm it isn’t running.)
+
+3) Map remount check
+
+Confirm the <MapView … key= value never changes during pan/zoom/filter/theme. If the key changes, the map remounts at its initial center/zoom. If you see it change, we’ll make the key stable (or drop it).
+
+4) Mobile parity
+
+Confirm mobile MapView.tsx now imports the severity cluster factory (@/features/map/cluster) and not the fallback.
+
+Log when mobile creates the cluster group:
+console.log("[Cluster] mobile group created", options)
+
+Confirm mobile receives the same incidents array:
+console.log("[Mobile] incidents count:", incidents.length)
+
+If incidents count is 0 on mobile, it will always recenter to the fallback (setView(center, 12)) and show the Windhoek cluster. That would explain both symptoms.
+
+Likely minimal fixes (once we see the logs)
+
+Guard the last recenter call that the trace exposes (probably the center-effect or an “on incidents change” effect we missed):
+
+if (hasAutoCentered.current) return; before calling fitBounds/setView.
+
+Or, in the center-effect: only if props.center is defined and !hasAutoCenteredFromProp.current.
+
+Stabilize center prop if we truly need it:
+
+Memoize getMapCenter() so it doesn’t produce a new array every render (otherwise the effect thinks it changed).
+
+Mobile clusters/colors:
+
+Ensure the mobile map actually uses the shared cluster factory and it’s reached (the “group created” log will confirm).
+
+If the incidents array on mobile is empty, wire it to the same useFeedIncidents() source (or the 24h infinite hook)—we keep the same architecture.
+
+Why we’re not removing clustering
+
+It’s not causing snap-back; recenter calls are.
+
+Clustering prevents overdraw and keeps the map usable as the feed grows.
+
+We already unified the color logic; we just need to ensure the mobile map is using it and actually gets the incidents.
+
+What we need from you, Replit
+
+Please paste:
+
+The [Map] CALL: and [Map] TRACE lines that happen during a snap.
+
+The [CenterEffect] firing … logs (do they appear during pan/zoom?).
+
+The current <MapView …> key/props block (to confirm key stability).
+
+Mobile logs: [Mobile] incidents count: and [Cluster] mobile group created.
+
+With that, we’ll point to the exact line to guard (likely a 2–3 line change), and we’ll keep every bit of current UI/behaviour intact.

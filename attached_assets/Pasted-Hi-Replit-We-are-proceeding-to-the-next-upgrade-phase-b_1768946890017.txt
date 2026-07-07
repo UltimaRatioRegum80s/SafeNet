@@ -1,0 +1,216 @@
+Hi Replit,
+
+We are proceeding to the next upgrade phase based on the Jan 20, 2026 checkpoint baseline. This phase is a coordinated change-set across Report → Feed → Map, and must be implemented surgically without breaking safety-grade behaviors (offline sync, idempotency, server-side gates, map snap-back guards).
+
+Goal (Phase A)
+
+Replace the current incident type/severity taxonomy + marker system with a new Taxonomy v2, including:
+
+new category groups
+
+new marker shapes
+
+new color spectrums
+
+updated report selection UI (WhatsApp emoji-style circular carousel loop on mobile)
+
+consistent rendering across Report page, Feed, and Map
+
+Critical Governance Rules (Do Not Break)
+
+Do not delete historical incidents in the DB.
+
+We are “deleting the old taxonomy,” not deleting rows.
+
+Historical incidents must still render (mapped to v2 where needed).
+
+Preserve and do not regress:
+
+Offline queue + auto-sync behavior
+
+Server-side idempotency enforcement
+
+Email verification gate for incident creation
+
+Rate limits (login + reactions)
+
+Map snap-back fix (interaction guard + one-time fit logic)
+
+Keep diagnostics available only via ?diag=1 (do not remove yet), and do not remove deployment-truth tooling unless replaced.
+
+A) Taxonomy v2 Specification (Authoritative)
+
+We now have 4 top-level groups:
+
+1) 🟧 SERVICES (civic / low urgency)
+
+Marker shape: Square
+
+Color spectrum: Yellow → Amber → Orange
+
+Types + suggested HEX:
+
+Water leak — Soft Yellow #FFD84D
+
+Road damage — Golden Yellow #FFC533
+
+Litter — Pale Amber #FFDF80
+
+Power outage — Amber #FFB300
+
+Internet outage — Deep Amber #FF9800
+
+Custom — Orange #F57C00
+
+2) 🔵 NABOR NOTE (community / awareness)
+
+Marker shape: Circle
+
+Color spectrum: Blue → Turquoise → Cyan
+
+Types + suggested HEX:
+
+Lost & found — Sky Blue #4FC3F7
+
+Lost pet — Turquoise #26C6DA
+
+Noise complaint — Teal Blue #0097A7
+
+Unknown person — Cyan-Blue #00ACC1
+
+Unknown vehicle — Blue-Green #00838F
+
+Custom — Deep Teal #006064
+
+3) ❌ EMERGENCY (serious, but not highest)
+
+Marker shape: Cross / X
+
+Color spectrum: Yellow-Orange → Orange-Red
+
+Types + suggested HEX:
+
+Fire — Fire Orange #FF7043
+
+Gunshots — Dark Orange #F4511E
+
+Medical — Safety Orange #FB8C00
+
+Car accident — Amber-Red #FF6F00
+
+Theft — Burnt Orange #E65100
+
+Custom — Orange-Red #D84315
+
+4) 🔴 CRITICAL (immediate)
+
+Marker shape: Pulsing red circle
+
+Color: Pure Red
+
+Types + suggested HEX:
+
+SOS – Immediate help needed — Emergency Red #D32F2F
+
+Optional pulse/glow accent: #FF5252
+
+“Custom” behavior (per group)
+
+Each group includes a Custom type. When selected, user creates a custom report/note within that group (still bounded—no accusations/doxxing; same policy rules).
+
+B) UI/UX Upgrade — Report Type Selector (Mobile)
+
+Implement a mobile incident type selector inspired by the WhatsApp emoji menu:
+
+Circular carousel loop (scroll/drag to rotate through groups/types)
+
+Must remain fast, simple, and accessible (large tap targets)
+
+Desktop can keep a grid layout (optional) but must use the same taxonomy source of truth.
+
+Key requirement: The selector should output a minimal payload like:
+{ groupId, typeId, severityStyle }
+and everything else (validation, offline queue, API write) remains unchanged.
+
+C) Map + Feed Alignment Requirements
+Map
+
+Must render markers using v2 shapes + colors
+
+Marker legend (if present) must match taxonomy v2
+
+Must not touch or regress snap-back fix logic
+
+Keep diagnostics behind ?diag=1 for now (do not remove yet)
+
+Feed
+
+Filter tabs should align to the new groups (Services / Nabor Note / Emergency / Critical)
+
+Cards should display v2 icon/shape cues and color cues consistently
+
+Keep current “view on map” flows intact
+
+D) Data / Schema / Migration Strategy (Surgical)
+
+Implement Taxonomy v2 as a data-driven config (single source of truth), e.g. a taxonomyV2.ts mapping used by:
+
+Report selector UI
+
+Feed card rendering
+
+Map marker rendering
+
+(optional) server validation/enforcement
+
+Migration requirement: existing incidents that were created with old types must still render:
+
+either by mapping old type/category → v2 group/type display
+
+or by “unknown/legacy” fallback that still shows safely
+
+Do not destroy old data.
+
+E) Acceptance Criteria (Must Pass)
+
+Reporting
+
+User can create incidents using v2 selector (all groups/types including Custom)
+
+Email verification gate remains enforced server-side
+
+Offline queue still works: draft offline → sync later → no duplicates (idempotency holds)
+
+Rendering
+
+New incidents show correct v2 marker shape/color in Map + Feed
+
+Old incidents still render (mapped or legacy fallback) without crashes
+
+Map Stability
+
+User pan/zoom persists through refresh/polling (no snap-back regression)
+
+Recenter still works intentionally
+
+No Scope Creep
+
+No push notifications / chat expansion / comments enabling in this phase
+
+Diagnostics not removed (only gated), magenta ribbon removal deferred until deployment truth is restored
+
+F) Deliverables
+
+PR/commit implementing taxonomy v2 config + updated Report selector UI
+
+Updated Feed + Map rendering to use v2 taxonomy
+
+Short technical note: where taxonomy lives, how legacy mapping works
+
+Quick test checklist results (esp offline + map snap-back suite)
+
+Once Phase A is complete, we will move to Phase B: Home page “lightweight insights” (counts + reactions + “took a look” style metrics; no heavy analytics).
+
+Proceed with Phase A implementation.
+
+— De Wet

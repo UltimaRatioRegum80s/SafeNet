@@ -1,0 +1,198 @@
+📩 MESSAGE TO REPLIT
+
+Subject: Landing Page CTA Refactor — Auth-Aware + PWA Install (UI Only)
+
+This is an owner-approved UI refactor.
+No backend changes. No schema changes. No auth logic changes.
+
+Scope is strictly limited to the landing page hero section.
+
+🎯 Objective
+
+Improve clarity and expose PWA install capability without widening beta or altering security posture.
+
+This change must:
+
+Preserve closed beta enforcement
+
+Not affect access control
+
+Not alter routing protection
+
+Not modify any map/feed/location logic
+
+Not impact service worker or caching logic
+
+This is a UI-only enhancement.
+
+✅ Part 1 — Auth-Aware Hero Buttons
+Required Behavior
+If user is NOT authenticated:
+
+Replace current “Open the App” button with:
+
+Sign In → /login
+
+Sign Up → /register
+
+Layout:
+
+Primary row:
+
+Sign In (outline / secondary style)
+
+Sign Up (solid primary style)
+
+Below that:
+
+“Get the App” (see Part 2, conditional)
+
+“How it works” (unchanged scroll link)
+
+If user IS authenticated:
+
+Show:
+
+Open the App → /community/map
+
+Keep:
+
+“Get the App” (if installable)
+
+“How it works” (unchanged)
+
+Implementation Notes
+
+Use existing session state (no new API calls).
+
+Pure conditional rendering in Hero component.
+
+Do NOT modify authentication middleware.
+
+Do NOT touch protected route logic.
+
+✅ Part 2 — “Get the App” PWA Install Button
+Objective
+
+Expose native PWA installation capability safely and minimally.
+
+Implementation Requirements
+1️⃣ Capture beforeinstallprompt
+
+In root component (App.tsx or equivalent):
+
+Listen for beforeinstallprompt
+
+Call preventDefault()
+
+Store event in state
+
+Set installAvailable = true
+
+Must be React state-based (not global variable only).
+
+2️⃣ Show “Get the App” Button Only When:
+
+installAvailable === true
+
+App is NOT already installed (display-mode: standalone false)
+
+If installed → hide button completely.
+
+3️⃣ On Click:
+
+Call deferredPrompt.prompt()
+
+Await userChoice
+
+Clear stored prompt
+
+Set installAvailable = false
+
+4️⃣ iOS Safari Handling
+
+Because iOS does not support beforeinstallprompt:
+
+If:
+
+iOS detected
+
+NOT standalone
+
+No installAvailable event
+
+Then:
+
+Show “Get the App” button → opens small modal:
+
+To install:
+Tap Share → Add to Home Screen
+
+Keep modal minimal. No styling theatrics.
+
+🔒 Governance Guardrails
+
+This change must:
+
+Not introduce push notifications
+
+Not introduce install banners that auto-trigger
+
+Not auto-trigger install prompt
+
+Not create engagement popups
+
+Not widen beta access
+
+Not alter existing routing protection
+
+Not affect service worker configuration
+
+This is clarity enhancement only.
+
+🎨 Visual Hierarchy
+
+For logged-out users:
+
+Sign In / Sign Up
+
+Get the App
+
+How it works
+
+For logged-in users:
+
+Open the App
+
+Get the App
+
+How it works
+
+Maintain restrained, professional tone.
+No animation-heavy behavior.
+
+🚦Acceptance Criteria
+
+Logged-out user sees Sign In / Sign Up
+
+Logged-in user sees Open the App
+
+Install button only appears when valid
+
+iOS shows manual instructions
+
+No console errors
+
+No change to auth protection
+
+No change to beta gating
+
+Confirm before implementation:
+
+Which file currently renders the hero buttons?
+
+Where session state is sourced from?
+
+Where App-level listeners should be placed for install prompt?
+
+Do not proceed until confirming file locations.

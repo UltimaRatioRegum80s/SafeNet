@@ -1,0 +1,93 @@
+GPT → Replit
+
+love it — all green across the board 🎉
+let’s button this up for prod with 3 tiny patches + a short release checklist.
+
+1) Store: add a reset helper (post-submit cleanup)
+diff --git a/client/src/state/useQuickReportStore.ts b/client/src/state/useQuickReportStore.ts
+@@
+ type QuickReportActions = {
+   openSheet: () => void;
+   closeSheet: () => void;
+   setCategory: (id?: string) => void;
+   setNote: (v: string) => void;
+   setLocation: (ll?: LatLng) => void;
+   startReportMode: () => void;
+   cancelReportMode: () => void;
+   confirmTempPin: (ll: LatLng) => void;
++  resetReportContext: () => void; // NEW
+ };
+@@
+   confirmTempPin: (ll) =>
+     set({
+       tempPin: ll,
+       location: ll,
+       sheetOpen: true,
+       reportMode: false,
+     }),
++  resetReportContext: () =>
++    set({
++      tempPin: undefined,
++      location: undefined,
++      reportMode: false,
++      // note/category left intact so user can file another quickly; wipe if you prefer
++    }),
+ }));
+
+2) Mutation: close sheet + reset context on success
+
+(Adjust path if yours differs — using client/src/features/report/useCreateIncident.ts as a placeholder.)
+
+diff --git a/client/src/features/report/useCreateIncident.ts b/client/src/features/report/useCreateIncident.ts
+index 111aaa2..222bbb3 100644
+--- a/client/src/features/report/useCreateIncident.ts
++++ b/client/src/features/report/useCreateIncident.ts
+@@
+ import { useMutation } from "@tanstack/react-query";
++import { useQuickReportStore } from "@/state/useQuickReportStore";
+ 
+ export function useCreateIncident() {
++  const { closeSheet, resetReportContext } = useQuickReportStore();
+   return useMutation({
+     mutationFn: async (payload: CreateIncidentDto) => {
+       // existing POST /api/incidents …
+     },
+     onSuccess: (data) => {
+       // existing optimistic marker/cluster logic …
++      // tidy UI state so the next report starts fresh
++      resetReportContext();
++      closeSheet();
+     },
+   });
+ }
+
+3) Analytics (lightweight custom events)
+diff --git a/client/src/pages/community/Map.tsx b/client/src/pages/community/Map.tsx
+@@
+-  const handleReportClick = () => {
++  const handleReportClick = () => {
+     if (isDesktop) startReportMode();
+     else openSheet();
++    window.dispatchEvent(new CustomEvent("nn.analytics", { detail: { event: "report_open", mode: isDesktop ? "desktop" : "mobile" }}));
+   };
+@@
+     function onClick(e: L.LeafletMouseEvent) {
+       if (!reportMode) return;
+       confirmTempPin({ lat: e.latlng.lat, lng: e.latlng.lng });
++      window.dispatchEvent(new CustomEvent("nn.analytics", { detail: { event: "report_pin_set" }}));
+     }
+
+
+(You can wire these to whatever telemetry sink you prefer later.)
+
+Release checklist (fast)
+
+Feature flag (env or config): NN_DESKTOP_TAP_TO_REPORT=true (default ON).
+
+CI: add test:e2e to package.json and run Playwright in your pipeline.
+
+Docs: update README/Contributing with: desktop tap-to-report UX, hotkeys (Esc), and QA steps.
+
+Monitoring (first 48h): track report_open, report_pin_set, submit success/failure, and error rate on /api/incidents.
+
+Roll-back plan: one-liner toggle via the feature flag (Map FAB falls back to old behavior).

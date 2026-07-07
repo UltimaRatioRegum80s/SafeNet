@@ -1,0 +1,105 @@
+NaborNet — Public Website Redesign (Landing + Public Pages)
+
+Goal
+Redesign ONLY the outward-facing public website (/, /about, /how-it-works, /safety, /terms, /privacy) into a modern, sleek, high-trust “Hybrid: institutional backbone + modern SaaS polish” style.
+Do NOT change community app shell, map, offline, auth, access gates, or service worker logic beyond strictly necessary housekeeping.
+
+Hard Guardrails (Non-negotiable)
+1) Do not import or reference any /community/* components from public pages.
+2) Do not touch map components/routes (anything under /community/map).
+3) Do not change any logic that affects viewport ownership, refresh behavior, or map mount lifecycle.
+4) Do not add heavy animation libraries. No Framer Motion for now.
+5) Any animations must be lightweight: CSS transitions + optional IntersectionObserver reveal (tiny helper).
+6) Do not alter start_url or manifest. Keep PWA install behavior as-is.
+
+Architecture Context (confirmed)
+- Wouter routing in client/src/App.tsx
+- LandingPage at client/src/pages/LandingPage.tsx
+- Tailwind + shadcn present
+- SW registered at root scope but currently disabled/unregistering (leave it)
+
+Implementation Plan (Step-by-step)
+A) Create a dedicated PublicLayout wrapper (if not already cleanly isolated)
+- Location: client/src/components/public/PublicLayout.tsx
+- Includes: PublicNav (sticky, glass), main content container, and PublicFooter.
+- PublicNav must be visually upgraded: glass blur on scroll, clean menu, responsive hamburger.
+- PublicNav items: How it works, Safety, About, Beta Access, Sign In (button)
+  (Beta Access can anchor-scroll to section on /, or route to /#beta)
+
+B) Redesign LandingPage into modern sections (no device mockups)
+File: client/src/pages/LandingPage.tsx
+Split into components:
+- client/src/components/public/sections/Hero.tsx
+- .../TrustPillars.tsx
+- .../HowItWorksSteps.tsx
+- .../WhatItIsSplit.tsx
+- .../Guardrails.tsx
+- .../OfflineReady.tsx
+- .../BetaAccess.tsx
+
+C) Design Language / Tokens (use Tailwind + CSS vars)
+Keep dark, premium, calm. Avoid hype.
+- Background: deep navy gradient
+- Accent: refined teal (existing brand feel)
+- Secondary accent: muted gold for “Closed Beta” banner
+- Cards: subtle border + soft shadow + glass
+- Typography: strong hierarchy, lots of whitespace
+
+D) Add lightweight “scroll reveal” utility (optional but recommended)
+- client/src/components/public/Reveal.tsx
+- Uses IntersectionObserver to apply class toggles (opacity/translate).
+No external deps. Respect prefers-reduced-motion.
+
+E) Upgrade existing public pages to share the new layout
+- /about, /how-it-works, /safety, /terms, /privacy
+Keep content, but re-wrap in PublicLayout and apply consistent spacing, typography, and section styling.
+
+F) CTA Behavior
+- Primary CTA on landing: “Open the App” should go to start_url route (/community/map or existing open-app logic).
+- Secondary CTA: “How it works” anchor-scroll to HowItWorks section.
+- Closed Beta: show a clear banner that signup is invite-only.
+
+Do NOT implement waitlist email capture yet (we can add later once we decide DB/storage and anti-spam posture).
+
+Copy (Use this tone — calm, institutional)
+Hero:
+Headline: “Community Safety, Designed with Restraint.”
+Subhead: “A structured way for neighbours to share observations and stay aware — without noise, speculation, or chaos.”
+Buttons: [Open the App] [How it works]
+
+Trust Pillars (3):
+1) Structured Observations — “Signals, not comment threads.”
+2) Anonymous by Design — “No public profiles. No identity exposure.”
+3) Safety-Grade Defaults — “Guardrails that prioritise legality and calm awareness.”
+
+What it is / What it is NOT:
+Keep your existing wording, but present as a split panel with strong visual hierarchy.
+
+Guardrails section:
+Title: “Built With Guardrails.”
+Bullets:
+- Not an emergency service
+- No chat or free-text speculation
+- Consent + terms tracked
+- Conservative reporting controls
+
+Offline section:
+Title: “Works When Networks Don’t.”
+Short text: offline drafts + sync on reconnect (keep it high-level; avoid deep tech talk).
+
+Beta section:
+Title: “Closed Beta”
+Text: “Registration is limited to invited users while we evaluate safety and usability.”
+Button: “Request access” -> for now link to a mailto or a simple contact instruction (NO backend yet), OR just “Contact the team”.
+
+Acceptance Checks
+1) Landing page looks like a modern product website (premium, calm, credible).
+2) Lighthouse performance stays strong (no heavy JS).
+3) No changes to /community UX, map, offline sync, auth, or gating.
+4) Mobile-first spacing and typography are excellent.
+5) Reduced motion supported.
+
+Deliverables
+- PR/commit: “Public site redesign v1”
+- Screenshots: mobile hero, pillars, split section, footer
+- Confirm no changes to community routes behavior.

@@ -1,0 +1,49 @@
+✅ This is a clean pass. Replit’s fix is minimal, matches the architectural guardrails, and directly eliminates the mechanism that produced the snap-back.
+
+Governance sanity-check
+
+What they changed is exactly what we wanted:
+
+Root cause: focus moved viewport but didn’t claim ownership, so later passive effects (auto-fit / city-center) overwrote it. ✅
+
+No re-focus loops: lastFocusedCoordsRef prevents refresh/polling from re-triggering focus. ✅
+
+Explicit intent → allowed viewport change: View-on-map is treated as intent. ✅
+
+After focus → viewport is owned: setting userHasInteractedRef.current = true blocks passive camera moves. ✅
+
+Acceptance tests are the right ones (through refresh cycles, pan/zoom ownership, second incident, no regression). ✅
+
+Only note: the console logs are fine during verification, but under our hardening rules they should be gated behind ?diag=1 or removed later. Not urgent right now unless they’re noisy.
+
+✅ What to reply to Replit (copy/paste)
+
+Great — this is governance-safe and matches the intent model. Accepted.
+Please keep any new console logging gated to ?diag=1 or removable for pre-v1.0 hardening (not urgent if it’s already minimal).
+
+Next single-focus item (no parallel work): Map marker delay after submitting an incident (marker doesn’t appear immediately; user must reload/map refresh or go via feed → view on map).
+Please investigate root cause (data refresh cadence, optimistic update absence, offline sync queue, caching, or map marker render trigger) and propose a minimal fix that does not add new UI surface or violate map viewport guardrails.
+
+Next agenda item: Marker delay after submit
+
+We’re now on the 3rd bug in the allowed pre-v1.0 bucket.
+
+Success criteria
+
+After submit:
+
+user lands on map
+
+the new incident marker appears immediately (or within a clearly explained, deterministic short window)
+
+no manual reload required
+
+no viewport snap-back introduced
+
+Constraints
+
+Allowed: instrumentation, small data-flow fix, optimistic marker insertion if it’s safe + bounded
+
+Not allowed: new UI flows, new features, big refactors
+
+When Replit replies with their diagnosis, paste it here and I’ll sanity-check it the same way before you accept/ship.

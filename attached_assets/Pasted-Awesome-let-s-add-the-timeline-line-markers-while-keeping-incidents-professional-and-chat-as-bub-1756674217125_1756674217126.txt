@@ -1,0 +1,104 @@
+Awesome — let’s add the timeline line + markers while keeping incidents professional and chat as bubbles.
+
+Below is drop-in code. It keeps your centered layout and simply wraps each feed row with a timeline “rail” and a small dot (severity-colored for incidents, subtle gray for chat).
+
+1) Timeline primitives
+// client/src/components/Timeline.tsx
+import React from "react";
+
+type Variant = "incident" | "message";
+type Severity = "low" | "medium" | "high" | "critical";
+
+export function Timeline({ children }: { children: React.ReactNode }) {
+  return (
+    <ol className="
+      relative space-y-3 sm:space-y-4
+      before:absolute before:inset-y-0 before:left-5 before:w-px before:bg-white/10
+    ">
+      {children}
+    </ol>
+  );
+}
+
+export function TimelineItem(
+  { children, variant = "incident", severity = "medium" }:
+  { children: React.ReactNode; variant?: Variant; severity?: Severity }
+) {
+  const dot = variant === "message"
+    ? "bg-zinc-500"
+    : severity === "low"
+      ? "bg-emerald-400"
+      : severity === "medium"
+        ? "bg-amber-400"
+        : severity === "high"
+          ? "bg-orange-400"
+          : "bg-red-400";
+
+  return (
+    <li className="relative pl-10">
+      {/* dot */}
+      <span className={`
+        absolute left-4 top-7 h-2.5 w-2.5 rounded-full ${dot}
+        ring-2 ring-zinc-950 shadow-[0_0_10px_rgba(255,255,255,0.15)]
+      `} />
+      {children}
+    </li>
+  );
+}
+
+
+The vertical rail is a ::before on the <ol>.
+
+Each item reserves left padding and draws a dot aligned with the card’s icon row.
+
+Incident dots are severity-colored; chat dots are neutral gray.
+
+2) Use it in the Feed
+
+Replace your current list wrapper in Feed.tsx with the timeline components:
+
+// client/src/pages/community/Feed.tsx
+import { Timeline, TimelineItem } from "@/components/Timeline";
+import { IncidentCard } from "@/components/IncidentCard";
+// …other imports
+
+// inside render:
+<div className="mx-auto w-full max-w-2xl px-4 sm:max-w-3xl sm:px-6 lg:max-w-4xl lg:px-8">
+  <section className="py-4 sm:py-6">
+    <Timeline>
+      {items.map((item) => {
+        if (item.kind === "incident") {
+          const inc = item.data; // IncidentItem
+          return (
+            <TimelineItem
+              key={`inc-${inc.id}`}
+              variant="incident"
+              severity={inc.severity}
+            >
+              <IncidentCard incident={inc} />
+            </TimelineItem>
+          );
+        }
+        if (item.kind === "message") {
+          return (
+            <TimelineItem key={`msg-${item.data.id}`} variant="message">
+              <MessageList message={item.data} />
+            </TimelineItem>
+          );
+        }
+        return null;
+      })}
+    </Timeline>
+  </section>
+</div>
+
+
+That’s it — you’ll get a faint vertical line centered under the dots, with colored markers tying the feed together, while preserving your existing cards and chat bubbles.
+
+Optional polish (tiny, nice-to-have)
+
+If a card’s first row spacing differs, adjust the dot’s vertical alignment (top-6 ↔ top-7).
+
+To lighten the rail: change before:bg-white/10 → /5.
+
+To make incident markers glow a bit more: add shadow-[0_0_12px_currentColor] to the dot span.

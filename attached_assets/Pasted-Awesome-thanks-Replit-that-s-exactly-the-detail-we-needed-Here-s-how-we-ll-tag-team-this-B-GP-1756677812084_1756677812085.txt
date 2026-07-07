@@ -1,0 +1,373 @@
+Awesome, thanks Replit — that’s exactly the detail we needed.
+Here’s how we’ll tag-team this.
+
+B) GPT → Replit: focused plan + copy-paste patches
+0) What we need you to confirm while applying the patches
+
+On mobile, do new incidents successfully reach POST /api/incidents (201), but don’t render? Or does POST fail (4xx/5xx)?
+
+In the mobile incident form payload, are lat/lng strings (e.g. "-33.9249") or numbers? Any chance they’re swapped?
+
+On mobile devtools (remote debug), any WebSocket disconnect/reconnect logs or CORS errors?
+
+Proceed with the changes below regardless; they’re safe hardening that should resolve the most likely culprits.
+
+1) Server: coordinate validation & normalization (handles iOS/Android quirks)
+
+Problem it solves
+
+Mobile often sends lat/lng as strings; strict validation may reject them.
+
+Some mobile GPS APIs momentarily provide 0 or undefined before permissions settle.
+
+Bounds or swapped coordinates can sneak in.
+
+Action
+Normalize and validate after coercion. Reject only when truly invalid.
+
+// server/validation.ts
+import { z } from "zod";
+
+export const incidentCreateSchema = z.object({
+  title: z.string().min(3).max(120),
+  description: z.string().min(3).max(5000),
+  // Accept strings or numbers; coerce to number
+  lat: z.coerce.number().refine(v => Number.isFinite(v) && Math.abs(v) <= 90, "Invalid latitude"),
+  lng: z.coerce.number().refine(v => Number.isFinite(v) && Math.abs(v) <= 180, "Invalid longitude"),
+  type: z.string(),
+  photoUrl: z.string().url().optional(),
+  // …anything else
+});
+
+// server/routes.ts (POST /api/incidents)
+import { incidentCreateSchema } from "./validation";
+
+app.post("/api/incidents", async (req, res) => {
+  try {
+    const parsed = incidentCreateSchema.parse(req.body);
+
+    // Guard against swapped lat/lng (common on mobile autofill)
+    const { lat, lng } = parsed;
+    if (Math.abs(lat) > 90 && Math.abs(lng) <= 90) {
+      // swap if they look reversed
+      [parsed.lat, parsed.lng] = [lng, lat];
+    }
+
+    // Round to 6dp to avoid DB precision mismatch & clustering jitter
+    parsed.lat = Number(parsed.lat.toFixed(6));
+    parsed.lng = Number(parsed.lng.toFixed(6));
+
+    const incident = await db.insert(incidents).values(parsed).returning();
+    io.emit("incident:new", incident[0]); // ensure creator also receives it immediately
+    return res.status(201).json(incident[0]);
+  } catch (e) {
+    console.error("Create incident failed", e);
+    return res.status(400).json({ error: "Invalid incident payload" });
+  }
+});
+
+
+@RDM: This makes mobile submissions more tolerant (without compromising bounds safety).
+
+2) Client: React Query invalidation + optimistic update (prevents “posted but not visible”)
+// client/src/hooks/useCreateIncident.ts
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+
+export function useCreateIncident() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: any) => {
+      const r = await fetch("/api/incidents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error("Failed to create incident");
+      return r.json();
+    },
+    onMutate: async (newIncident) => {
+      await qc.cancelQueries({ queryKey: ["incidents"] });
+      const prev = qc.getQueryData<any[]>(["incidents"]) || [];
+      const optimistic = {
+        ...newIncident,
+        id: `temp-${Date.now()}`,
+        __optimistic: true,
+      };
+      qc.setQueryData(["incidents"], [optimistic, ...prev]);
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(["incidents"], ctx.prev);
+    },
+    onSuccess: (created) => {
+      qc.setQueryData<any[]>(["incidents"], (old = []) =>
+        [created, ...old.filter(i => i.id !== created.id && !i.__optimistic)]
+      );
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["incidents"] });
+    },
+  });
+}
+
+3) Client: Socket.IO robust mobile config (backgrounding & flaky radios)
+// client/src/lib/socket.ts
+import { io } from "socket.io-client";
+
+export const socket = io("/", {
+  transports: ["websocket", "polling"],
+  reconnection: true,
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 500,
+  reconnectionDelayMax: 5000,
+  timeout: 20000,
+  autoConnect: true,
+});
+
+// client/src/state/incidentStream.ts (Zustand store)
+import { create } from "zustand";
+import { socket } from "@/lib/socket";
+
+type Incident = {
+  id: string;
+  lat: number;
+  lng: number;
+  type: string;
+  title: string;
+  // …
+};
+
+type S = {
+  liveConnected: boolean;
+  addIncident: (i: Incident) => void;
+  incidents: Incident[];
+};
+
+export const useIncidentStream = create<S>((set) => {
+  socket.on("connect", () => set({ liveConnected: true }));
+  socket.on("disconnect", () => set({ liveConnected: false }));
+  socket.on("incident:new", (i: Incident) =>
+    set((s) => ({ incidents: [i, ...s.incidents] }))
+  );
+
+  return {
+    liveConnected: socket.connected,
+    incidents: [],
+    addIncident: (i) => set((s) => ({ incidents: [i, ...s.incidents] })),
+  };
+});
+
+4) Map: Leaflet mobile rendering fixes (invalidateSize, cluster add, stable refs)
+
+Problems it solves
+
+Leaflet map in responsive containers can render “blank” or miss markers until invalidateSize() runs.
+
+On mobile orientation changes and tailwind breakpoint jumps, tiles & markers misalign.
+
+New incidents via socket must be added to the existing cluster layer (not recreate).
+
+// client/src/components/InteractiveMap.tsx
+import L, { Map as LeafletMap } from "leaflet";
+import "leaflet.markercluster";
+import "leaflet/dist/leaflet.css";
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
+
+import { useEffect, useMemo, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useIncidentStream } from "@/state/incidentStream";
+
+export default function InteractiveMap() {
+  const mapRef = useRef<LeafletMap | null>(null);
+  const clusterRef = useRef<L.MarkerClusterGroup | null>(null);
+
+  const { data: fetched = [] } = useQuery({
+    queryKey: ["incidents"],
+    queryFn: async () => (await fetch("/api/incidents")).json(),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    networkMode: "always",
+  });
+
+  const { incidents: liveIncidents } = useIncidentStream();
+  const allIncidents = useMemo(
+    () => [...liveIncidents, ...fetched],
+    [liveIncidents, fetched]
+  );
+
+  useEffect(() => {
+    if (mapRef.current) return;
+    const map = L.map("nn-map", {
+      center: [-33.9249, 18.4241],
+      zoom: 12,
+      zoomControl: false,
+    });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap",
+    }).addTo(map);
+
+    // Touch-friendly settings
+    map.touchZoom.enable();
+    map.dragging.enable();
+
+    // Cluster layer once
+    const cluster = L.markerClusterGroup({
+      chunkedLoading: true,
+      removeOutsideVisibleBounds: false,
+      spiderfyOnMaxZoom: true,
+    });
+    cluster.addTo(map);
+
+    mapRef.current = map;
+    clusterRef.current = cluster;
+
+    // Mobile: resize/orientation fixes
+    const invalidate = () => setTimeout(() => map.invalidateSize(), 0);
+    window.addEventListener("resize", invalidate);
+    window.addEventListener("orientationchange", invalidate);
+    // Tailwind-driven layout changes: Mutation observer to catch container size changes
+    const obs = new ResizeObserver(invalidate);
+    const container = document.getElementById("nn-map");
+    if (container) obs.observe(container);
+
+    return () => {
+      window.removeEventListener("resize", invalidate);
+      window.removeEventListener("orientationchange", invalidate);
+      obs.disconnect();
+      map.remove();
+      mapRef.current = null;
+      clusterRef.current = null;
+    };
+  }, []);
+
+  // Render markers (idempotent diff)
+  useEffect(() => {
+    if (!mapRef.current || !clusterRef.current) return;
+    const cluster = clusterRef.current;
+
+    // Rebuild cluster content safely when dataset changes
+    cluster.clearLayers();
+
+    for (const inc of allIncidents) {
+      if (!Number.isFinite(inc.lat) || !Number.isFinite(inc.lng)) continue;
+
+      const marker = L.marker([inc.lat, inc.lng], {
+        icon: L.icon({
+          iconUrl: `/icons/${inc.type}.png`,
+          iconSize: window.devicePixelRatio > 1 ? [40, 40] : [28, 28],
+          iconAnchor: [14, 28],
+          className: "will-change-transform",
+        }),
+        keyboard: false,
+      }).bindPopup(`<strong>${inc.title ?? "Incident"}</strong>`);
+
+      cluster.addLayer(marker);
+    }
+
+    // Ensure map knows about new bounds (first load esp. on mobile)
+    if (allIncidents.length > 0) {
+      const group = L.featureGroup(
+        allIncidents.map((i) => L.marker([i.lat, i.lng]))
+      );
+      try {
+        mapRef.current.fitBounds(group.getBounds(), { maxZoom: 15, padding: [30, 30] });
+      } catch {}
+    } else {
+      // maintain a sensible default center
+      mapRef.current.setView([-33.9249, 18.4241], 12);
+    }
+
+    // Post-layout pass for tiles/markers
+    setTimeout(() => mapRef.current?.invalidateSize(), 0);
+  }, [allIncidents]);
+
+  return (
+    <div id="nn-map" className="h-[calc(100vh-8rem)] w-full rounded-2xl shadow-md" />
+  );
+}
+
+
+Key mobile fixers here:
+
+ResizeObserver + invalidateSize() on resize/orientation.
+
+Stable cluster instance (clusterRef).
+
+DPR-aware icon sizes to keep taps accurate on HiDPI phones.
+
+Guard against non-finite coords.
+
+5) Photo upload reliability on mobile (timeouts, backgrounding)
+
+If you’re using fetch uploads directly, switch to chunked or at least add a longer timeout & retry. As a quick win, ensure the mutation doesn’t block the map update:
+
+// When creating an incident with photo, do NOT await the photo upload to render the marker optimistically.
+// Instead, send metadata first, then attach photo; or use a single request but keep the optimistic marker from step 2.
+
+
+(If our current flow is multipart in a single POST, keep the optimistic marker and let the server emit incident:new only after full success — we already do that in step 1.)
+
+6) Debug logging you can enable (temporary, mobile only)
+
+Add a simple debug overlay toggleable via query string ?debug=1 to quickly see socket/state on phones.
+
+// client/src/components/DebugHud.tsx
+import { useSearchParams } from "react-router-dom";
+import { useIncidentStream } from "@/state/incidentStream";
+import { useIsFetching } from "@tanstack/react-query";
+
+export function DebugHud() {
+  const [sp] = useSearchParams();
+  if (sp.get("debug") !== "1") return null;
+  const fetchers = useIsFetching({ queryKey: ["incidents"] });
+  const { liveConnected, incidents } = useIncidentStream();
+  return (
+    <div className="fixed bottom-2 right-2 bg-black/70 text-white text-xs p-2 rounded">
+      <div>Socket: {liveConnected ? "connected" : "disconnected"}</div>
+      <div>Live incidents: {incidents.length}</div>
+      <div>Fetching: {fetchers > 0 ? "yes" : "no"}</div>
+    </div>
+  );
+}
+
+
+Drop <DebugHud /> into the map page temporarily.
+
+7) Quick CSS sanity for mobile container
+
+Ensure the map container has a deterministic height on mobile (Tailwind):
+
+<div class="flex flex-col h-screen">
+  <header class="shrink-0">…</header>
+  <main class="grow">
+    <div id="nn-map" class="h-full w-full" />
+  </main>
+</div>
+
+
+If the map sits in a tab/panel that starts hidden, call map.invalidateSize() when that panel becomes visible.
+
+8) Minimal test script (run & report)
+
+Mobile create: open app on phone, ?debug=1. Create an incident with/without photo.
+
+Observe: after submit, optimistic marker appears immediately? If yes, server then emits real marker that replaces optimistic.
+
+Rotate device: portrait ↔ landscape — tiles/markers should remain visible after rotation.
+
+Backgrounding: home button 10s, return — socket auto-reconnects and new live incidents appear.
+
+GPS edge: toggle location off → submit → server should reject with 400 Invalid incident payload (confirm correct error UX). Toggle on → succeeds.
+
+Please run this and tell me which step deviates.
+
+A) Replit → GPT: what to watch for while merging
+
+If InteractiveMap.tsx currently recreates the cluster on every render, keep only one instance as in the patch.
+
+If we already have a Zod schema, replace the coordinate fields with the coercion & guards above.
+
+Confirm that the client icons path /icons/${type}.png matches actual asset paths; otherwise keep your existing icon builder.

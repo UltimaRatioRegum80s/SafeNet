@@ -1,0 +1,80 @@
+@Replit — paste this into the codebase (flag-gated, Progress-safe)
+
+File: client/src/components/MapView.tsx
+(Add exactly this helper + call. Do not change any other logic.)
+
+1) Add the helper (top-level in the file)
+// at top of file
+import { Flags } from "@/lib/flags";
+
+// Flag-gated, idempotent CSS injector to make clusters/markers visible on mobile.
+function injectMobileMarkerHotfix() {
+  if (!Flags.fixMobileMarkers) return;
+  if (document.getElementById("nn-mobile-marker-hotfix")) return;
+
+  const css = `
+  .leaflet-marker-pane{ z-index:650 !important; display:block !important; opacity:1 !important; }
+  /* Visible cluster bubbles even if MarkerCluster.css didn't load in the PWA chunk */
+  .marker-cluster{ width:42px !important; height:42px !important; border-radius:9999px !important;
+    background:#2563eb !important; color:#fff !important; box-shadow:0 2px 6px rgba(0,0,0,.30) !important;
+    text-align:center !important; line-height:42px !important; font-weight:700 !important; }
+  .marker-cluster div{ background:transparent !important; }
+  .marker-cluster span{ color:#fff !important; line-height:42px !important; }
+  /* Make our divIcon dots obvious */
+  .nn-divicon-wrapper > div{ outline:2px solid rgba(255,255,255,.75) !important; }
+  `;
+
+  const st = document.createElement("style");
+  st.id = "nn-mobile-marker-hotfix";
+  st.textContent = css;
+  document.head.appendChild(st);
+
+  // Nudge re-render if map/cluster are available (debug only; harmless)
+  const m = (window as any)._map;
+  const cl = (window as any)._cluster;
+  m?.invalidateSize();
+  cl?.refreshClusters?.();
+
+  console.log("[NN] mobile marker hotfix injected");
+}
+
+2) Call the helper once after the map mounts
+
+Find the effect/section where the Leaflet map instance is created and ready (mapRef.current exists). After you set mapRef.current, insert:
+
+// right after mapRef.current is set (and any clusterRef setup)
+if (Flags.fixMobileMarkers) {
+  injectMobileMarkerHotfix();
+}
+
+
+(If your map/cluster are created inside a useEffect, put the call at the end of that effect so it runs once when the map is ready.)
+
+Commit message
+chore(mobile): flag-gated CSS hotfix to force markers/clusters visible when NN_FIX_MOBILE_MARKERS=1
+
+How to test (no code changes needed by RDM)
+
+Open the map with ?NN_FIX_MOBILE_MARKERS=1
+
+Zoom out → you should see blue cluster bubbles (with numbers).
+
+Zoom in → you should see blue dots (divIcon markers) and popups on tap.
+
+Desktop (no flag) must remain pixel-identical.
+
+Rollback / Kill switch
+
+Remove ?NN_FIX_MOBILE_MARKERS=1 or run in Console:
+
+localStorage.NN_FIX_MOBILE_MARKERS = '0'; location.reload();
+
+
+Or revert the single commit.
+
+If clusters/dots still don’t show after this hotfix, reply with a screenshot of the map (flag ON) and the count from:
+
+document.querySelectorAll('.marker-cluster').length
+
+
+…but this hotfix should surface them immediately while keeping desktop safe.

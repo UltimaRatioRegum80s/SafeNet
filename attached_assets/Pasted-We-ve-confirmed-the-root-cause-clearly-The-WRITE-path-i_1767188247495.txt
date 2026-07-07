@@ -1,0 +1,143 @@
+We’ve confirmed the root cause clearly:
+
+- The WRITE path is correct (Kenya incidents are stored with valid Mombasa lat/lng, country_code='KE', visibility_scope='private_whitelist').
+- The READ paths (feed + map) use a radius-based query centered on currentLocation.
+- On mobile, currentLocation is not reliably populated, so the system silently falls back to a hardcoded Windhoek default.
+- This makes Kenya incidents invisible (~2600km away) and recenters the map to Windhoek/Swakopmund after submit.
+
+To fix this permanently (for Kenya and ALL future regions, including Southern Africa), please implement the following **minimal, safe, architecture-level fixes**.
+
+--------------------------------------------------
+PATCH A — Guaranteed UX (must-have)
+--------------------------------------------------
+After successful POST /api/incidents:
+- Navigate to:
+  /community/map?focus=<newIncidentId>
+- You already have focus logic in Map.tsx (~lines 637–705). Wire the incident creation flow to pass the new ID.
+- This must work even if GPS is missing or delayed.
+
+--------------------------------------------------
+PATCH B — Root Fix: Reliable geolocation + fail-loud behavior
+--------------------------------------------------
+Create a single shared Location Service / Hook used by BOTH Feed and Map that:
+
+1) Explicitly requests geolocation permission
+2) Uses watchPosition (not only getCurrentPosition)
+3) Uses high accuracy + timeout
+4) Continuously updates useLocationStore.currentLocation
+5) Stores lastGoodLocation + timestamp
+6) Exposes a locationStatus:
+   'ok' | 'stale' | 'denied' | 'unavailable'
+
+Then REMOVE all silent Windhoek fallback usage from:
+- client/src/pages/community/Feed.tsx (DEFAULT_LOCATION)
+- client/src/features/incidents/useFeedIncidents.ts (DEFAULT_LAT/LNG)
+- client/src/pages/community/Map.tsx (default center)
+
+Instead:
+- If lastGoodLocation is recent (<= 10 min), use it
+- Else:
+  - DO NOT query nearby incidents
+  - Show a clear UI state: “Location required to show nearby incidents”
+
+This avoids misleading results in ANY country.
+
+--------------------------------------------------
+PATCH C — Prevention / UX clarity
+--------------------------------------------------
+If locationStatus != 'ok', show a banner:
+“Location not available. Enable GPS to view incidents near you.”
+
+Feed/Map must NOT query using Windhoek defaults when GPS is denied/unavailable.
+
+--------------------------------------------------
+PATCH D — Small server-side safety net
+--------------------------------------------------
+On POST /api/incidents:
+- Strictly validate lat/lng (finite numbers, valid bounds)
+- If invalid or missing, return 400 and do not write
+- Temporarily log received lat/lng for create + nearby queries (mobile debugging)
+
+--------------------------------------------------
+REFERENCE CODE (can use directly or adapt)
+--------------------------------------------------
+
+A) Robust device location hook
+
+// client/src/lib/location/useDeviceLocation.ts
+import { useEffect, useRef } from "react";
+import { useLocationStore } from "@/stores/locationStore";
+
+type LocationStatus = "ok" | "stale" | "denied" | "unavailable";
+const MAX_AGE_MS = 10 * 60 * 1000;
+
+export function useDeviceLocation() {
+  const setLocation = useLocationStore(s => s.setCurrentLocation);
+  const setLastGood = useLocationStore(s => s.setLastGoodLocation);
+  const setStatus = useLocationStore(s => s.setLocationStatus);
+  const watchRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!("geolocation" in navigator)) {
+      setStatus("unavailable");
+      return;
+    }
+
+    const onSuccess = (pos: GeolocationPosition) => {
+      const { latitude: lat, longitude: lng } = pos.coords;
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        const now = Date.now();
+        setLocation({ lat, lng, timestamp: now });
+        setLastGood({ lat, lng, timestamp: now });
+        setStatus("ok");
+      } else {
+        setStatus("unavailable");
+      }
+    };
+
+    const onError = (err: GeolocationPositionError) => {
+      setStatus(err.code === err.PERMISSION_DENIED ? "denied" : "unavailable");
+    };
+
+    watchRef.current = navigator.geolocation.watchPosition(onSuccess, onError, {
+      enableHighAccuracy: true,
+      timeout: 15000,
+      maximumAge: 5000,
+    });
+
+    return () => {
+      if (watchRef.current != null) {
+        navigator.geolocation.clearWatch(watchRef.current);
+      }
+    };
+  }, []);
+}
+
+export function pickQueryLocation(store: {
+  currentLocation?: { lat: number; lng: number; timestamp: number } | null;
+  lastGoodLocation?: { lat: number; lng: number; timestamp: number } | null;
+}) {
+  const now = Date.now();
+  if (store.currentLocation && now - store.currentLocation.timestamp <= MAX_AGE_MS)
+    return store.currentLocation;
+  if (store.lastGoodLocation && now - store.lastGoodLocation.timestamp <= MAX_AGE_MS)
+    return store.lastGoodLocation;
+  return null;
+}
+
+--------------------------------------------------
+REQUEST FOR YOUR REVIEW
+--------------------------------------------------
+Before implementing, please review this approach and tell me:
+
+1) Does this disrupt any existing Southern Africa behavior?
+2) Does removing silent Windhoek defaults introduce any regressions?
+3) Are there any architectural concerns with a shared location service + state machine?
+4) Would you adjust anything to better align with the existing codebase?
+
+Once reviewed, please implement with:
+- list of files changed
+- confirmation this prevents “teleport to Windhoek/Swakopmund” globally
+- quick test plan (mobile + desktop, GPS allowed/denied, Kenya + Namibia)
+
+Thanks — this should permanently solve the issue and make future geo-expansion safe.

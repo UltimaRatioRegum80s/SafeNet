@@ -1,0 +1,104 @@
+Got it. I looked through Replit’s logs you pasted—this is very clear now.
+
+What the logs prove (why it still snaps)
+
+The recenter call is coming from the “CenterEffect”
+
+[CenterEffect] CALLING setView: [-22.5597, 17.0658], 12
+That’s the zoom-12 jump you feel.
+
+Both desktop and mobile are rendering MapView with incidentsCount: 0 initially
+
+[Map] incidents length -> 0
+This triggers the fallback branch (setView(center, 12)) on mount.
+
+We still have a mismatch between “center” used by the effect vs defaultCenter
+
+center=[17.0658,-22.5597] vs defaultCenter=[14.5272,-22.6792]
+Two different coordinates + (note the flipped order) keeps the effect firing.
+
+There’s a React warning about spreading a props object that contains a key
+
+“A props object containing a key prop is being spread into JSX”
+If that key changes, React remounts the map → triggers initial centering again.
+
+So: initial incidents=0 + a center effect that runs even when we’re not passing a center prop + a possibly changing key = repeated setView(..., 12).
+
+NRP-safe actions for Replit (no architecture changes)
+A) Stop the center effect unless a real center prop is provided
+
+The logger shows CenterEffect runs even when hasCenter: false.
+
+Make the effect early return unless props.center is defined.
+
+Also add a small one-time guard (e.g., hasAutoCenteredFromProp) so if we do pass center explicitly we run it once then never again.
+
+This removes the setView(..., 12) path entirely during normal operation.
+
+B) Don’t run the “no incidents” fallback after first paint
+
+Keep the “center on first load” behavior, but only if incidents are empty on the first paint.
+
+After that, if incidents toggles 0 → 50 → 0 during background refreshes, do not call the fallback again. The guard should look at a “first load” ref, not at incidents.length.
+
+C) Stabilize the MapView key (and stop spreading it)
+
+Destructure key out of the object before spreading: const { key, ...rest } = props; then <MapView key={key} {...rest} />.
+
+Make the key static (e.g., "map-with-sidebar"). If the key changes with city/theme/filters, React remounts the map and you get the initial setView again.
+
+D) Align coordinate order for any center we do use
+
+Leaflet expects [lat, lng]. Your trace shows [-22.5597, 17.0658] (which looks like [lat, lng]) but earlier we saw a flipped [lng, lat] in another place.
+
+Ensure all centers you pass around are consistently [lat, lng]. Remove any setView([center[1], center[0]]) flips.
+
+E) Ensure mobile actually gets incidents + colored clusters
+
+Your logs show incidentsCount: 0 on mobile and cluster factory never logs creation.
+
+Confirm mobile uses the same incidents hook as desktop (the shared Feed cache / 24h hook) and the severity cluster factory (@/features/map/cluster).
+
+Add/keep a single log on mobile:
+
+[Mobile] incidents count: X (should be > 0)
+
+[Cluster] mobile group created (should print once on mount)
+
+Quick verification steps (what I expect after A–E)
+
+Load map → it may center once.
+
+Pan/zoom → stays put (no jump to 12).
+
+Change theme/filters → no recenter.
+
+“In View” button → still refits on demand only.
+
+Mobile: incidents count > 0; severity-colored clusters match desktop.
+
+Why we’re not removing clustering
+
+It’s not the cause of the snap; the center effect is.
+
+Clustering is valuable for performance and readability as reports scale.
+
+We’ve already unified the color logic; once mobile reads the same incidents, colors will match.
+
+Replit → please apply those guards & key fix
+
+A/B: tighten the center/fallback effects as above.
+
+C: destructure and stabilize the key.
+
+D/E: verify center ordering and mobile incidents hookup.
+
+Then share the new console snippets:
+
+[Map] CALL: ... (should be gone during pan/zoom)
+
+[Desktop/Mobile] Render MapView props (hasCenter should remain false, key stable)
+
+[Mobile] incidents count: (> 0)
+
+@RDM, these are tiny, reversible changes and won’t impact any of the UI improvements or data flow we’ve made.

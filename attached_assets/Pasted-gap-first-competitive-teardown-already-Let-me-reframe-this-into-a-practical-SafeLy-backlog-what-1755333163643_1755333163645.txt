@@ -1,0 +1,121 @@
+gap-first competitive teardown already 👌.
+Let me reframe this into a practical SafeLy backlog: what to build, in what order, and what not to chase yet.
+
+🔑 Key Insights From Competitor Analysis
+
+Citizen & PulsePoint = real-time feeds + life-or-death speed. SafeLy doesn’t have the ops/legal bandwidth yet.
+
+Ring/Nextdoor = trust via verified identities & agency accounts. This is doable for SafeLy in Namibia.
+
+Snap Send Solve/Safecity = civic routing + anonymous reporting → very relevant locally, since municipal responsiveness & stigma are both real issues.
+
+GuardMetrics/SaferWatch = where the money is: security companies, schools, estates. That’s your paying client path.
+
+🎯 SafeLy Roadmap (Namibia Context)
+P0 – Trust & Retention (MVP hardening)
+
+✅ Verified agency accounts
+
+Badge for police/municipal/security posts.
+
+Lets you pitch SafeLy as “the official channel.”
+
+Effort: M (account type + badge + post filter).
+
+✅ Geo-radius push & follow incident
+
+People only get pinged if it’s nearby.
+
+Keeps push notifications relevant.
+
+Effort: S-M (topic-based or radius push in FCM).
+
+✅ Moderation basics + anonymous reporting
+
+Report/ban buttons.
+
+One-tap “report anonymously.”
+
+Effort: S-M (tables + flags + throttling).
+
+Why: stops trolls from killing trust.
+
+P1 – Monetizable Security Features
+
+Guard tour (NFC/QR checkpoints)
+
+Security companies log patrols.
+
+Client portal exports → invoices.
+
+Effort: M-L.
+
+Why: recurring revenue from B2B.
+
+Evidence pipeline (photo/video uploads)
+
+Neighbors/security can attach CCTV/doorbell footage.
+
+Add chain-of-custody fields (timestamp, uploader).
+
+Effort: M.
+
+Why: makes reports useful in court/police follow-up.
+
+P2 – Civic Value
+
+Municipal routing + ticket status
+
+“Streetlight out” → email/portal to city works.
+
+“In progress / resolved” flows back.
+
+Effort: M (email gateway or MoU with local councils).
+
+Why: transforms SafeLy into a service delivery tracker.
+
+Safety score + heatmaps
+
+Aggregate incidents into area safety ratings.
+
+Heatmaps on map dashboard.
+
+Effort: S-M.
+
+Why: NGOs, city planners, property market.
+
+P3 – Partnership “Big Swings”
+
+Dispatch/scanner integration (Citizen-style).
+
+Needs legal review + ops staff.
+
+Effort: L.
+
+Skip until you have a partner.
+
+AED registry & CPR responder network (PulsePoint-style).
+
+Great PR + partnerships with Red Cross/EMS.
+
+Effort: M.
+
+Requires government health buy-in.
+
+🚫 What to Skip (for now)
+
+Full social network features (chat, classifieds, DMs). → Noise, not core.
+
+Livestream video without moderation team. → Too risky.
+
+Hard tie-ins to proprietary hardware (Ring doorbells, etc.). → Start generic with photo/video upload.
+
+📝 Backlog Shaping
+
+Short-term pitch = “SafeLy makes your neighborhood safer, with verified posts and instant geo-alerts.”
+
+Revenue path = security companies + estates (guard tour, evidence pipeline).
+
+Civic legitimacy = municipal routing + safety dashboards.
+
+Long-term defensibility = partnership rails (agencies, NGOs, health)

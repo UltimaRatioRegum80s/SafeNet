@@ -1,0 +1,101 @@
+PROMPT FOR REPLIT (NO CODE):
+
+Make the following targeted updates to the Join Your Community section on the sign-up page.
+Do not change the colour palette, theme tokens, shadows, spacings, fonts, or any styles globally.
+Do not modify any other pages, components, routes, logic, or copy anywhere else in the app.
+Only perform the changes listed below. Everything else must remain exactly as is.
+
+Scope lockdown
+
+No changes to the site’s colour palette (keep the exact current colours and design tokens).
+
+No changes to any other parts of the site/app (hero, feature cards, header/footer, routing, APIs, icons, typography, spacing system).
+
+Keep the existing “Join Community” button styling, text, and behaviour.
+
+Keep the note at the bottom: “No account required • Local community platform • Anonymous reporting available.”
+
+Remove tabs
+
+Remove the “Quick Join / Email” tabs entirely. Present a single guided form instead.
+
+New form flow (single form, step-gated by dependency; keep current visual style)
+
+Role (first choice, required; no default selected):
+
+Radio options: Private citizen, Security organisation, Government service.
+
+Name (required for all roles):
+
+Relabel the existing “Username” input to Name; placeholder: “Your full name or organisation/service name.”
+
+Country (required):
+
+Use the existing country dropdown list exactly as it is (same options, order, and values).
+
+City/Town (required, disabled until Country chosen):
+
+Dropdown filtered/loaded by the selected Country. Reuse any existing city list if available.
+
+Neighbourhood (required, disabled until City/Town chosen; dynamically populated):
+
+Populate based on the selected City/Town.
+
+Provide an “Other (type manually)” option that switches to a text field.
+
+If no neighbourhoods exist for the city, automatically show the manual input.
+
+Show a lightweight loading indicator only inside this field’s area when fetching.
+
+Data source for City → Neighbourhood
+
+Use either:
+
+A static JSON map bundled with the app { country → city → [neighbourhoods] }, or
+
+A lightweight GET endpoint: /api/locations?country=XX&city=YYY returning { neighbourhoods: string[] }.
+
+Cache the last fetched city’s neighbourhoods in memory to avoid repeat requests.
+
+When Country changes: clear & disable City/Town and Neighbourhood until reselected.
+
+When City/Town changes: clear & disable Neighbourhood until it repopulates.
+
+Validation & accessibility (match current styling; no palette changes)
+
+Required fields: Role, Name, Country, City/Town, Neighbourhood.
+
+Disable Join Community until all required fields are valid.
+
+Show concise inline errors under the relevant field only.
+
+Maintain existing dark theme visuals and component spacing.
+
+Preserve label associations and announce loading/errors with aria-live="polite" per current conventions.
+
+Submission payload (no backend/routing changes)
+
+Include (and keep any existing required fields untouched):
+
+role: "private_citizen" | "security_organisation" | "government_service"
+name: string
+country: string
+city: string
+neighbourhood: string
+
+
+Submit using the existing join logic and destination. Do not rename endpoints or alter post-submit navigation.
+
+Acceptance criteria
+
+Colour palette and all other site parts remain unchanged.
+
+Tabs (Quick Join / Email) are removed.
+
+Form order: Role → Name → Country → City/Town → Neighbourhood.
+
+Neighbourhood is dynamically tied to City/Town, with a working “Other (type manually)” path.
+
+Join Community stays disabled until all required inputs are valid.
+
+After submission, behaviour is identical to the current app.

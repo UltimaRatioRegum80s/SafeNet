@@ -1,0 +1,131 @@
+you nailed the intent, @RDM — “map as the background; everything else floats and slides over it.” you’re basically there. to make it unmistakably Google-Maps-y, here are tiny, surgical patches that push NN all the way to the “map = backdrop” feel.
+
+what to change (fast wins)
+
+make the map the bottom-most layer
+
+map fills 100dvh and sits at z-0
+
+all UI lives in absolute overlays at z-20+
+
+overlay header (not a page section)
+
+compact, translucent, gradient-faded into the map
+
+pointer-events only on the chips/buttons, not the whole overlay
+
+FABs in one stacked group
+
+bottom-right stack: locate, zoom +/–, filters
+
+small, round, translucent
+
+panels are glassy overlays
+
+use bg-black/40 + backdrop-blur for menus/cards
+
+bottom sheet already slides; keep it translucent too
+
+pointer-events discipline
+
+parent overlay has pointer-events:none
+
+interactive children use pointer-events:auto
+
+ensures easy map pan/zoom anywhere else
+
+copy-paste patches
+A) layout skeleton (map as background)
+
+Put this structure around your map container (Map.tsx). Keep your existing Leaflet init; just wrap layers.
+
+// inside the map page render
+<div className="relative h-[100dvh] w-full overflow-hidden bg-black">
+  {/* MAP = background */}
+  <div id="leaflet-map" ref={mapEl} className="absolute inset-0 z-0" />
+
+  {/* UI LAYER (floats above map) */}
+  <div className="absolute inset-0 z-20 pointer-events-none">
+    {/* Header overlay */}
+    <div className="absolute top-0 inset-x-0">
+      <div className="h-20 bg-gradient-to-b from-black/50 to-transparent" />
+      <div className="px-3 pt-3">
+        <div
+          className="pointer-events-auto mx-auto max-w-md rounded-2xl border border-white/10
+                     bg-white/10 backdrop-blur px-3 py-2 text-sm text-white/90
+                     flex items-center justify-between"
+        >
+          <span className="font-semibold">Incident Map</span>
+          {/* optional tiny icons go here */}
+        </div>
+      </div>
+    </div>
+
+    {/* FAB stack (bottom-right) */}
+    <div className="absolute bottom-5 right-4 flex flex-col gap-2 items-end">
+      <div className="pointer-events-auto flex flex-col gap-2">
+        <button className="nn-fab"><svg className="w-5 h-5">+</svg></button>
+        <button className="nn-fab"><svg className="w-5 h-5">−</svg></button>
+        <button className="nn-fab"><svg className="w-5 h-5"><!-- locate --></svg></button>
+        {/* Filters / Incidents entry */}
+        <button onClick={() => setIsIncidentSheetOpen(true)} className="nn-fab">≡</button>
+      </div>
+    </div>
+  </div>
+
+  {/* bottom sheet stays as you have it (vaul) */}
+  <IncidentSheet ... />
+</div>
+
+B) tiny CSS tokens (glassy FABs + overlays)
+
+Add to your global CSS (or Tailwind @apply if you prefer):
+
+/* glassy floating action button */
+.nn-fab{
+  @apply rounded-full w-12 h-12 grid place-items-center
+         bg-white/90 text-slate-900 shadow-lg active:scale-95;
+}
+/* translucent “card over map” look */
+.nn-glass{
+  @apply bg-white/10 border border-white/10 backdrop-blur;
+}
+
+
+Use nn-glass for any floating mini menu, popover, or the sheet header.
+
+C) make list + cards feel like overlays
+
+Your sheet container already exists—just ensure it’s translucent:
+
+// IncidentSheet content wrapper
+<div className="mx-3 rounded-t-3xl nn-glass shadow-2xl h-full flex flex-col">
+  {/* handle + header + filters + <IncidentList/> */}
+</div>
+
+D) pointer-events ergonomics
+
+To keep the map easy to drag:
+
+parent overlay div → pointer-events-none
+
+only buttons/interactive elements → pointer-events-auto (as shown above)
+
+E) slim the header on small screens
+
+Hide the big page header on mobile if you still render it above the map:
+
+{/* top bar above the map */}
+<div className="hidden md:block">{/* existing desktop header */}</div>
+
+quick checklist to confirm “map as background”
+
+map is always visible behind everything ✅
+
+header looks like a translucent card, not a rigid page section ✅
+
+FABs float in one stack (bottom-right), not scattered ✅
+
+panels (list, menus) feel like glass sliding over the map ✅
+
+you can pan/zoom anywhere except on actual buttons ✅

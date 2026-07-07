@@ -1,0 +1,57 @@
+Phase 2 — Ultra-short prompt
+
+Replit: Implement Phase 2 using only local Replit resources (Node/Express/Leaflet/local DB). No external services/CDNs. Don’t change colors/logos. Keep clustering + 12h/24h map filters. No moderation UI (only authority ack/resolve allowed).
+
+Data model: add businesses, promotions, events, driveby_requests; extend incidents with acknowledgedAt, resolvedAt, resolveNote.
+
+Endpoints (JSON):
+
+Businesses/Promotions: POST /api/businesses, GET /api/businesses/nearby?lat&lng&radius, POST /api/promotions, GET /api/promotions/active?lat&lng&radius.
+
+Events: POST /api/events, GET /api/events/nearby?lat&lng&radius&sinceHours&untilHours.
+
+Drive-by: POST /api/driveby, GET /api/driveby/my, GET /api/driveby/inbox (security orgs), POST /api/driveby/:id/accept, .../complete, .../cancel.
+
+Authority actions only: POST /api/incidents/:id/ack, POST /api/incidents/:id/resolve.
+
+Rules: sanitize all text; numeric guards; Namibia bounds; RL = write endpoints (drive-by 1/5m per user). Promotions auto-expire; dedupe identical promos.
+
+Map/UI: new toggles for Promotions, Events, Businesses; render cards on tap. Add Request drive-by in incident drawer. Add Drive-by Inbox for security orgs. Show Ack/Resolve buttons only to authority roles.
+
+(Optional sockets): broadcast promotion:new, event:new, driveby:*, incident:ack/resolved.
+
+Tests (Jest/Supertest): CRUD + time windows for promos/events; drive-by flow (new→accept→complete/cancel); authority endpoints 403 for non-authority.
+
+Deliver: migrations/adapters, endpoints, UI layers/toggles, drive-by UI, authority ack/resolve UI, tests.
+
+Phase 3 — Ultra-short prompt
+
+Replit: Implement Phase 3 using only local Replit resources. No external routing/feeds. Keep Phase 2 behavior intact.
+
+Data model: add patrol_routes, patrol_waypoints, unit_locations (breadcrumb, prune old), osint_items (pending/approved/rejected), org_sharing (scopes), analytics_snapshots (daily).
+
+Endpoints:
+
+Patrols: POST /api/patrols, GET /api/patrols?orgId=..., POST /api/patrols/:id/activate|deactivate, POST /api/patrols/:id/waypoints, GET /api/patrols/:id.
+
+Units: POST /api/units/locate (RL 1/15s per guard), GET /api/units/nearby?lat&lng&radius&orgId? (respect inter-op).
+
+OSINT queue (manual): POST /api/osint, GET /api/osint/pending, POST /api/osint/:id/approve|reject, public GET for approved items.
+
+Inter-op: POST /api/orgsharing (fromOrgId, toOrgId, scope=live_locations|incidents|both, enabled).
+
+Analytics: GET /api/analytics/city?day=YYYY-MM-DD; add job/endpoint to build daily snapshots.
+
+Map/UI:
+
+Patrol Builder (org dashboard): add/reorder waypoints on map; activate/deactivate; deep-link to device maps for navigation.
+
+Units layer toggle: show my org’s units; if sharing enabled, show partner units with badge; show nearest unit in incident drawer (straight-line).
+
+OSINT layer toggle: show approved items with source attribution; OSINT Inbox (approve/reject).
+
+Analytics dashboard: city snapshot (counts by category, median ack/resolve, hotspots, 7-day chart). No external chart CDN (use local lib or Canvas).
+
+Rules: sanitization everywhere; RL on write; inter-op strictly opt-in per scope; patrol routing is manual (no auto pathfinding); navigation via native map deep-links.
+
+Tests: patrol CRUD + waypoints + activation; unit breadcrumbs + inter-op visibility; OSINT pending→approve/reject + layer visibility; analytics snapshot shape.

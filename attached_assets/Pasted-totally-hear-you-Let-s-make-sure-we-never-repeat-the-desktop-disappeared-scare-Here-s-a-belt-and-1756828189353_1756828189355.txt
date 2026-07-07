@@ -1,0 +1,376 @@
+totally hear you. Let’s make sure we never repeat the “desktop disappeared” scare. Here’s a belt-and-suspenders rollout plan that keeps progress safe while fixing mobile.
+
+Guardrails so we can’t break desktop
+
+Dark-launch flag (default OFF)
+
+Add a tiny, centralized feature flag: NN_FIX_MOBILE_MARKERS false by default.
+
+Enable only via query param or localStorage on specific devices while testing:
+
+?nn_fix_mobile_markers=1
+
+or localStorage.NN_FIX_MOBILE_MARKERS='1'
+
+On every app boot, compute flags.fixMobileMarkers from:
+
+query param → overrides
+
+else localStorage → overrides
+
+else env default (false)
+
+Platform & condition gating
+
+Only activate the fallback when both are true:
+
+we’re on a touch/mobile user agent, and
+
+getIncidentIcon(inc.type) returned null.
+
+Desktop path remains unchanged (still uses your existing icon images).
+
+Runtime canary & auto-rollback
+
+When the flag is ON, we log counters per render:
+
+createdMarkers, clusterAddSuccess, clusterChildCount.
+
+If after rendering ≥ 10 incidents, clusterChildCount === 0, we auto-disable the flag for that session and warn:
+
+localStorage.NN_FIX_MOBILE_MARKERS='0' (kill-switch)
+
+This guarantees that if something unexpected happens, we bounce back to the prior behavior immediately.
+
+No mutation of existing codepaths
+
+We don’t touch the desktop icon path.
+
+We only swap the circleMarker fallback for a divIcon-based L.Marker inside the gated branch.
+
+One-file, single-commit patch + instant revert
+
+Scope changes to the marker factory file (where the fallback lives).
+
+Commit message: feat(markers): gated divIcon fallback for mobile + canary
+
+Revert is a single click (or flip the flag to 0).
+
+What Replit should implement (safely)
+
+This is still analysis + plan. When you’re ready to patch, do it exactly like this to keep desktop safe.
+
+Flag plumbing (central place, e.g., client/src/lib/flags.ts)
+
+export function readFlag(name: string, def = '0') {
+  const url = new URL(location.href);
+  const q = url.searchParams.get(name);
+  if (q === '1' || q === '0') return q;
+  const ls = localStorage.getItem(name);
+  if (ls === '1' || ls === '0') return ls;
+  return def;
+}
+
+export const Flags = {
+  fixMobileMarkers: readFlag('NN_FIX_MOBILE_MARKERS', '0') === '1',
+};
+
+
+Lightweight platform check (no new deps)
+
+export const isLikelyMobile = (() => {
+  const ua = navigator.userAgent || '';
+  return /Android|iPhone|iPad|iPod|Mobile|Silk/.test(ua) || ('ontouchstart' in window);
+})();
+
+
+Gated fallback (replace only the circleMarker branch)
+
+// pseudocode located in incidentIcons.ts (or your marker factory)
+import { Flags } from '@/lib/flags';
+import { isLikelyMobile } from '@/lib/platform';
+
+let diag = { created: 0, added: 0, clusterChildrenAfter: 0 };
+
+function buildFallbackDivIcon({ size = 14, color = '#2563eb' } = {}) {
+  const r = size / 2;
+  return L.divIcon({
+    className: 'nn-divicon-wrapper',
+    html: `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:rgba(37,99,235,0.15);border:2px solid ${color};box-shadow:0 1px 2px rgba(0,0,0,.25)"></div>`,
+    iconSize: [size, size],
+    iconAnchor: [r, r],
+    popupAnchor: [0, -r],
+  });
+}
+
+// inside addIncidentToCluster(inc)
+const icon = typeof getIncidentIcon === 'function' ? getIncidentIcon(inc.type) : null;
+
+let layer: L.Layer;
+
+if (icon) {
+  // ✅ existing desktop path (unchanged)
+  layer = L.marker(ll, { icon, title: inc.title ?? inc.type });
+} else if (Flags.fixMobileMarkers && isLikelyMobile) {
+  // 🛡️ gated mobile fallback → still a Marker (cluster-compatible)
+  layer = L.marker(ll, {
+    icon: buildFallbackDivIcon({ size: 14, color: '#2563eb' }),
+    title: inc.title ?? inc.type,
+  });
+} else {
+  // 🚫 legacy fallback retained but not used when flag is on
+  layer = L.circleMarker(ll, { radius: 7, color: '#2563eb' });
+}
+
+// diagnostics (dev only)
+try {
+  diag.created++;
+  clusterRef.current.addLayer(layer);
+  diag.added++;
+  // sample the child count after first batch
+  if (diag.created === 10) {
+    const children = clusterRef.current.getLayers().length;
+    diag.clusterChildrenAfter = children;
+    if (Flags.fixMobileMarkers && isLikelyMobile && children === 0) {
+      console.warn('[NN] Canary: no children after 10 markers. Disabling fallback for this session.');
+      localStorage.setItem('NN_FIX_MOBILE_MARKERS', '0'); // kill switch
+    }
+  }
+} catch (e) {
+  console.error('[NN] addLayer error', e);
+}
+
+Rollout protocol (step-by-step)
+
+Create a short-lived branch: fix/mobile-markers-gated
+
+Patch only the marker factory file (plus tiny flags.ts helper).
+
+Build + run locally (desktop): Verify desktop remains identical (icons + clusters).
+
+Dark-launch on one mobile device only:
+
+Open the PWA with ?NN_FIX_MOBILE_MARKERS=1
+
+Confirm clusters + markers appear and popups work.
+
+Kill-switch test: Temporarily force a failure (e.g., block icon URL) and ensure the canary flips the flag off automatically.
+
+Staged enablement:
+
+Keep default OFF in code.
+
+For production validation, enable on specific tester devices via query param only.
+
+If all good: Set readFlag default to '1' in a separate commit, so the change is trivially revertible.
+
+Rollback plan: If anything odd happens on desktop, either:
+
+Flip ?NN_FIX_MOBILE_MARKERS=0, or
+
+localStorage.NN_FIX_MOBILE_MARKERS='0', or
+
+Revert the single commit that changed the default.
+
+Why this won’t break desktop again
+
+Desktop path is literally unchanged (still uses your icon assets).
+
+The new code only runs when icon === null AND mobile AND flag ON.
+
+There’s an automatic session kill-switch if clustering doesn’t populate.
+
+You can disable the behavior instantly with a query param—no redeploy.
+
+@RDM — action items
+
+Approve this guarded rollout.
+
+Replit will implement exactly the patch above in a branch, test via query param on a single device, and report results.
+
+No existing UI/functionality will be removed or altered on desktop; this is strictly additive and guarded.
+
+You said:
+
+Thought for 12s totally hear you. Let’s make sure we never repeat the “desktop disappeared” scare. Here’s a belt-and-suspenders rollout plan that keeps progress safe while fixing mobile. Guardrails so we **can’t** break desktop ======================================== 1. **Dark-launch flag (default OFF)** * Add a tiny, centralized feature flag: `NN_FIX_MOBILE_MARKERS` **false by default**. * Enable only via **query param** or **localStorage** on specific devices while testing: * `?nn_fix_mobile_markers=1` * or `localStorage.NN_FIX_MOBILE_MARKERS='1'` * On every app boot, compute `flags.fixMobileMarkers` from: * query param → overrides * else localStorage → overrides * else env default (false) 2. **Platform & condition gating** * Only activate the fallback when **both** are true: * we’re on a **touch/mobile** user agent, _and_ * `getIncidentIcon(inc.type)` returned **null**. * Desktop path remains unchanged (still uses your existing icon images). 3. **Runtime canary & auto-rollback** * When the flag is ON, we log counters per render: * `createdMarkers`, `clusterAddSuccess`, `clusterChildCount`. * If after rendering ≥ 10 incidents, `clusterChildCount === 0`, we **auto-disable** the flag for that session and warn: * `localStorage.NN_FIX_MOBILE_MARKERS='0'` (kill-switch) * This guarantees that if something unexpected happens, we bounce back to the prior behavior immediately. 4. **No mutation of existing codepaths** * We don’t touch the desktop icon path. * We only swap the _circleMarker fallback_ for a **divIcon-based L.Marker** _inside the gated branch_. 5. **One-file, single-commit patch + instant revert** * Scope changes to the marker factory file (where the fallback lives). * Commit message: `feat(markers): gated divIcon fallback for mobile + canary` * Revert is a single click (or flip the flag to 0). What Replit should implement (safely) ===================================== > This is still _analysis + plan_. When you’re ready to patch, do it exactly like this to keep desktop safe. **Flag plumbing (central place, e.g., `client/src/lib/flags.ts`)** ts Copy code `export function readFlag(name: string, def = '0') { const url = new URL(location.href); const q = url.searchParams.get(name); if (q === '1' || q === '0') return q; const ls = localStorage.getItem(name); if (ls === '1' || ls === '0') return ls; return def; } export const Flags = { fixMobileMarkers: readFlag('NN_FIX_MOBILE_MARKERS', '0') === '1', };` **Lightweight platform check (no new deps)** ts Copy code `export const isLikelyMobile = (() => { const ua = navigator.userAgent || ''; return /Android|iPhone|iPad|iPod|Mobile|Silk/.test(ua) || ('ontouchstart' in window); })();` **Gated fallback (replace only the circleMarker branch)** ts Copy code ``// pseudocode located in incidentIcons.ts (or your marker factory) import { Flags } from '@/lib/flags'; import { isLikelyMobile } from '@/lib/platform'; let diag = { created: 0, added: 0, clusterChildrenAfter: 0 }; function buildFallbackDivIcon({ size = 14, color = '#2563eb' } = {}) { const r = size / 2; return L.divIcon({ className: 'nn-divicon-wrapper', html: `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:rgba(37,99,235,0.15);border:2px solid ${color};box-shadow:0 1px 2px rgba(0,0,0,.25)"></div>`, iconSize: [size, size], iconAnchor: [r, r], popupAnchor: [0, -r], }); } // inside addIncidentToCluster(inc) const icon = typeof getIncidentIcon === 'function' ? getIncidentIcon(inc.type) : null; let layer: L.Layer; if (icon) { // ✅ existing desktop path (unchanged) layer = L.marker(ll, { icon, title: inc.title ?? inc.type }); } else if (Flags.fixMobileMarkers && isLikelyMobile) { // 🛡️ gated mobile fallback → still a Marker (cluster-compatible) layer = L.marker(ll, { icon: buildFallbackDivIcon({ size: 14, color: '#2563eb' }), title: inc.title ?? inc.type, }); } else { // 🚫 legacy fallback retained but not used when flag is on layer = L.circleMarker(ll, { radius: 7, color: '#2563eb' }); } // diagnostics (dev only) try { diag.created++; clusterRef.current.addLayer(layer); diag.added++; // sample the child count after first batch if (diag.created === 10) { const children = clusterRef.current.getLayers().length; diag.clusterChildrenAfter = children; if (Flags.fixMobileMarkers && isLikelyMobile && children === 0) { console.warn('[NN] Canary: no children after 10 markers. Disabling fallback for this session.'); localStorage.setItem('NN_FIX_MOBILE_MARKERS', '0'); // kill switch } } } catch (e) { console.error('[NN] addLayer error', e); }`` Rollout protocol (step-by-step) =============================== 1. **Create a short-lived branch:** `fix/mobile-markers-gated` 2. **Patch only the marker factory file** (plus tiny `flags.ts` helper). 3. **Build + run locally (desktop):** Verify desktop remains identical (icons + clusters). 4. **Dark-launch on one mobile device only:** * Open the PWA with `?NN_FIX_MOBILE_MARKERS=1` * Confirm clusters + markers appear and popups work. 5. **Kill-switch test:** Temporarily force a failure (e.g., block icon URL) and ensure the canary flips the flag off automatically. 6. **Staged enablement:** * Keep default OFF in code. * For production validation, enable on specific tester devices via **query param** only. 7. **If all good:** Set `readFlag` default to `'1'` **in a separate commit**, so the change is trivially revertible. 8. **Rollback plan:** If anything odd happens on desktop, either: * Flip `?NN_FIX_MOBILE_MARKERS=0`, or * `localStorage.NN_FIX_MOBILE_MARKERS='0'`, or * Revert the single commit that changed the default. Why this won’t break desktop again ================================== * Desktop path is **literally unchanged** (still uses your icon assets). * The new code only runs when **icon === null AND mobile AND flag ON**. * There’s an **automatic session kill-switch** if clustering doesn’t populate. * You can disable the behavior instantly with a query param—no redeploy. * * * **@RDM — action items** * Approve this guarded rollout. * Replit will implement exactly the patch above in a branch, test via query param on a single device, and report results.
+
+package this in an instruction to Replit 
+NN Builder & Coder said:
+
+@Replit — here are your exact implementation instructions (progress-safe, desktop can’t regress). Please follow step-by-step.
+
+Objective
+
+Restore mobile markers + clusters without touching the working desktop path by replacing the L.circleMarker fallback with a gated L.Marker + divIcon. Dark-launch with a kill-switch.
+
+Branch & Scope
+
+Create branch: fix/mobile-markers-gated
+
+Only touch:
+
+client/src/lib/flags.ts (new)
+
+client/src/lib/platform.ts (new or existing)
+
+The marker factory where addIncidentToCluster/fallback lives (currently in client/src/lib/incidentIcons.ts per your note)
+
+No other files. No build or SW changes.
+
+1) Add feature-flag helper
+client/src/lib/flags.ts
+export function readFlag(name: string, def = '0') {
+  const url = new URL(location.href);
+  const q = url.searchParams.get(name);
+  if (q === '1' || q === '0') return q;
+  const ls = localStorage.getItem(name);
+  if (ls === '1' || ls === '0') return ls;
+  return def;
+}
+
+export const Flags = {
+  fixMobileMarkers: readFlag('NN_FIX_MOBILE_MARKERS', '0') === '1',
+};
+
+2) Add light platform check
+client/src/lib/platform.ts
+export const isLikelyMobile = (() => {
+  const ua = navigator.userAgent || '';
+  return /Android|iPhone|iPad|iPod|Mobile|Silk/.test(ua) || ('ontouchstart' in window);
+})();
+
+3) Implement gated fallback (single file change)
+
+In client/src/lib/incidentIcons.ts (or the file that contains addIncidentToCluster / the marker creation):
+
+Do not change the existing “desktop success” path (where getIncidentIcon() returns an image icon and you build L.marker).
+
+Replace only the L.circleMarker fallback with a gated L.Marker using a divIcon.
+
+import { Flags } from '@/lib/flags';
+import { isLikelyMobile } from '@/lib/platform';
+
+// small helper (local to this file)
+function buildFallbackDivIcon({ size = 14, color = '#2563eb' } = {}) {
+  const r = size / 2;
+  return L.divIcon({
+    className: 'nn-divicon-wrapper',
+    html: `<div style="width:${size}px;height:${size}px;border-radius:9999px;background:rgba(37,99,235,0.15);border:2px solid ${color};box-shadow:0 1px 2px rgba(0,0,0,.25)"></div>`,
+    iconSize: [size, size],
+    iconAnchor: [r, r],
+    popupAnchor: [0, -r],
+  });
+}
+
+// wherever you currently decide the layer type:
+function addIncidentToCluster(inc: any) {
+  if (!clusterRef.current) return;
+
+  const ll = L.latLng(inc.lat, inc.lng);
+  const icon = (typeof getIncidentIcon === 'function') ? getIncidentIcon(inc.type) : null;
+
+  let layer: L.Layer;
+
+  if (icon) {
+    // ✅ Desktop/icon path — unchanged
+    layer = L.marker(ll, { icon, title: inc.title ?? inc.type });
+  } else if (Flags.fixMobileMarkers && isLikelyMobile) {
+    // 🛡️ Gated mobile fallback — still an L.Marker (cluster-compatible)
+    layer = L.marker(ll, {
+      icon: buildFallbackDivIcon({ size: 14, color: '#2563eb' }),
+      title: inc.title ?? inc.type,
+    });
+  } else {
+    // 🚫 Legacy fallback retained (not used when flag is ON); keep for parity
+    layer = L.circleMarker(ll, { radius: 7, color: '#2563eb' });
+  }
+
+  // existing popup/bind logic stays the same
+  if (inc.popupHtml) layer.bindPopup(inc.popupHtml, { maxWidth: 320 });
+
+  // add to cluster
+  clusterRef.current.addLayer(layer);
+}
+
+
+Important: Do not alter any other clustering logic or desktop icon creation. This is the only behavioral change.
+
+4) Canary & kill-switch (optional but recommended)
+
+Add the following inside addIncidentToCluster after addLayer to protect Progress Law:
+
+// Simple canary
+if (Flags.fixMobileMarkers && isLikelyMobile) {
+  // After ~10 additions, confirm cluster has children
+  if (!window.__nnDiag) window.__nnDiag = { created: 0 };
+  window.__nnDiag.created++;
+  if (window.__nnDiag.created === 10) {
+    const childCount = clusterRef.current.getLayers().length;
+    if (childCount === 0) {
+      console.warn('[NN] Canary: zero layers after 10 adds. Disabling fallback for this session.');
+      localStorage.setItem('NN_FIX_MOBILE_MARKERS', '0'); // kill-switch
+    }
+  }
+}
+
+5) Commit
+
+Commit message:
+
+feat(markers): gated divIcon fallback for mobile + canary; desktop path unchanged
+
+6) Test Protocol (no risk to desktop)
+
+Desktop smoke (flag OFF by default)
+
+Run branch locally; ensure:
+
+All desktop markers + clusters look identical.
+
+Popups and spiderfy behave as before.
+
+Dark-launch on one mobile tester
+
+On the device, open the app with: ?NN_FIX_MOBILE_MARKERS=1
+
+Confirm:
+
+Markers & clusters render.
+
+Tap markers → popups open.
+
+Performance acceptable.
+
+Kill-switch test
+
+With flag =1, temporarily block an icon URL (or simulate icon null) and confirm canary does not wedge the UI; if it detects zero children after 10 adds, it writes localStorage.NN_FIX_MOBILE_MARKERS='0' and the session disables the fallback.
+
+7) Staged Enablement (safest possible)
+
+Keep default OFF in code.
+
+For wider mobile testing, distribute the query param to selected testers only.
+
+If results are good for 24–48h, flip the default to '1' in readFlag in a separate commit (easy to revert).
+
+8) Rollback Options (instant)
+
+If anything odd is observed:
+
+Use ?NN_FIX_MOBILE_MARKERS=0 or
+
+localStorage.NN_FIX_MOBILE_MARKERS='0', or
+
+Revert the single feature commit.
+
+Acceptance Criteria
+
+Desktop (flag OFF): no visual or behavioral changes vs. current rolled-back version.
+
+Mobile (flag ON): clusters and incident markers render; popups work.
+
+No console errors; cluster has >0 layers after initial batch.
+
+Kill-switch disables the fallback if clustering does not populate.
+
+Ping me when the branch is ready and tested; I’ll review the diffs and we can decide when to flip the default.

@@ -1,0 +1,81 @@
+awesome — desktop looks untouched with the flag OFF ✅. let’s move to a strictly guarded mobile test without risking regressions.
+
+@Replit, here’s the exact test script (no code changes):
+
+Mobile dark-launch test (flagged)
+
+Test surfaces
+
+Mobile browser tab and PWA standalone (both).
+
+Use this on each: append ?NN_FIX_MOBILE_MARKERS=1 to the incidents route.
+
+Hard reload prep
+
+In DevTools → Application → Service Workers → check Bypass for network → hard reload once (then you can uncheck).
+
+Clear only app cache if results seem stale.
+
+Visual checks
+
+Clusters render at zoomed-out levels (badges with counts).
+
+Zoom in → markers appear (small circular divIcon style), tap opens popup.
+
+Pan/zoom performance acceptable; no map controls overlap issues.
+
+Quick console probes (read-only)
+Paste after map loads:
+
+// 1) Pane/DOM health
+const pane = document.querySelector('.leaflet-marker-pane');
+console.log('marker-pane children:', pane?.children.length);
+
+// 2) Confirm we’re on the divIcon path
+[...document.querySelectorAll('.nn-divicon-wrapper')].length
+
+// 3) Cluster child count snapshot
+(window.clusterRef?.current && window.clusterRef.current.getLayers().length) || 'no cluster'
+
+
+Expected:
+
+marker-pane children > 0
+
+divIcon wrappers > 0
+
+cluster child layers > 0
+
+A/B toggle sanity
+
+Refresh the same page with ?NN_FIX_MOBILE_MARKERS=0 → markers should disappear only if your icon assets are still failing (this proves the gate works).
+
+Switch back to =1 → markers return.
+
+Parallel desktop guard
+
+On a desktop session (no query param), refresh and confirm:
+
+same icons as before,
+
+same cluster behavior,
+
+no new console warnings.
+
+Rapid rollback levers (no redeploy)
+
+Add ?NN_FIX_MOBILE_MARKERS=0 to any URL.
+
+Or run in console: localStorage.NN_FIX_MOBILE_MARKERS='0'; location.reload();
+
+Report back (paste results)
+
+Screenshot of mobile zoomed out (clusters) and zoomed in (markers + popup) with the flag ON.
+
+Outputs of the three console lines above.
+
+Any performance notes (jank, long tap-to-popup delay, etc.).
+
+Confirm desktop is unchanged.
+
+If everything passes, we’ll keep the flag default OFF and propose a tiny follow-up PR to flip the default in a separate commit, preserving our easy rollback.

@@ -1,0 +1,295 @@
+let’s add a tiny pulsing outline + badge to distinguish optimistic and offline markers in Leaflet (you’re using custom HTML markers already, so this slots right in).
+
+below are focused patches only (CSS + helper tweaks + two small calls). copy-paste in order.
+
+1) CSS for pulsing outline & badges
+
+client/src/styles/markers.css (new) and import it once in your global CSS (e.g., index.css or main.tsx → import "@/styles/markers.css";)
+
+/* --- base wrapper (we use a divIcon so Leaflet won't add extra classes) --- */
+.nn-marker {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+}
+
+/* the actual icon (your gradient png/svg) */
+.nn-marker__img {
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+}
+
+/* small corner badge */
+.nn-marker__badge {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 9999px;
+  background: #0ea5e9;     /* default electric blue */
+  color: #000;
+  font-size: 10px;
+  line-height: 16px;
+  font-weight: 700;
+  border: 2px solid #0b1324; /* match dark map bg edge */
+}
+
+/* ---------- optimistic (just submitted) ---------- */
+.nn-marker--optimistic .nn-marker__badge {
+  background: #22d3ee; /* teal */
+  color: #001013;
+}
+
+/* pulsing ring */
+.nn-marker--optimistic::after {
+  content: "";
+  position: absolute;
+  width: 38px;
+  height: 38px;
+  border-radius: 9999px;
+  border: 2px solid rgba(34, 211, 238, 0.6);
+  animation: nnPulse 1.4s ease-out infinite;
+}
+
+@keyframes nnPulse {
+  0% { transform: scale(0.7); opacity: 0.9; }
+  70% { transform: scale(1.15); opacity: 0.25; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+
+/* ---------- offline (queued) ---------- */
+.nn-marker--offline .nn-marker__badge {
+  background: #fbbf24; /* amber */
+  color: #1a1200;
+}
+
+/* dashed halo for offline */
+.nn-marker--offline::after {
+  content: "";
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  border: 2px dashed rgba(251, 191, 36, 0.7);
+  animation: nnDash 1.8s linear infinite;
+}
+
+@keyframes nnDash {
+  to { transform: rotate(360deg); }
+}
+
+
+then import once (example):
+
+// client/src/main.tsx or client/src/index.css
+import "@/styles/markers.css";
+
+2) Enhance your marker helper to render badges
+
+Patch your existing Leaflet helper so it can style markers when optimistic/offline is true.
+
+client/src/features/map/createIncidentMarker.ts (adjust signature/HTML)
+
+import L from "leaflet";
+import { INCIDENT_MARKERS } from "@/features/report/incidentTypes";
+
+// Registry (optional but useful for updates)
+const markerRegistry = new Map<string, L.Marker>();
+
+type CreateMarkerOpts = {
+  id: string;
+  type: string;
+  lat: number;
+  lng: number;
+  description?: string;
+  optimistic?: boolean;
+  offline?: boolean;
+  map?: L.Map; // if not injected elsewhere
+};
+
+export function createIncidentMarker({
+  id, type, lat, lng, description, optimistic, offline, map,
+}: CreateMarkerOpts): L.Marker {
+  const iconUrl = INCIDENT_MARKERS[type as keyof typeof INCIDENT_MARKERS]?.icon;
+  const classes = ["nn-marker"];
+  if (optimistic) classes.push("nn-marker--optimistic");
+  if (offline) classes.push("nn-marker--offline");
+
+  const badgeText = offline ? "⏳" : optimistic ? "⚡" : "";
+
+  const html = `
+    <div class="${classes.join(" ")}" data-id="${id}">
+      <img class="nn-marker__img" src="${iconUrl}" alt="${type}" />
+      ${badgeText ? `<span class="nn-marker__badge">${badgeText}</span>` : ""}
+    </div>
+  `;
+
+  const divIcon = L.divIcon({
+    html,
+    className: "",           // keep empty so our classes control styles
+    iconSize: [36, 36],
+    iconAnchor: [18, 36],
+    popupAnchor: [0, -28],
+  });
+
+  const marker = L.marker([lat, lng], { icon: divIcon });
+  if (description) marker.bindPopup(description);
+
+  // add to map now or return for caller to add
+  if (map) marker.addTo(map);
+
+  markerRegistry.set(id, marker);
+  return marker;
+}
+
+/** update flags on an existing marker (swap classes + badge) */
+export function updateMarkerFlags(
+  id: string,
+  { optimistic, offline }: { optimistic?: boolean; offline?: boolean }
+) {
+  const marker = markerRegistry.get(id);
+  if (!marker) return;
+  const el = (marker as any)._icon as HTMLElement | null;
+  if (!el) return;
+
+  el.classList.toggle("nn-marker--optimistic", !!optimistic);
+  el.classList.toggle("nn-marker--offline", !!offline);
+
+  let badge = el.querySelector(".nn-marker__badge") as HTMLSpanElement | null;
+  const wantBadge = offline || optimistic;
+  if (wantBadge && !badge) {
+    badge = document.createElement("span");
+    badge.className = "nn-marker__badge";
+    el.appendChild(badge);
+  }
+  if (!wantBadge && badge) {
+    badge.remove();
+  } else if (badge) {
+    badge.textContent = offline ? "⏳" : optimistic ? "⚡" : "";
+  }
+}
+
+/** replace temp ID with real ID in registry (after server confirms) */
+export function replaceMarkerId(tempId: string, newId: string) {
+  const marker = markerRegistry.get(tempId);
+  if (!marker) return;
+  markerRegistry.delete(tempId);
+  markerRegistry.set(newId, marker);
+
+  const el = (marker as any)._icon as HTMLElement | null;
+  if (el) el.setAttribute("data-id", newId);
+}
+
+
+if you already have a registry, merge the two tiny helpers into it.
+
+3) Wire flags when adding markers
+A) Optimistic: you’re already adding a temp incident in QuickReportCard. Pass the flag through to the marker creation (wherever you render markers from store/hydration).
+
+If you add markers directly on submission (common pattern), just call:
+
+createIncidentMarker({
+  id: tempId,
+  type,
+  lat, lng,
+  description: note?.trim() || undefined,
+  optimistic: true,
+  map, // your Leaflet map instance
+});
+
+
+If your map builds markers from store/React Query:
+
+include optimistic?: boolean and offline?: boolean in the incident model,
+
+pass them into createIncidentMarker during render.
+
+B) After server confirms, clear optimistic flag and replace ID
+
+Where you previously did:
+
+updateIncidentId(tempId, result.id);
+
+
+also update the marker UI:
+
+import { updateMarkerFlags, replaceMarkerId } from "@/features/map/createIncidentMarker";
+
+replaceMarkerId(tempId, result.id);
+updateMarkerFlags(result.id, { optimistic: false, offline: false });
+
+C) Offline queued path (if you choose to show a queued marker)
+
+When you enqueue (offline), also drop a marker with the offline style:
+
+const tempId = `offline-${Date.now()}`;
+createIncidentMarker({
+  id: tempId,
+  type,
+  lat, lng,
+  description: note?.trim() || undefined,
+  offline: true,
+  map,
+});
+
+
+Then, when the queue flushes and server returns a real id, call:
+
+replaceMarkerId(tempId, realId);
+updateMarkerFlags(realId, { offline: false });
+
+
+If you prefer not to show offline markers until back online, skip this; the CSS/JS supports it whenever you enable it.
+
+4) (Optional) tiny legend in the corner
+
+If you want users to know what the decorations mean:
+
+// client/src/features/map/MarkerLegend.tsx
+export function MarkerLegend() {
+  return (
+    <div style={{
+      position: "absolute", bottom: 12, left: 12,
+      background: "rgba(12,12,16,0.85)", color: "#fff",
+      padding: "6px 10px", borderRadius: 10, fontSize: 12
+    }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <span className="nn-marker nn-marker--optimistic" style={{ width: 16, height: 16 }}>
+          <span className="nn-marker__badge">⚡</span>
+        </span>
+        <span>Submitting…</span>
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+        <span className="nn-marker nn-marker--offline" style={{ width: 16, height: 16 }}>
+          <span className="nn-marker__badge">⏳</span>
+        </span>
+        <span>Saved offline</span>
+      </div>
+    </div>
+  );
+}
+
+
+Mount it inside your Map.tsx (positioned over the map).
+
+5) Quick sanity checklist
+
+ markers.css imported at app start
+
+ createIncidentMarker now supports optimistic / offline
+
+ Call updateMarkerFlags + replaceMarkerId when server confirms
+
+ (If used) offline queued markers switch to confirmed on flush
+
+that’s it—now your users get instant visual feedback:
+
+⚡ pulsing teal ring = “just submitted (optimistic)”
+
+⏳ dashed amber halo = “saved offline (will sync)”

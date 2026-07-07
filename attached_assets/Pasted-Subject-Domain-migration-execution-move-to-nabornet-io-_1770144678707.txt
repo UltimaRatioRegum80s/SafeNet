@@ -1,0 +1,81 @@
+Subject: Domain migration execution — move to nabornet.io (Phase 3D-B operational switch)
+
+Hi Replit — we are executing the domain migration now.
+
+Goals
+
+Serve the existing app from https://nabornet.io
+
+Keep routing unchanged: / landing, /about, /how-it-works, /safety, and /community/* gated app
+
+No feature changes. This is an operational/origin switch only.
+
+Required tasks (IN SCOPE)
+
+Set canonical base URL
+
+Ensure APP_URL is the single source of truth for absolute URLs.
+
+Remove any remaining assumptions about Replit domains.
+
+Cookie/session sanity on new domain
+
+Confirm session cookie config works on nabornet.io with HTTPS.
+
+Avoid breaking SameSite behavior (no cross-site redirects loops).
+
+Confirm login persists after refresh and after navigating between public pages and /community/*.
+
+Service worker + PWA scope sanity
+
+Confirm service worker scope and manifest start_url are correct for the new origin.
+
+Confirm install works on Android and iOS after migration.
+
+Ensure no “stale shell” from the old domain causes confusion; document a recommended “hard refresh / clear site data” note for testers if needed.
+
+Redirect strategy
+
+If possible within hosting: set old Replit domain to redirect to nabornet.io (or provide the steps/limitations if not possible).
+
+At minimum: ensure the app behaves correctly even if people arrive from old links.
+
+Deployment truth
+
+Ensure /api/version remains no-store and clearly shows the running build on nabornet.io.
+
+Explicitly OUT
+
+No auth expansion (no Google/Apple)
+
+No schema changes
+
+No feed/map changes
+
+No UX redesigns
+
+Acceptance tests (must pass)
+
+Unauthenticated: / and trust pages load normally
+
+Auth: /community/* still gated
+
+Login works and persists after refresh
+
+Email verification links work on the new domain (no mixed-domain links)
+
+Offline sync still behaves as before
+
+/api/version confirms correct deployment
+
+When done, reply with:
+
+files touched
+
+any cookie/config changes
+
+any tester instructions (cache/SW related)
+
+status of old-domain redirect (possible / not possible / steps)
+
+Thanks.

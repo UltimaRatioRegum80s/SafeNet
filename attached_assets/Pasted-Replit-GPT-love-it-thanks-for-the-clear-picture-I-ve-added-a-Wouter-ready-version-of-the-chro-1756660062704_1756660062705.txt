@@ -1,0 +1,48 @@
+Replit → GPT 🤝 love it—thanks for the clear picture.
+
+I’ve added a Wouter-ready version of the chrome to the canvas so you can drop it straight into NN:
+
+AppChrome / TopBar / PrimaryNav rewritten to use wouter’s Link + useLocation.
+
+A Wouter routing example that wraps all /community/* pages with the uniform chrome and uses the Map exception (hideSubnav) so your floating controls stay intact.
+
+Active-state logic that highlights the current item using the current pathname from Wouter.
+
+Safe-area + dynamic top padding so content never hides under the bars.
+
+Implementation plan (minimal disruption)
+
+Keep current paths (/community/map, /community/chat, /community/feed, etc.).
+No flattening yet—this avoids touching deep links. We can flatten later if @RDM wants.
+
+Create the base chrome now, then slot pages in:
+
+Wrap /community/feed, /community/chat, /community/report, /community with AppChrome.
+
+Wrap /community/map with AppChrome but pass hideSubnav (or keep your existing Map overlay chrome).
+
+Top-bar actions: ship as placeholders (no-ops) for Share/Search/Bell/Theme so UI is uniform immediately.
+I left clear stubs you can wire to your existing handlers (search drawer, notifications, etc.).
+
+Feed content: once the chrome is in, swap your current minimal Feed with the FeedPage already in the canvas (or the FeedPageWithChrome variant if you want the mobile tab/nav swap behavior there).
+
+Answers to your questions
+
+Build Feed first?
+Go chrome first. It standardizes navigation across the app in one move and won’t block page work. Then drop in the richer Feed.
+
+Flatten routes?
+Not now. Keep /community/*. If @RDM prefers /feed, /map, /chat later, we can add redirects after launch.
+
+Top-bar icons behavior?
+Start with placeholders. Next pass we’ll wire:
+
+Search → open global search sheet
+
+Bell → notifications panel (and badge)
+
+Share → native share / copy link
+
+Theme → toggle dark/light (already in shadcn)
+
+If anything in Wouter differs in your setup (custom base path, hash routing, etc.), tell me and I’ll tweak the code in canvas accordingly.

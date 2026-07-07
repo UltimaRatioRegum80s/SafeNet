@@ -1,0 +1,186 @@
+## NaborNet - Complete Application Code Analysis
+
+### Project Structure Overview:
+
+- ./client/public/incidents.json
+- ./client/public/manifest.json
+- ./client/public/sw.js
+- ./client/src/App.tsx
+- ./client/src/components/DevicePreview.tsx
+- ./client/src/components/FallbackMap.tsx
+- ./client/src/components/Header.tsx
+- ./client/src/components/icons/CustomIcons.tsx
+- ./client/src/components/ImageUpload.tsx
+- ./client/src/components/Layout.tsx
+- ./client/src/components/MapComponent.tsx
+- ./client/src/components/MapView.tsx
+- ./client/src/components/NaborNetLogo.tsx
+- ./client/src/components/NotificationBell.tsx
+- ./client/src/components/ProtectedRoute.tsx
+- ./client/src/components/QRScanner.tsx
+- ./client/src/components/ReportDialog.tsx
+- ./client/src/components/ResponsiveExample.tsx
+- ./client/src/components/ResponsiveHelper.tsx
+- ./client/src/components/RoleSelector.tsx
+- ./client/src/components/ThemeProvider.tsx
+- ./client/src/components/ThemeToggle.tsx
+- ./client/src/components/ui/accordion.tsx
+- ./client/src/components/ui/alert-dialog.tsx
+- ./client/src/components/ui/alert.tsx
+- ./client/src/components/ui/aspect-ratio.tsx
+- ./client/src/components/ui/avatar.tsx
+- ./client/src/components/ui/badge.tsx
+- ./client/src/components/ui/breadcrumb.tsx
+- ./client/src/components/ui/button.tsx
+- ./client/src/components/ui/calendar.tsx
+- ./client/src/components/ui/card.tsx
+- ./client/src/components/ui/carousel.tsx
+- ./client/src/components/ui/chart.tsx
+- ./client/src/components/ui/checkbox.tsx
+- ./client/src/components/ui/collapsible.tsx
+- ./client/src/components/ui/command.tsx
+- ./client/src/components/ui/context-menu.tsx
+- ./client/src/components/ui/dialog.tsx
+- ./client/src/components/ui/drawer.tsx
+- ./client/src/components/ui/dropdown-menu.tsx
+- ./client/src/components/ui/form.tsx
+- ./client/src/components/ui/hover-card.tsx
+- ./client/src/components/ui/input-otp.tsx
+- ./client/src/components/ui/input.tsx
+- ./client/src/components/ui/label.tsx
+- ./client/src/components/ui/menubar.tsx
+- ./client/src/components/ui/navigation-menu.tsx
+- ./client/src/components/ui/pagination.tsx
+- ./client/src/components/ui/popover.tsx
+- ./client/src/components/ui/progress.tsx
+- ./client/src/components/ui/radio-group.tsx
+- ./client/src/components/ui/resizable.tsx
+- ./client/src/components/ui/scroll-area.tsx
+- ./client/src/components/ui/select.tsx
+- ./client/src/components/ui/separator.tsx
+- ./client/src/components/ui/sheet.tsx
+- ./client/src/components/ui/sidebar.tsx
+- ./client/src/components/ui/skeleton.tsx
+- ./client/src/components/ui/slider.tsx
+- ./client/src/components/ui/switch.tsx
+- ./client/src/components/ui/table.tsx
+- ./client/src/components/ui/tabs.tsx
+- ./client/src/components/ui/textarea.tsx
+- ./client/src/components/ui/toaster.tsx
+- ./client/src/components/ui/toast.tsx
+- ./client/src/components/ui/toggle-group.tsx
+- ./client/src/components/ui/toggle.tsx
+- ./client/src/components/ui/tooltip.tsx
+- ./client/src/components/VerifiedBadge.tsx
+- ./client/src/hooks/use-mobile.tsx
+- ./client/src/hooks/useResponsive.ts
+- ./client/src/hooks/use-toast.ts
+- ./client/src/lib/auth.ts
+- ./client/src/lib/firebase.ts
+- ./client/src/lib/firestore.ts
+- ./client/src/lib/geolocationService.ts
+- ./client/src/lib/incidentIcons.ts
+- ./client/src/lib/locationCoordinates.ts
+- ./client/src/lib/locationData.ts
+- ./client/src/lib/queryClient.ts
+- ./client/src/lib/socketService.ts
+- ./client/src/lib/storage.ts
+- ./client/src/lib/utils.ts
+- ./client/src/main.tsx
+- ./client/src/pages/admin/Panel.tsx
+- ./client/src/pages/admin/TenantManagement.tsx
+- ./client/src/pages/admin/UserInvitation.tsx
+- ./client/src/pages/client/Reports.tsx
+- ./client/src/pages/community/Dashboard.tsx
+- ./client/src/pages/community/Feed.tsx
+- ./client/src/pages/community/Map.tsx
+- ./client/src/pages/community/ReportFull.tsx
+- ./client/src/pages/community/ReportIncident.tsx
+- ./client/src/pages/guard/CheckIn.tsx
+- ./client/src/pages/guard/Home.tsx
+- ./client/src/pages/guard/IncidentReport.tsx
+- ./client/src/pages/Login.tsx
+- ./client/src/pages/not-found.tsx
+- ./client/src/pages/Signup.tsx
+- ./client/src/pages/supervisor/Dashboard.tsx
+- ./client/src/pages/supervisor/IncidentBoard.tsx
+- ./client/src/pages/supervisor/SiteManagement.tsx
+- ./client/src/pages/Welcome.tsx
+- ./client/src/store/auth.ts
+- ./client/src/store/dashboard.ts
+- ./client/src/store/user.ts
+- ./client/src/types/community.ts
+- ./client/src/types/index.ts
+- ./complete_code_analysis.md
+- ./components.json
+- ./.config/.semgrep/semgrep_rules.json
+- ./drizzle.config.ts
+- ./firebase.json
+- ./functions/package.json
+- ./functions/src/alerts.ts
+- ./functions/src/checkins.ts
+- ./functions/src/incidents.ts
+- ./functions/src/index.ts
+- ./functions/src/qr.ts
+- ./.local/state/replit/agent/filesystem/filesystem_state.json
+- ./.local/state/replit/agent/.latest.json
+- ./package.json
+- ./package-lock.json
+- ./postcss.config.js
+- ./README.md
+- ./replit.md
+- ./safely_app_export.md
+- ./seed-data.ts
+- ./server/auth.ts
+- ./server/db.ts
+- ./server/incidentDatabase.ts
+- ./server/index.ts
+- ./server/locationService.ts
+- ./server/routes.ts
+- ./server/storage.ts
+- ./server/vite.ts
+- ./shared/schema.ts
+- ./tailwind.config.ts
+- ./test-server.js
+- ./tsconfig.json
+- ./.upm/store.json
+- ./vite.config.ts
+
+
+### File Analysis Summary:
+
+#### Backend Files (server/):
+- **server/index.ts**: Main Express server with session management and security
+- **server/routes.ts**: API endpoints with RBAC middleware and input sanitization
+- **server/storage.ts**: Database operations using Drizzle ORM
+- **server/auth.ts**: Authentication logic for users
+- **server/db.ts**: PostgreSQL database connection
+- **server/incidentDatabase.ts**: Incident-specific database operations
+- **server/locationService.ts**: Geographic location services
+
+#### Frontend Files (client/src/):
+- **App.tsx**: Main React application with routing
+- **pages/**: React pages for different app sections
+- **components/**: Reusable UI components
+- **lib/**: Utility libraries and services
+- **store/**: Zustand state management
+- **types/**: TypeScript type definitions
+
+#### Shared Files:
+- **shared/schema.ts**: Database schema definitions using Drizzle
+
+#### Security Features Implemented:
+- RBAC middleware protecting admin/moderator routes
+- Input sanitization preventing XSS attacks
+- Rate limiting on incident creation
+- Session security with production checks
+- Authentication middleware on sensitive endpoints
+
+#### Key Technologies:
+- **Backend**: Express.js, PostgreSQL, Drizzle ORM
+- **Frontend**: React, TypeScript, Tailwind CSS, Radix UI
+- **Real-time**: Socket.IO for live updates
+- **Authentication**: Session-based with role management
+- **Maps**: Leaflet for interactive mapping
+- **Security**: RBAC, input sanitization, rate limiting
+

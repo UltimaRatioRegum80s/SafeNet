@@ -1,0 +1,76 @@
+boom—Milestone 4 feels tight. 🎯 The overlay + grid-snap UX is exactly the kind of “premium but simple” we wanted.
+
+Here are a few tiny nits + optional polish to consider, then we can roll to Milestone 5.
+
+Quick nits (low effort, high signal)
+
+Pause map interactions while picking (extra safety on mobile):
+
+// when picking starts
+mapRef.current?.dragging?.disable?.();
+mapRef.current?.scrollWheelZoom?.disable?.();
+mapRef.current?.doubleClickZoom?.disable?.();
+
+// when picking ends (cancel/confirm)
+mapRef.current?.dragging?.enable?.();
+mapRef.current?.scrollWheelZoom?.enable?.();
+mapRef.current?.doubleClickZoom?.enable?.();
+
+
+Out-of-bounds friendly toast (instead of console.warn):
+
+// e.g., in handleOverlayClick guard
+toast({ title: "That’s outside our coverage", description: "Please pick a spot in Southern Africa.", variant: "destructive" });
+
+
+Reduce layout shift when footer appears
+Add pb-[calc(env(safe-area-inset-bottom)+72px)] on the map container only while picking so bottom FABs don’t get covered.
+
+Respect reduced motion
+Skip the ghost pin fade/scale if prefers-reduced-motion: reduce. (A quick motion-safe: tailwind class or a boolean check.)
+
+Memory safety
+Double-check every addEventListener in the hook has a matching cleanup (you did, just keep it consistent if you add more).
+
+Analytics dimensions
+Include zoom and a coarse bucketed accuracy at confirm:
+
+track("pick_confirm", { lat: ghost.lat, lng: ghost.lng, zoom: mapRef.current?.getZoom?.() });
+
+Tiny UX touches (optional)
+
+Pointer hint: While no ghost yet, show a small banner text “tap to place” in the center (fades after first click).
+
+Grid size per zoom: gridPx = Math.max(6, 2 * (20 - zoom)) to keep the feel consistent across zooms.
+
+Sanity QA (30 sec)
+
+Start pick → map drag/zoom disabled; cancel/confirm restores.
+
+OOB click → toast appears, no ghost placed.
+
+Mobile Safari safe areas respected; FABs remain tappable.
+
+Multiple rapid “Drop a pin” clicks → single picking session (no duplicate listeners).
+
+Ready for Milestone 5?
+
+Two paths—your call:
+
+A) Media pipeline hardening
+
+Client: compress to ~1600px max edge, WebP where supported.
+
+Server: strip EXIF (privacy), validate MIME, size caps.
+
+Progressive uploads: presigned flow or background retry.
+
+B) Push & realtime polish
+
+Client opt-in UX for push; categorize notifications by severity.
+
+Socket: ephemeral “you submitted” suppressor (you already reconcile; add a subtle self-suppress toast).
+
+Offline queue for incident POST (Replay when back online).
+
+If you pick A, I’ll drop in a lightweight client-side compressor + server EXIF strip (sharp) with copy-paste code. If you pick B, I’ll wire the push prompt flow + guards and tidy the realtime toasts.

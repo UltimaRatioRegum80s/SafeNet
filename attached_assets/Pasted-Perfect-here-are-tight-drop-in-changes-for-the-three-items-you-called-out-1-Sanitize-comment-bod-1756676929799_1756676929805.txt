@@ -1,0 +1,172 @@
+Perfect—here are tight, drop-in changes for the three items you called out:
+
+1) Sanitize comment body (server)
+
+We’ll store plain text only (no HTML). No new deps needed.
+
+A) Add a tiny sanitizer helper
+// server/util/sanitize.ts
+export function sanitizePlainText(input: unknown, max = 1000) {
+  const s = String(input ?? "").trim().slice(0, max);
+  // Escape HTML entities so text is safe to render
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+B) Use it in the POST /comments route
+// server/routes.ts
+import { sanitizePlainText } from "./util/sanitize";
+
+// …
+router.post("/api/incidents/:id/comments", async (req: any, res) => {
+  if (!req.user) return res.status(401).end();
+  const { id } = req.params;
+  const body = sanitizePlainText(req.body?.body, 1000);
+  if (!body) return res.status(400).json({ error: "Empty comment" });
+
+  const [row] = await db.insert(incidentComments).values({
+    incidentId: id,
+    userId: req.user.id,
+    body, // <-- safe text
+  }).returning();
+
+  req.io?.to(`incident:${id}`).emit("incident:comment:new", { incidentId: id, comment: row });
+  res.status(201).json(row);
+});
+
+
+Frontend: keep rendering with {comment.body} (NOT dangerouslySetInnerHTML).
+
+2) Soft delete (deletedAt) for comments
+A) Extend schema (in shared/schema.ts)
+import { timestamp } from "drizzle-orm/pg-core";
+
+// existing…
+export const incidentComments = pgTable("incident_comments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  incidentId: uuid("incident_id").notNull().index(),
+  userId: uuid("user_id").notNull().index(),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),   // ✅ soft delete
+});
+
+
+Run your Drizzle migration to add the nullable column.
+
+B) Only return non-deleted comments
+// server/routes.ts
+import { isNull, and, eq } from "drizzle-orm";
+
+// GET comments
+router.get("/api/incidents/:id/comments", async (req, res) => {
+  const { id } = req.params;
+  const limit = Math.min(Number(req.query.limit ?? 20), 100);
+  const offset = Math.max(Number(req.query.offset ?? 0), 0);
+
+  const items = await db.query.incidentComments.findMany({
+    where: and(
+      eq(incidentComments.incidentId, id),
+      isNull(incidentComments.deletedAt)             // ✅ hide deleted
+    ),
+    orderBy: (t, { desc }) => [desc(t.createdAt)],
+    limit,
+    offset,
+  });
+
+  res.json({ items, nextOffset: items.length === limit ? offset + limit : null });
+});
+
+C) Add a soft-delete route (optional moderation)
+// server/routes.ts
+router.delete("/api/incidents/:incidentId/comments/:commentId", async (req: any, res) => {
+  if (!req.user) return res.status(401).end();
+  const { incidentId, commentId } = req.params;
+
+  // TODO: enforce RBAC (author or moderator)
+  await db.update(incidentComments)
+    .set({ deletedAt: new Date() })
+    .where(eq(incidentComments.id, commentId));
+
+  req.io?.to(`incident:${incidentId}`).emit("incident:comment:deleted", {
+    incidentId,
+    commentId,
+  });
+
+  res.status(204).end();
+});
+
+D) (Optional) Live update client on deletions
+
+In your comments hook add a listener (if you want instant removal):
+
+// client/src/features/incidents/api.ts
+React.useEffect(() => {
+  if (!enabled) return;
+  const room = `incident:${incidentId}`;
+  socket.emit("join", room);
+  const onNew = (p: any) => { if (p.incidentId === incidentId) q.refetch(); };
+  const onDel = (p: any) => { if (p.incidentId === incidentId) q.refetch(); }; // ✅
+  socket.on("incident:comment:new", onNew);
+  socket.on("incident:comment:deleted", onDel);
+  return () => {
+    socket.emit("leave", room);
+    socket.off("incident:comment:new", onNew);
+    socket.off("incident:comment:deleted", onDel);
+  };
+}, [incidentId, enabled]);
+
+3) Preload reviews count (visible before open) — without joining sockets for all cards
+
+We’ll split the hook into fetch and live phases:
+
+Fetch always (so the count shows).
+
+Join socket only when the card is open (to avoid many subscriptions).
+
+A) Update hook
+// client/src/features/incidents/api.ts
+export function useReviewSummary(
+  incidentId: string,
+  fetchEnabled: boolean,    // fetch count
+  liveEnabled: boolean      // join socket for live updates
+) {
+  const key = ["incidents", incidentId, "reviews"];
+  const q = useQuery({
+    queryKey: key,
+    enabled: fetchEnabled,
+    queryFn: async () => {
+      const r = await fetch(`/api/incidents/${incidentId}/reviews`);
+      return (await r.json()) as { count: number; reviewedByMe: boolean };
+    },
+    staleTime: 15_000,
+  });
+
+  // Live updates only when panel is open
+  React.useEffect(() => {
+    if (!liveEnabled) return;
+    const room = `incident:${incidentId}`;
+    socket.emit("join", room);
+    const handler = (p: any) => { if (p.incidentId === incidentId) q.refetch(); };
+    socket.on("incident:review:count", handler);
+    return () => {
+      socket.emit("leave", room);
+      socket.off("incident:review:count", handler);
+    };
+  }, [incidentId, liveEnabled]);
+
+  return q;
+}
+
+B) Use it in the card
+// client/src/components/IncidentCard.tsx
+const [open, setOpen] = React.useState(false);
+// Preload count (fetchEnabled=true), live updates only when open
+const { data: reviews } = useReviewSummary(incident.id, true, open);
+
+
+Everything else in your card stays the same. You’ll now see “0/1/… checked” even when the card is collapsed, and it will live-update while it’s open.

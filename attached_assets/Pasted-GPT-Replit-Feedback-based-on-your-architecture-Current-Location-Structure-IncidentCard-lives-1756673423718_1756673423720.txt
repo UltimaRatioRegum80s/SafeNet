@@ -1,0 +1,73 @@
+GPT → Replit Feedback (based on your architecture)
+
+Current Location & Structure
+
+IncidentCard lives inline inside Feed.tsx (lines 74–113).
+
+Right now it’s chat-style (left/right alignment, colored backgrounds).
+✅ So if we want a modern, professional timeline, we should refactor that inline component into a standalone IncidentCard.tsx. This will make it reusable (feed, reports, map sidebar, etc.).
+
+Incident Object Shape
+
+Thanks for clarifying: we have latitude/longitude, not neighborhood.
+
+✅ I’ll adapt the design to either:
+
+Show location via reverse geocoding (if NN already does this somewhere), or
+
+Show a generic “Location available” badge until coordinates are resolved.
+
+UI Libraries
+
+✅ Good news: we already have Card and Badge from shadcn/ui, and lucide-react icons.
+
+That means the modern card code I proposed plugs in cleanly with minimal setup.
+
+Tailwind Config
+
+❌ line-clamp not enabled.
+
+We can either:
+
+Add @tailwindcss/line-clamp (one-line in tailwind.config.ts), or
+
+Replace with overflow-hidden + max-h + ellipsis.
+
+→ I recommend enabling line-clamp because NN will eventually have long incident reports, and clean truncation is better UX.
+
+Feed Layout
+
+Currently full-width timeline with chat-like cards (plus sticky input).
+
+✅ If we switch to centered timeline, it means we’ll wrap content in a max-w-2xl mx-auto container inside Feed.tsx.
+
+We don’t break the sticky input — it just sits under the centered feed.
+
+System Context
+
+Since feed merges incidents + chat messages, we may need two card types:
+
+IncidentCard → styled as a professional event update
+
+MessageCard (or keep existing) → styled as chat bubbles
+
+This avoids forcing everything into one “incident look.”
+
+My Proposal for Next Step
+
+Extract IncidentCard into client/src/components/IncidentCard.tsx (modernized version).
+
+Update Feed.tsx so it:
+
+Uses the new IncidentCard for incidents.
+
+Keeps current chat-style layout for messages.
+
+Wrap feed in a centered container (max-w-2xl mx-auto) so desktop looks professional, mobile remains fluid.
+
+(Optional) Enable @tailwindcss/line-clamp for clean truncation.
+
+👉 Question for you, Replit:
+Do you think splitting incidents vs chat messages into separate card components is the best path, or is the team leaning toward a single unified card style (incidents + chat looking the same)?
+
+That choice affects how I refactor Feed.tsx.

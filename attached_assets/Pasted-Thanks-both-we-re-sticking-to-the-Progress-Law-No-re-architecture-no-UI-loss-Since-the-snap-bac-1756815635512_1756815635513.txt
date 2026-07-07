@@ -1,0 +1,111 @@
+Thanks both — we’re sticking to the Progress Law. No re-architecture, no UI loss. Since the snap-back persists, we’ll pin down the exact caller that’s still recentering and why mobile differs. Here’s a super-focused, NRP-safe plan.
+
+What likely still causes the snap
+
+Even after the “run-once” guard and memoized center, one of these is still firing:
+
+A setView/fitBounds path that’s not behind the guard
+
+A prop-controlled center sneaking back in via spread props / remount
+
+Key changes on <MapView> causing remount → initial setView
+
+Incidents array temporarily going empty (watchdog/refetch), triggering the fallback setView(..., 12)
+
+URL sync changing center/zoom (and not gated)
+
+The mobile mismatch (stuck at Windhoek, no severity colors) suggests mobile incidents = 0 at times → it hits the fallback center and never builds the colored cluster group.
+
+Replit 🔧 — quick, surgical diagnostics (no behavior changes)
+
+Please run these and paste the short logs. They won’t alter anything.
+
+1) Log every time a view method is called (already added)
+
+When it snaps, copy the exact lines:
+
+[Map] CALL: setView … / fitBounds …
+
+The trace top 3 frames (file:line)
+
+We need one pan and one zoom snap. This tells us which effect still needs a guard.
+
+2) Confirm we’re not passing a controlled center back in
+
+Right where you render <MapView …> add this temporary log:
+
+console.log("[Render MapView props]", {
+  hasCenter: "center" in propsPassedToMapView, 
+  center: propsPassedToMapView.center, 
+  defaultCenter: propsPassedToMapView.defaultCenter,
+  hasZoom: "zoom" in propsPassedToMapView,
+  defaultZoom: propsPassedToMapView.defaultZoom,
+  key: propsPassedToMapView.key
+});
+
+
+Paste the output. If hasCenter: true or the key changes while you pan/zoom/theme, that’s our culprit.
+
+3) Watch incidents length transitions
+
+Add in MapView (desktop + mobile):
+
+useEffect(() => {
+  console.log("[Map] incidents length ->", incidents.length);
+}, [incidents.length]);
+
+
+If you see 50 → 0 → 50 spikes, the “no incidents” fallback setView(center, 12) will keep firing. We’ll gate it to “first load only”.
+
+4) Mobile parity checks
+
+Log on mobile:
+
+console.log("[Mobile] incidents count:", incidents.length);
+console.log("[Mobile] cluster factory:", typeof createClusterGroup);
+
+
+Ensure mobile imports @/features/map/cluster (severity-aware), not the fallback.
+
+Confirm you see [Cluster] mobile group created once. If not, cluster group isn’t mounted.
+
+Tiny, NRP-compliant fixes to apply after logs (2–3 lines each)
+
+We won’t change anything else; we’ll just guard the one remaining path the logs expose.
+
+Fallback center guard
+
+In the “no incidents → setView(center, 12)” effect, add:
+
+if (hasAutoCentered.current) return;
+
+
+And set the ref after running it once.
+
+Center-prop effect guard
+
+Inside the effect that reacts to center prop, early-return unless:
+
+if (props.center == null) return;
+if (hasAutoCenteredFromProp.current) return;
+
+
+Then set hasAutoCenteredFromProp.current = true.
+
+Stabilize <MapView key>
+
+If your key includes dynamic pieces that change on filter/theme/URL, make it static (or remove it). A remount resets zoom.
+
+Mobile incidents source
+
+If [Mobile] incidents count: 0, wire mobile to the same hook as desktop (you likely already did, but the log will confirm).
+
+Ensure the severity cluster factory is used on mobile (you said we switched it — the log will confirm).
+
+For @RDM
+
+We’re not removing clustering — it’s valuable and not the root cause. We’ll keep it behind an NRP flag so it can be toggled if needed, but our goal is to stop the auto-recenter and make mobile match desktop.
+
+After Replit shares the 3–4 short logs above, we’ll point to the exact 2–3 lines to guard. Everything else stays as-is.
+
+Replit, drop the logs and we’ll give you the precise single-spot guard to end the snap and fix mobile parity without touching any working parts.

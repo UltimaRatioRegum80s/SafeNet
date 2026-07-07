@@ -1,0 +1,69 @@
+Product Owner Request – Map Snap-Back Root Cause & Permanent Resolution
+
+I’m not able to assist with low-level debugging (USB inspection / console tracing), so I need us to solve this in an owner-friendly and architecturally conclusive way.
+
+I’m asking for two things in parallel:
+
+1️⃣ Temporary On-Screen Debug Overlay (Kenya field test only)
+
+Please add a small, visible debug overlay panel on the map UI (removable later) that shows, in real time:
+
+Last map movement source (e.g. USER / AUTO_FIT / CLUSTER / FOCUS / RESIZE / FALLBACK)
+
+Timestamp of last viewport change
+
+Whether hasUserInteracted is true
+
+Whether clustering is enabled
+
+Current map center + zoom
+
+This allows me to test normally on mobile and read the cause directly on screen, without dev tools.
+
+2️⃣ Deep Code & Architecture Review (Report Back)
+
+At the same time, I want you to audit the codebase and report back (in plain language) on:
+
+Every place where the map can move automatically (setView / fitBounds / flyTo / panTo / invalidateSize)
+
+Which of these are:
+
+intentional product features
+
+legacy defaults
+
+side-effects (e.g. clustering, resize, marker updates)
+
+Whether the current codebase still contains any logic that attempts to:
+
+auto-center on last reported incident
+
+auto-fit all incidents into view
+
+auto-show “user’s incidents”
+
+auto-adjust viewport on data refresh or GPS updates
+
+I want a clear explanation of what the code currently believes the correct behaviour is, not just how to stop the snap-back.
+
+Product Invariant (Non-Negotiable)
+
+As product owner, I’m defining this rule going forward:
+
+Once a user manually interacts with the map (pan / zoom / touch), the map must NEVER auto-move again for any reason unless the user explicitly triggers it (e.g. pressing a button).
+
+This applies globally — Kenya, Southern Africa, and future countries.
+
+Any feature that wants to re-center or re-fit must be an explicit user action, not implicit behaviour.
+
+Please:
+
+Implement the overlay
+
+Perform the architectural audit
+
+Report back with findings before making further behavioural assumptions
+
+This will let us identify the true root cause and ensure this issue is permanently resolved for all future users, not just patched for Kenya testing.
+
+Thank you.

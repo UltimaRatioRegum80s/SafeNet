@@ -1,0 +1,79 @@
+I’m auditing the Reporting Rate/Location Limits in this project. Please find and return all code and config related to:
+
+Spam/Duplicate prevention
+
+Server-enforced cooldowns (per user & per IP), deduping of recent reports, and any “same user + same payload” or “same location + same category + time window” checks.
+
+Any Redis/DB keys used for cooldowns or idempotency (e.g., SETNX / EXPIRE, hashes, queues).
+
+Rate limits
+
+Per-IP and per-user request limits (Express middleware like express-rate-limit or custom), as well as Socket.IO event throttling/debouncing.
+
+Show where limits are configured (window size, max, messages), ban lists/allow lists, and bypass logic for admins/moderators.
+
+Geofence / proximity dedupe
+
+Any PostGIS proximity checks used to dedupe reports within a radius (e.g., ST_DWithin, ST_Distance, ST_Buffer).
+
+Spatial indices and migrations (GIST/GIN) on geometry/geography columns.
+
+The exact query(ies) used when submitting a new report to decide if it’s a duplicate within N meters & T minutes.
+
+Data model & migrations (Drizzle + PostgreSQL)
+
+Drizzle schema for reports/incidents/locations (table names, columns, types, constraints).
+
+All migrations that enable PostGIS (CREATE EXTENSION postgis), create spatial columns, or add spatial indexes.
+
+Endpoints / handlers / services
+
+The HTTP/Socket endpoints that create reports or locations (e.g., POST /api/reports, socket.emit("report:create")).
+
+Any middleware used there (auth, RBAC, body validators, anti-spam).
+
+Any background workers/queues (BullMQ, etc.) that touch rate/dup logic.
+
+Config & env
+
+.env variables or config constants that control cooldowns, rate limits, radii, and time windows. Include defaults and where they’re read.
+
+package.json deps related to this (e.g., express-rate-limit, rate-limiter-flexible, ioredis, pg, drizzle-orm, @types/*).
+
+Client safeguards (if any)
+
+UI-level throttling/debounce (e.g., preventing rapid submits), duplicate warning modals, or local dedupe heuristics.
+
+Output format (very important):
+
+For each item found, respond with:
+
+File path (absolute from repo root)
+
+Relevant function/class names
+
+Exact code snippet (full function or block) in a fenced code block
+
+One-line summary of what it does
+
+Group results by the 7 headings above.
+
+If something is not present, state “Not found” under that heading.
+
+Limit each snippet to just the necessary block, but do not omit critical context (imports, types, SQL).
+
+Search hints (use these terms):
+
+rate, ratelimit, cooldown, throttle, debounce, duplicate, dedupe, hash, idempot*, recent, window, banlist
+
+postgis, ST_DWithin, ST_Distance, ST_Buffer, geog, geom, GIST, USING GIST
+
+incident, report, location, radius, meters, distance, proximity, nearby
+
+redis, bull, queue, limiter, express-rate-limit, rate-limiter-flexible
+
+socket, socket.on("report"), emit("report")
+
+schema, drizzle, migrate, sql\``, createTable`
+
+After listing everything, include a short dependency map: show which endpoints call which services/utilities, and which of those touch Redis/PostGIS.

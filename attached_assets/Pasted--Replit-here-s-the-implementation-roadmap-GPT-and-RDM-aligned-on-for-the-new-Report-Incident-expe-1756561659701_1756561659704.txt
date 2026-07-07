@@ -1,0 +1,86 @@
+@Replit — here’s the implementation roadmap GPT and @RDM aligned on for the new Report Incident experience. This gives you a step-by-step sequence so dev work stays clean and scoped:
+
+🚀 Report Incident Implementation Roadmap
+Milestone 1 – Backend foundation
+
+Confirm schema fits spec:
+
+incidents table: id, type, severity, description, photos, reporterId (nullable), isAnonymous, status, lat/lng, createdAt.
+
+Default status = pending.
+
+Update API:
+
+POST /api/incidents → accepts {type, description, photos[], isAnonymous, lat, lng}.
+
+Enforce cooldown (rate limit).
+
+Store reporterId but hide it from client if anonymous (admins still see).
+
+Socket.IO: broadcast incident:created immediately to neighborhood room with status=pending.
+
+Milestone 2 – Shared panel component
+
+Build ReportPanel (bottom sheet mobile, side drawer desktop).
+
+Use Zustand (useReportPanel) for global open/close state.
+
+Minimal form: anon toggle, note, photo upload (max 2), GPS auto-capture, manual pin refine stub.
+
+On submit success → close panel + toast.
+
+Milestone 3 – Entry points
+
+Refactor /community/report Quick Grid → open shared ReportPanel.
+
+Add floating “Report” button on Map page → same panel.
+
+Ensure consistent UX across both.
+
+Milestone 4 – Location UX
+
+GPS auto-capture with useEnhancedLocation.
+
+“Refine on Map” button → fires nn:begin-location-pick event.
+
+Map listens, lets user drop a pin, writes coords back.
+
+Accuracy badge hidden from end-users (kept in logs/admin).
+
+Milestone 5 – Media handling
+
+Use existing ImageUpload (camera-first capture, capture="environment").
+
+Restrict max 2 photos.
+
+Validate client + server side.
+
+Milestone 6 – Styling polish
+
+Apply glass + blur aesthetic (match new floating UI on map).
+
+Swap current PNG icons with new set (design decision pending).
+
+Mobile-first layout, large tap targets.
+
+Milestone 7 – Notifications & moderation
+
+Broadcast all incidents to neighborhood channel.
+
+Push notifications: for all incidents (when infra is ready).
+
+Show incidents immediately with “pending” badge.
+
+Client: soft cooldown (30s lockout between reports).
+
+Milestone 8 – QA & Metrics
+
+Track submission funnel: start → submit → success.
+
+Monitor abandoned reports.
+
+Track GPS accuracy vs. defaults.
+
+Cross-device QA: mobile Safari, Chrome, desktop.
+
+👉 Replit, this is the roadmap we’ll be working from. First up: Milestone 1 (Backend foundation) — does your current Express + SQLite + Socket.IO setup already cover most of this, or should GPT prep the schema + API update code so you can drop it in?

@@ -1,0 +1,122 @@
+@Replit — run this Console Probe Pack v2 (copy-paste once)
+
+Use it with ?NN_FIX_MOBILE_MARKERS=1 after the map loads.
+
+// NN Mobile Markers – Probe Pack v2 (read-only)
+(() => {
+  const out:any = {};
+  const map = (window as any)._map || (window as any).map;
+  const cluster = (window as any).clusterRef?.current || (window as any)._cluster;
+
+  out.ua = navigator.userAgent;
+  out.flagParam = new URL(location.href).searchParams.get('NN_FIX_MOBILE_MARKERS');
+  out.flagLS = localStorage.getItem('NN_FIX_MOBILE_MARKERS');
+
+  // Pane + DOM
+  const pane = document.querySelector('.leaflet-marker-pane') as HTMLElement | null;
+  out.markerPaneExists = !!pane;
+  out.markerPaneDisplay = pane ? getComputedStyle(pane).display : 'none';
+  out.markerPaneZ = pane ? getComputedStyle(pane).zIndex : '(none)';
+  out.divIconWrappers = document.querySelectorAll('.nn-divicon-wrapper').length;
+  out.clusterEls = document.querySelectorAll('.marker-cluster').length;
+
+  // Cluster presence + contents
+  out.hasMap = !!map;
+  out.hasCluster = !!cluster;
+  out.clusterOnMap = (map && cluster) ? map.hasLayer(cluster) : false;
+  out.clusterLayerCount = cluster ? cluster.getLayers().length : 0;
+  out.first5 = cluster ? cluster.getLayers().slice(0,5).map((l:any) => ({
+    ctor: l?.constructor?.name,
+    isMarker: l instanceof L.Marker,
+    isCircle: l instanceof L.CircleMarker,
+  })) : [];
+
+  // MarkerCluster CSS?
+  out.hasMCStyles = (() => {
+    try {
+      for (const s of Array.from(document.styleSheets)) {
+        const rules = (s as CSSStyleSheet).cssRules || [];
+        for (const r of Array.from(rules)) {
+          if ((r as CSSStyleRule).selectorText?.includes('.marker-cluster')) return true;
+        }
+      }
+    } catch (_) {} // cross-origin
+    return false;
+  })();
+
+  console.table(out);
+
+  // === Optional live probes (no code edits) ===
+  // A) Add a single divIcon marker to the CLUSTER
+  (out.doAddProbeToCluster = () => {
+    if (!map || !cluster) return console.warn('no map/cluster');
+    const c = map.getCenter();
+    const icon = L.divIcon({ className:'nn-divicon-wrapper', html:'<div style="width:16px;height:16px;border-radius:9999px;background:rgba(37,99,235,.2);border:2px solid #2563eb"></div>', iconSize:[16,16], iconAnchor:[8,8] });
+    const m = L.marker(c, { icon, title:'probe' });
+    cluster.addLayer(m);
+    console.log('added PROBE marker to cluster @', c, 'cluster layer count:', cluster.getLayers().length);
+    return m;
+  });
+
+  // B) Add a single marker directly to the MAP (bypassing cluster)
+  (out.doAddProbeDirectToMap = () => {
+    if (!map) return console.warn('no map');
+    const c = map.getCenter();
+    const icon = L.divIcon({ className:'nn-divicon-wrapper', html:'<div style="width:16px;height:16px;border-radius:9999px;background:rgba(16,185,129,.2);border:2px solid #10b981"></div>', iconSize:[16,16], iconAnchor:[8,8] });
+    const m = L.marker(c, { icon, title:'direct-probe' }).addTo(map);
+    console.log('added DIRECT probe marker @', c);
+    return m;
+  });
+
+  (window as any).__nnDiagOut = out;
+  return out;
+})();
+
+
+Post back the console table (or just the key lines):
+
+clusterOnMap, clusterLayerCount, first5
+
+divIconWrappers, clusterEls, hasMCStyles
+
+Then try: __nnDiagOut.doAddProbeToCluster() and __nnDiagOut.doAddProbeDirectToMap() and say which one appears.
+
+How we’ll interpret your results
+
+Case 1 – Cluster not on map
+
+clusterOnMap=false, clusterLayerCount≥0.
+➜ Fix: ensure we call map.addLayer(clusterRef.current) exactly once after map init on mobile path. (Tiny gated patch.)
+
+Case 2 – Cluster on map, but layers are CircleMarkers
+
+clusterOnMap=true, clusterLayerCount>0, first5[*].isCircle=true.
+➜ Our fallback still isn’t used; we’ll add a one-line log to prove getIncidentIcon(...) is null and force the divIcon Marker when flag=ON. (Already coded; we’ll double-check the site is indeed built with that change.)
+
+Case 3 – Cluster on map, layers are Markers, but invisible
+
+clusterOnMap=true, first5[*].isMarker=true, clusterEls=0, hasMCStyles=false.
+➜ CSS not bundled in PWA chunk. We add:
+
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
+
+
+in the actual PWA entry (where mobile route bundles). Progress-safe.
+
+Case 4 – Direct marker shows, but cluster marker doesn’t
+
+Direct probe visible, cluster probe not.
+➜ Cluster instance mismatch (markers added to a different group than the one on map). We’ll bind both to the same clusterRef.current and ensure references don’t get re-created on re-renders.
+
+Case 5 – Neither direct nor cluster probe shows
+
+Pane is hidden or z-index wrong:
+
+markerPaneExists=true but markerPaneDisplay='none' or zIndex < 400.
+➜ We’ll add a one-line CSS override:
+
+.leaflet-marker-pane { display:block !important; z-index:600 !important; }
+
+
+gated behind the flag.

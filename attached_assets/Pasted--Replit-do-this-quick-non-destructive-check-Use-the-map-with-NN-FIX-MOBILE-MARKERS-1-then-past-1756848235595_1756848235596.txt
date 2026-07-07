@@ -1,0 +1,139 @@
+@Replit — do this quick, non-destructive check
+
+Use the map with ?NN_FIX_MOBILE_MARKERS=1, then paste each block into the Console after the map loads.
+
+A) Pane stacking + visibility (rules out “behind tiles”)
+(() => {
+  const panes = ['tile','overlay','shadow','marker','tooltip','popup'];
+  const res = {};
+  panes.forEach(k => {
+    const el = document.querySelector(`.leaflet-${k}-pane`);
+    res[k] = el ? {
+      z: getComputedStyle(el).zIndex,
+      display: getComputedStyle(el).display,
+      opacity: getComputedStyle(el).opacity
+    } : 'MISSING';
+  });
+  console.table(res); return res;
+})();
+
+
+Expected (Leaflet defaults): tile≈200, overlay≈400, marker≈600, tooltip≈650, popup≈700, all display: block, opacity: 1.
+
+B) Cluster presence + contents
+(() => {
+  const map = window._map || window.map;
+  const cluster = window.clusterRef?.current || window._cluster;
+  const out = {
+    hasMap: !!map,
+    hasCluster: !!cluster,
+    clusterOnMap: map && cluster ? map.hasLayer(cluster) : false,
+    clusterLayerCount: cluster ? cluster.getLayers().length : 0,
+    first5: cluster ? cluster.getLayers().slice(0,5).map(l => ({
+      ctor: l?.constructor?.name,
+      isMarker: l instanceof L.Marker,
+      isCircle: l instanceof L.CircleMarker,
+    })) : []
+  };
+  console.table(out); return out;
+})();
+
+C) Control probes (prove visibility path)
+// 1) Direct marker (bypasses cluster). You should SEE this.
+(() => {
+  const map = window._map || window.map; if(!map) return console.warn('no map');
+  const icon = L.divIcon({ className:'nn-divicon-wrapper',
+    html:'<div style="width:18px;height:18px;border-radius:9999px;background:#ff00ff;border:2px solid #fff"></div>',
+    iconSize:[18,18], iconAnchor:[9,9] });
+  L.marker(map.getCenter(), { icon, title:'direct-probe' }).addTo(map);
+  console.log('Added DIRECT probe marker'); 
+})();
+
+// 2) Clustered marker (goes into the cluster group). You should SEE a cluster bump or marker.
+(() => {
+  const map = window._map || window.map; const cl = window.clusterRef?.current;
+  if(!map || !cl) return console.warn('no map/cluster');
+  const icon = L.divIcon({ className:'nn-divicon-wrapper',
+    html:'<div style="width:18px;height:18px;border-radius:9999px;background:#10b981;border:2px solid #065f46"></div>',
+    iconSize:[18,18], iconAnchor:[9,9] });
+  const m = L.marker(map.getCenter(), { icon, title:'cluster-probe' });
+  cl.addLayer(m);
+  console.log('Added CLUSTER probe marker; count:', cl.getLayers().length);
+})();
+
+D) High-z test (quickly proves if markers are hidden under tiles/overlays)
+(() => {
+  const style=document.createElement('style'); style.id='nn-highz-test';
+  style.textContent = `
+    .leaflet-marker-pane{ z-index:999999 !important; display:block !important; opacity:1 !important; }
+    .marker-cluster, .nn-divicon-wrapper > div{ outline:2px solid #fff !important; }
+  `;
+  document.head.appendChild(style);
+  console.log('Injected #nn-highz-test');
+})();
+
+
+Please paste back:
+
+The tables from A and B,
+
+Whether the direct probe is visible,
+
+Whether the cluster probe is visible,
+
+Whether high-z injection makes anything appear.
+
+If X happens, here’s the tiny, safe fix we’ll apply (flag-gated)
+
+We will not apply these until you confirm the case.
+
+Case: cluster not on the map
+(B shows clusterOnMap = false)
+
+// MapView init (where clusterRef is created)
+if (Flags.fixMobileMarkers && map && clusterRef.current && !map.hasLayer(clusterRef.current)) {
+  map.addLayer(clusterRef.current); // one-liner, behind the flag
+}
+
+
+Case: markers are Markers, but invisible due to CSS
+(A shows marker pane low z-index / hidden OR D makes them appear)
+Add a flag-gated CSS override (scoped, won’t touch desktop):
+
+// when NN_FIX_MOBILE_MARKERS=1
+import './marker-pane-fix.css'; // contains:
+/* marker-pane-fix.css */
+.leaflet-marker-pane{ z-index: 650 !important; display:block !important; opacity:1 !important; }
+.leaflet-popup-pane{  z-index: 700 !important; }
+
+
+Case: direct probe shows, cluster probe doesn’t
+(B shows cluster exists, on map, but count doesn’t rise)
+We’re adding to a different instance than the one on the map.
+Fix: ensure a single clusterRef.current is created and reused; don’t recreate on re-render. Minimal patch:
+
+// inside useEffect that depends on `map`
+if (Flags.fixMobileMarkers && map && !clusterRef.current) {
+  clusterRef.current = L.markerClusterGroup(/* existing opts */);
+  map.addLayer(clusterRef.current);
+}
+// when data changes:
+clusterRef.current?.clearLayers();
+incidents.forEach(m => clusterRef.current!.addLayer(m)); // existing logic
+
+
+Case: first5 are CircleMarkers
+(B shows isCircle: true)
+Our fallback still isn’t being used in the data path; we’ll log once and force Marker creation when flag=ON (you already reordered—let’s confirm build picked it up).
+
+Why this stays Progress-Law safe
+
+The checks above don’t modify code.
+
+Any patch we apply is behind NN_FIX_MOBILE_MARKERS and touches only mobile test sessions.
+
+Desktop path (icons and clustering) remains identical.
+
+Kill-switch: ?NN_FIX_MOBILE_MARKERS=0 or localStorage.NN_FIX_MOBILE_MARKERS='0'.
+
+Once you paste the console results, I’ll map them to the one-liner patch (if needed).

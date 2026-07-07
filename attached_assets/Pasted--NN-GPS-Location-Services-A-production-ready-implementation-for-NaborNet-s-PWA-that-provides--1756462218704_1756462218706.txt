@@ -1,0 +1,1061 @@
+# NN GPS & Location Services
+
+A production-ready implementation for NaborNet’s PWA that provides:
+
+* **Accurate GPS with network/cell fallback** (via Geolocation API first; graceful fallback to IP-based geolocation through a backend endpoint).
+* **User opt-in + clear permission rationale UI** (shadcn/ui component).
+* **Throttled foreground updates** (watchPosition) and **best-effort background polling** (when tab/app is backgrounded, within browser/OS limits).
+* **State management with Zustand** and persistence of last known location.
+
+> ⚠️ Note on the Web Platform: Service Workers **cannot** access geolocation and true continuous background GPS is not available in browsers. We implement: (1) real-time `watchPosition` while the app is foregrounded/active; (2) reduced-frequency polling while hidden/installed PWA is backgrounded, which the OS may throttle. We surface clear UX around this.
+
+---
+
+## 1) Types & Utilities
+
+**`src/lib/location/types.ts`**
+
+```ts
+export type LocationSource = 'gps-high' | 'gps-network' | 'ip-fallback';
+
+export type PermissionStateLike = 'granted' | 'denied' | 'prompt' | 'unsupported';
+
+export interface NNPosition {
+  lat: number;
+  lon: number;
+  accuracy: number; // meters (lower is better)
+  altitude?: number | null;
+  altitudeAccuracy?: number | null;
+  heading?: number | null;
+  speed?: number | null; // m/s
+  timestamp: number; // epoch ms
+  source: LocationSource;
+}
+
+export interface WatchOptions {
+  /** High-accuracy GPS first (true), else network-based first (false). */
+  highAccuracy?: boolean;
+  /** Emit only if moved this much since last emit (meters). */
+  minDistanceM?: number; // e.g. 25m
+  /** Emit at most once per this interval (ms). */
+  minIntervalMs?: number; // e.g. 15_000
+  /** When app hidden, poll no more than once per this interval (ms). */
+  backgroundIntervalMs?: number; // e.g. 180_000 (3m)
+  /** Timeout for high-accuracy attempt (ms). */
+  highAccTimeoutMs?: number; // e.g. 8_000
+  /** Timeout for low-accuracy attempt (ms). */
+  lowAccTimeoutMs?: number; // e.g. 8_000
+}
+```
+
+**`src/lib/location/utils.ts`**
+
+```ts
+export function haversineMeters(
+  a: { lat: number; lon: number },
+  b: { lat: number; lon: number }
+): number {
+  const R = 6371_000; // meters
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+
+  const sinDLat = Math.sin(dLat / 2);
+  const sinDLon = Math.sin(dLon / 2);
+
+  const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLon * sinDLon;
+  const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  return R * c;
+}
+
+export function withTimeout<T>(promise: Promise<T>, ms: number, label = 'timeout'): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(label)), ms);
+    promise
+      .then((v) => {
+        clearTimeout(t);
+        resolve(v);
+      })
+      .catch((e) => {
+        clearTimeout(t);
+        reject(e);
+      });
+  });
+}
+
+export function isSecureContextOrLocalhost(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (window.isSecureContext) return true;
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1';
+}
+```
+
+---
+
+## 2) Zustand Store
+
+**`src/store/locationStore.ts`**
+
+```ts
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
+import type { NNPosition, PermissionStateLike } from '@/lib/location/types';
+
+interface LocationState {
+  permission: PermissionStateLike;
+  last?: NNPosition;
+  watching: boolean;
+  error?: string | null;
+  setPermission: (p: PermissionStateLike) => void;
+  setLast: (pos: NNPosition) => void;
+  setWatching: (w: boolean) => void;
+  setError: (e: string | null) => void;
+}
+
+export const useLocationStore = create<LocationState>()(
+  persist(
+    (set) => ({
+      permission: 'prompt',
+      last: undefined,
+      watching: false,
+      error: null,
+      setPermission: (p) => set({ permission: p }),
+      setLast: (pos) => set({ last: pos }),
+      setWatching: (w) => set({ watching: w }),
+      setError: (e) => set({ error: e }),
+    }),
+    { name: 'nn-location' }
+  )
+);
+```
+
+---
+
+## 3) Geolocation Service (with network/IP fallback)
+
+**`src/lib/location/service.ts`**
+
+```ts
+import type { NNPosition, WatchOptions, PermissionStateLike, LocationSource } from './types';
+import { haversineMeters, withTimeout, isSecureContextOrLocalhost } from './utils';
+
+const DEFAULTS: Required<WatchOptions> = {
+  highAccuracy: true,
+  minDistanceM: 25,
+  minIntervalMs: 15_000,
+  backgroundIntervalMs: 180_000, // 3 minutes
+  highAccTimeoutMs: 8_000,
+  lowAccTimeoutMs: 8_000,
+};
+
+export async function queryPermission(): Promise<PermissionStateLike> {
+  if (typeof navigator === 'undefined' || !('geolocation' in navigator)) return 'unsupported';
+  try {
+    // @ts-ignore - TS doesn't know the union here
+    const status = await navigator.permissions?.query({ name: 'geolocation' as PermissionName });
+    return (status?.state as PermissionStateLike) ?? 'prompt';
+  } catch {
+    // Some browsers throw; treat as prompt
+    return 'prompt';
+  }
+}
+
+function toNNPosition(pos: GeolocationPosition, fromHighAcc: boolean): NNPosition {
+  const c = pos.coords;
+  const src: LocationSource = fromHighAcc ? 'gps-high' : 'gps-network';
+  return {
+    lat: c.latitude,
+    lon: c.longitude,
+    accuracy: c.accuracy,
+    altitude: c.altitude ?? null,
+    altitudeAccuracy: c.altitudeAccuracy ?? null,
+    heading: c.heading ?? null,
+    speed: c.speed ?? null,
+    timestamp: pos.timestamp,
+    source: src,
+  };
+}
+
+async function getViaGeolocation(enableHighAccuracy: boolean, timeoutMs: number): Promise<NNPosition> {
+  if (typeof navigator === 'undefined' || !navigator.geolocation) throw new Error('Geolocation unsupported');
+  return withTimeout(
+    new Promise<GeolocationPosition>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy,
+        maximumAge: 0,
+        timeout: timeoutMs,
+      });
+    }),
+    timeoutMs + 2000,
+    'geolocation-timeout'
+  ).then((p) => toNNPosition(p, enableHighAccuracy));
+}
+
+export async function getIpFallback(): Promise<NNPosition> {
+  const res = await fetch('/api/geo/ip', { headers: { 'x-nn-client': 'web' } });
+  if (!res.ok) throw new Error('ip-fallback-failed');
+  const j = await res.json();
+  const now = Date.now();
+  return {
+    lat: j.lat,
+    lon: j.lon,
+    accuracy: j.accuracy ?? 25_000, // IP geo is coarse (~10-25km)
+    altitude: null,
+    altitudeAccuracy: null,
+    heading: null,
+    speed: null,
+    timestamp: now,
+    source: 'ip-fallback',
+  } satisfies NNPosition;
+}
+
+/**
+ * Try high-accuracy first, then low-accuracy, then IP as last resort.
+ */
+export async function getCurrentPositionSmart(opts?: Partial<WatchOptions>): Promise<NNPosition> {
+  const o = { ...DEFAULTS, ...opts };
+  if (!isSecureContextOrLocalhost()) throw new Error('Geolocation requires HTTPS or localhost');
+  try {
+    return await getViaGeolocation(true, o.highAccTimeoutMs);
+  } catch (e1) {
+    try {
+      return await getViaGeolocation(false, o.lowAccTimeoutMs);
+    } catch (e2) {
+      return await getIpFallback();
+    }
+  }
+}
+
+export interface WatchHandle { stop: () => void; }
+
+export function startLocationWatch(
+  onUpdate: (pos: NNPosition) => void,
+  onError: (err: GeolocationPositionError | Error) => void,
+  options?: Partial<WatchOptions>
+): WatchHandle {
+  const o = { ...DEFAULTS, ...options };
+  if (!isSecureContextOrLocalhost()) {
+    // Immediately fall back to IP if not secure context
+    getIpFallback().then(onUpdate).catch(onError);
+    return { stop: () => void 0 };
+  }
+
+  let lastEmitted: NNPosition | undefined;
+  let lastEmitTs = 0;
+  let watchId: number | null = null;
+  let bgTimer: number | null = null;
+
+  const clearWatch = () => {
+    if (watchId != null) {
+      navigator.geolocation.clearWatch(watchId);
+      watchId = null;
+    }
+  };
+  const clearBg = () => {
+    if (bgTimer != null) {
+      clearInterval(bgTimer);
+      bgTimer = null;
+    }
+  };
+
+  const shouldEmit = (p: NNPosition) => {
+    const now = Date.now();
+    const intervalOk = now - lastEmitTs >= o.minIntervalMs;
+    const distanceOk = !lastEmitted || haversineMeters(lastEmitted, p) >= o.minDistanceM;
+    return intervalOk && distanceOk;
+  };
+
+  const handleSuccess = (pos: GeolocationPosition, fromHighAcc: boolean) => {
+    const nn = toNNPosition(pos, fromHighAcc);
+    if (shouldEmit(nn)) {
+      lastEmitted = nn;
+      lastEmitTs = Date.now();
+      onUpdate(nn);
+    }
+  };
+
+  const startForegroundWatch = () => {
+    clearWatch();
+    watchId = navigator.geolocation.watchPosition(
+      (p) => handleSuccess(p, o.highAccuracy ?? true),
+      async (err) => {
+        // Fallback: try low-accuracy once, then IP
+        if (o.highAccuracy) {
+          try {
+            const low = await getViaGeolocation(false, o.lowAccTimeoutMs);
+            if (shouldEmit(low)) {
+              lastEmitted = low;
+              lastEmitTs = Date.now();
+              onUpdate(low);
+            }
+            return;
+          } catch (_) {}
+        }
+        try {
+          const ip = await getIpFallback();
+          if (shouldEmit(ip)) {
+            lastEmitted = ip;
+            lastEmitTs = Date.now();
+            onUpdate(ip);
+          }
+        } catch (e) {
+          onError(err);
+        }
+      },
+      {
+        enableHighAccuracy: o.highAccuracy,
+        maximumAge: 2_000,
+        timeout: o.highAccTimeoutMs,
+      }
+    );
+  };
+
+  const startBackgroundPoll = () => {
+    clearBg();
+    bgTimer = window.setInterval(async () => {
+      try {
+        const pos = await getCurrentPositionSmart({
+          highAccTimeoutMs: 4_000,
+          lowAccTimeoutMs: 4_000,
+        });
+        if (shouldEmit(pos)) {
+          lastEmitted = pos;
+          lastEmitTs = Date.now();
+          onUpdate(pos);
+        }
+      } catch (e) {
+        // swallow; next tick will try again
+      }
+    }, o.backgroundIntervalMs);
+  };
+
+  // Initial active watch
+  startForegroundWatch();
+
+  const onVisChange = () => {
+    const hidden = document.visibilityState === 'hidden';
+    if (hidden) {
+      clearWatch();
+      startBackgroundPoll();
+    } else {
+      clearBg();
+      startForegroundWatch();
+    }
+  };
+  document.addEventListener('visibilitychange', onVisChange);
+
+  return {
+    stop: () => {
+      clearWatch();
+      clearBg();
+      document.removeEventListener('visibilitychange', onVisChange);
+    },
+  };
+}
+```
+
+---
+
+## 4) React Hook + Integration
+
+**`src/hooks/useLocation.ts`**
+
+```ts
+import { useEffect, useRef } from 'react';
+import { useLocationStore } from '@/store/locationStore';
+import { queryPermission, startLocationWatch, getCurrentPositionSmart } from '@/lib/location/service';
+import type { WatchHandle } from '@/lib/location/service';
+
+export function useBootstrapLocation() {
+  const setPermission = useLocationStore((s) => s.setPermission);
+  const setLast = useLocationStore((s) => s.setLast);
+  const setError = useLocationStore((s) => s.setError);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const p = await queryPermission();
+      if (!cancelled) setPermission(p);
+      if (p === 'granted') {
+        try {
+          const pos = await getCurrentPositionSmart();
+          if (!cancelled) setLast(pos);
+        } catch (e: any) {
+          if (!cancelled) setError(e?.message ?? 'location-init-failed');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [setPermission, setLast, setError]);
+}
+
+export function useLiveLocation() {
+  const setLast = useLocationStore((s) => s.setLast);
+  const setWatching = useLocationStore((s) => s.setWatching);
+  const setError = useLocationStore((s) => s.setError);
+  const handleRef = useRef<WatchHandle | null>(null);
+
+  useEffect(() => {
+    setWatching(true);
+    handleRef.current = startLocationWatch(
+      (pos) => setLast(pos),
+      (err) => setError(err?.message ?? 'watch-error'),
+      {
+        highAccuracy: true,
+        minDistanceM: 25,
+        minIntervalMs: 15_000,
+        backgroundIntervalMs: 180_000,
+      }
+    );
+    return () => {
+      setWatching(false);
+      handleRef.current?.stop();
+      handleRef.current = null;
+    };
+  }, [setLast, setWatching, setError]);
+}
+```
+
+---
+
+## 5) Permission Rationale UI (shadcn/ui)
+
+**`src/components/LocationConsentCard.tsx`**
+
+```tsx
+import { useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { MapPin, ShieldCheck, Timer } from 'lucide-react';
+import { useLocationStore } from '@/store/locationStore';
+import { getCurrentPositionSmart, queryPermission } from '@/lib/location/service';
+
+export default function LocationConsentCard() {
+  const permission = useLocationStore((s) => s.permission);
+  const setPermission = useLocationStore((s) => s.setPermission);
+  const setLast = useLocationStore((s) => s.setLast);
+  const error = useLocationStore((s) => s.error);
+  const setError = useLocationStore((s) => s.setError);
+
+  useEffect(() => {
+    (async () => setPermission(await queryPermission()))();
+  }, [setPermission]);
+
+  const request = async () => {
+    try {
+      // This will prompt if not yet granted
+      const pos = await getCurrentPositionSmart();
+      setLast(pos);
+      setPermission(await queryPermission());
+    } catch (e: any) {
+      setError(e?.message ?? 'permission-request-failed');
+    }
+  };
+
+  return (
+    <Card className="max-w-xl rounded-2xl shadow-md">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-xl">
+          <MapPin className="h-5 w-5" /> Enable Location for Nearby Features
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="flex items-start gap-2">
+            <ShieldCheck className="mt-0.5 h-4 w-4 text-emerald-600" />
+            <div>
+              <div className="font-medium">Privacy-first</div>
+              <div className="text-muted-foreground">Stored securely; you control sharing.</div>
+            </div>
+          </div>
+          <div className="flex items-start gap-2">
+            <MapPin className="mt-0.5 h-4 w-4 text-sky-600" />
+            <div>
+              <div className="font-medium">Accurate GPS</div>
+              <div className="text-muted-foreground">Falls back to network/IP if needed.</div>
+            </div>
+          </div>
+          <div className="flex items-start gap-2">
+            <Timer className="mt-0.5 h-4 w-4 text-amber-600" />
+            <div>
+              <div className="font-medium">Battery-aware</div>
+              <div className="text-muted-foreground">Throttled updates in background.</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex gap-2">
+          <Button onClick={request} className="rounded-2xl">Allow Location</Button>
+          {permission === 'granted' && (
+            <span className="self-center text-xs text-emerald-700">Granted</span>
+          )}
+          {permission === 'denied' && (
+            <span className="self-center text-xs text-red-700">Denied in browser settings</span>
+          )}
+        </div>
+
+        {error && (
+          <Alert variant="destructive">
+            <AlertTitle>Location Error</AlertTitle>
+            <AlertDescription className="text-xs">{error}</AlertDescription>
+          </Alert>
+        )}
+
+        <p className="text-xs text-muted-foreground">
+          Note: Continuous GPS in the background isn’t supported by most browsers. NN will update your location actively while you’re using the app and occasionally when it’s in the background, subject to OS limits.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+```
+
+**Example usage**
+
+**`src/pages/location-demo.tsx`**
+
+```tsx
+import { useEffect } from 'react';
+import LocationConsentCard from '@/components/LocationConsentCard';
+import { useBootstrapLocation, useLiveLocation } from '@/hooks/useLocation';
+import { useLocationStore } from '@/store/locationStore';
+
+export default function LocationDemoPage() {
+  useBootstrapLocation();
+  useLiveLocation();
+  const last = useLocationStore((s) => s.last);
+  const perm = useLocationStore((s) => s.permission);
+
+  useEffect(() => {
+    // Example: send to backend when location changes, debounced server-side
+    if (!last) return;
+    fetch('/api/geo/telemetry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(last),
+    }).catch(() => void 0);
+  }, [last]);
+
+  return (
+    <div className="mx-auto grid max-w-2xl gap-6 p-4">
+      <LocationConsentCard />
+      <div className="rounded-2xl border p-4 text-sm">
+        <div>Permission: <b>{perm}</b></div>
+        {last ? (
+          <ul className="grid grid-cols-2 gap-2 text-xs">
+            <li>Lat: {last.lat.toFixed(6)}</li>
+            <li>Lon: {last.lon.toFixed(6)}</li>
+            <li>Accuracy: {Math.round(last.accuracy)} m</li>
+            <li>Source: {last.source}</li>
+            <li>Updated: {new Date(last.timestamp).toLocaleTimeString()}</li>
+          </ul>
+        ) : (
+          <div className="text-muted-foreground">No location yet.</div>
+        )}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 6) Backend: IP-based Fallback + Telemetry Endpoint (Express)
+
+**`server/routes/geo.ts`**
+
+```ts
+import express from 'express';
+import fetch from 'node-fetch';
+
+const router = express.Router();
+
+/**
+ * GET /api/geo/ip
+ * Uses a provider to estimate coarse location from IP as a last-resort fallback.
+ * Configure one of: IPAPI_CO_TOKEN, IPINFO_TOKEN, or a custom URL.
+ */
+router.get('/ip', async (req, res) => {
+  try {
+    const ip =
+      (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+      (req.socket as any)?.remoteAddress ||
+      undefined;
+
+    const provider = process.env.GEO_FALLBACK_PROVIDER || 'ipapi'; // 'ipinfo' | 'ipdata' | 'custom'
+    let lat = 0,
+      lon = 0,
+      accuracy = 25_000;
+
+    if (provider === 'ipinfo') {
+      const token = process.env.IPINFO_TOKEN;
+      const url = `https://ipinfo.io/${ip ? ip : ''}?token=${token}`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('ipinfo-failed');
+      const j = await r.json();
+      if (j.loc) {
+        const [la, lo] = j.loc.split(',').map(Number);
+        lat = la;
+        lon = lo;
+      }
+    } else if (provider === 'ipapi') {
+      // ipapi.co works without a token but has rate limits; use token if available
+      const url = ip
+        ? `https://ipapi.co/${ip}/json/`
+        : `https://ipapi.co/json/`;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('ipapi-failed');
+      const j = await r.json();
+      lat = Number(j.latitude);
+      lon = Number(j.longitude);
+      accuracy = 15_000;
+    } else if (provider === 'custom' && process.env.IP_GEO_API_URL) {
+      const url = process.env.IP_GEO_API_URL!;
+      const r = await fetch(url);
+      if (!r.ok) throw new Error('custom-geo-failed');
+      const j = await r.json();
+      lat = Number(j.lat ?? j.latitude);
+      lon = Number(j.lon ?? j.longitude);
+      accuracy = Number(j.accuracy ?? 25_000);
+    } else {
+      throw new Error('no-fallback-provider-configured');
+    }
+
+    res.json({ lat, lon, accuracy, ip: ip ?? null });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message ?? 'ip-geo-error' });
+  }
+});
+
+/**
+ * POST /api/geo/telemetry
+ * Example endpoint that accepts client-side location updates.
+ */
+router.post('/telemetry', express.json(), async (req, res) => {
+  try {
+    const body = req.body;
+    // TODO: optionally validate & store to Postgres via Drizzle
+    // e.g., queue write for batching to reduce DB load
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message ?? 'telemetry-error' });
+  }
+});
+
+export default router;
+```
+
+**`server/index.ts` (excerpt)**
+
+```ts
+import express from 'express';
+import geoRoutes from './routes/geo';
+
+const app = express();
+
+app.use('/api/geo', geoRoutes);
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(`[server] listening on :${port}`));
+```
+
+---
+
+## 7) Wiring & Defaults
+
+* Add the **store, utils, and hook** files under `src/` as shown.
+* Render `<LocationConsentCard />` somewhere prominent (e.g., onboarding or settings panel). The live hook can be activated at app root if you want constant updates while the app is open.
+* Ensure your dev/preview runs on **HTTPS** (PWA requirement for geolocation) or `localhost`.
+* Configure one fallback provider via environment:
+
+  * `GEO_FALLBACK_PROVIDER=ipapi` *(default, low-friction, coarse)*
+  * Or `ipinfo` with `IPINFO_TOKEN=...`
+  * Or `custom` with `IP_GEO_API_URL=https://...` that returns `{ lat, lon, accuracy }`.
+
+---
+
+## 8) Acceptance Mapping
+
+* **Accurate GPS + cell-tower/network fallback**: high-accuracy first → low-accuracy → IP fallback.
+* **User opt-in**: `LocationConsentCard` prompts and explains rationale.
+* **Background updates guarded by OS limits**: foreground `watchPosition` + hidden-tab polling with conservative interval; OS may clamp further.
+
+---
+
+## 9) Future Enhancements (optional)
+
+* When installed as an **Android TWA**, consider a lightweight native wrapper to enable true background geolocation and forward to the PWA via postMessage/WebView bridge.
+* Add **MapLibre** marker rendering using `useLocationStore().last`.
+* Persist telemetry to **Postgres (Drizzle)** with server-side rate limiting + privacy controls.
+
+---
+
+## 10) Wiring into existing `ReportIncident.tsx`
+
+**`client/src/pages/ReportIncident.tsx` (drop-in example)**
+
+```tsx
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { GeolocationService, type LocationData } from '@/lib/geolocationService';
+import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+
+const geo = new GeolocationService();
+
+const WINDHOEK = { lat: -22.5597, lon: 17.0658 };
+
+export default function ReportIncident() {
+  const [loc, setLoc] = useState<LocationData | null>(null);
+  const [locError, setLocError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [accuracyThreshold, setAccuracyThreshold] = useState(100); // meters
+  const stopRef = useRef<() => void>();
+
+  // bootstrap location once on mount (prompt + best effort)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const p = await geo.getCurrentPosition({
+          highAccTimeoutMs: 8000,
+          lowAccTimeoutMs: 8000,
+        });
+        if (!cancelled) setLoc(p);
+      } catch (e: any) {
+        if (!cancelled) setLocError(e?.message ?? 'location-init-failed');
+      }
+    })();
+    return () => {
+      cancelled = true;
+      stopRef.current?.();
+    };
+  }, []);
+
+  // live updates while the form is open
+  const startLive = async () => {
+    setLocError(null);
+    geo.startWatchingPosition(
+      (p) => setLoc(p),
+      (err) => setLocError(err?.message ?? 'watch-error'),
+      {
+        highAccuracy: true,
+        minDistanceM: 25,
+        minIntervalMs: 15_000,
+        backgroundIntervalMs: 180_000,
+      }
+    );
+    stopRef.current = () => geo.stopWatchingPosition();
+  };
+
+  const stopLive = () => {
+    geo.stopWatchingPosition();
+    stopRef.current = undefined;
+  };
+
+  const finalLatLon = useMemo(() => {
+    if (!loc) return { lat: WINDHOEK.lat, lon: WINDHOEK.lon, isDefault: true };
+    if (loc.accuracy > accuracyThreshold) {
+      return { lat: WINDHOEK.lat, lon: WINDHOEK.lon, isDefault: true };
+    }
+    return { lat: loc.latitude, lon: loc.longitude, isDefault: false };
+  }, [loc, accuracyThreshold]);
+
+  async function submitIncident(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      // Example payload; add your other form fields
+      const payload = {
+        type: 'incident',
+        latitude: finalLatLon.lat,
+        longitude: finalLatLon.lon,
+        accuracy: loc?.accuracy ?? null,
+        locSource: loc?.source ?? 'unknown',
+        // ... other form fields
+      };
+
+      // Send telemetry update for the user (optional):
+      try {
+        await fetch(`/api/users/me/location`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ latitude: payload.latitude, longitude: payload.longitude }),
+        });
+      } catch {}
+
+      // Create the incident
+      const res = await fetch('/api/incidents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error('failed-to-create-incident');
+
+      // Optionally, check for duplicates
+      try {
+        await fetch(`/api/incidents/duplicates`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'incident',
+            latitude: payload.latitude,
+            longitude: payload.longitude,
+          }),
+        });
+      } catch {}
+
+      // Navigate away or show success
+      setLoading(false);
+      alert('Incident reported successfully');
+    } catch (e: any) {
+      setLoading(false);
+      setLocError(e?.message ?? 'submit-error');
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-xl space-y-4 p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-lg font-semibold">Report Incident</h1>
+        <div className="text-xs text-muted-foreground">
+          {loc ? `±${Math.round(loc.accuracy)} m • ${loc.source}` : 'locating…'}
+        </div>
+      </div>
+
+      {locError && (
+        <Alert variant="destructive"><AlertDescription className="text-xs">{locError}</AlertDescription></Alert>
+      )}
+
+      <div className="flex gap-2">
+        <Button size="sm" onClick={startLive}>Improve Accuracy</Button>
+        <Button size="sm" variant="secondary" onClick={stopLive}>Stop</Button>
+      </div>
+
+      {loc && loc.accuracy > accuracyThreshold && (
+        <Alert>
+          <AlertDescription className="text-xs">
+            Location accuracy too low (±{Math.round(loc.accuracy)} m). Using default Windhoek until signal improves.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Your form fields here */}
+      <form onSubmit={submitIncident} className="space-y-3">
+        {/* ... */}
+        <Button type="submit" disabled={loading} className="w-full">
+          {loading ? 'Submitting…' : 'Submit incident'}
+        </Button>
+      </form>
+
+      <div className="text-xs text-muted-foreground">
+        Using: {finalLatLon.isDefault ? 'Windhoek default' : 'Current position'}
+      </div>
+    </div>
+  );
+}
+```
+
+---
+
+## 11) Client helpers (React Query optional)
+
+**`client/src/lib/api/nearby.ts`**
+
+```ts
+export async function getIncidentsNearby(lat: number, lon: number, radiusMeters: number) {
+  const r = await fetch(`/api/incidents/nearby?lat=${lat}&lon=${lon}&radius=${radiusMeters}`);
+  if (!r.ok) throw new Error('nearby-incidents-failed');
+  return r.json();
+}
+
+export async function getBusinessesNearby(lat: number, lon: number, radiusMeters = 2000) {
+  const r = await fetch(`/api/businesses/nearby?lat=${lat}&lon=${lon}&radius=${radiusMeters}`);
+  if (!r.ok) throw new Error('nearby-businesses-failed');
+  return r.json();
+}
+
+export async function getEventsNearby(lat: number, lon: number, radiusMeters = 5000) {
+  const r = await fetch(`/api/events/nearby?lat=${lat}&lon=${lon}&radius=${radiusMeters}`);
+  if (!r.ok) throw new Error('nearby-events-failed');
+  return r.json();
+}
+```
+
+---
+
+## 12) Server wiring: user location + nearby queries (Express + pg)
+
+> Works with PostgreSQL **earthdistance/cube**. Ensure extensions and indexes are present (see section 13).
+
+**`server/routes/location.ts`**
+
+```ts
+import express from 'express';
+import { Pool } from 'pg';
+
+const router = express.Router();
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+// Update current user location (assumes auth middleware sets req.user.id)
+router.post('/users/me/location', express.json(), async (req, res) => {
+  try {
+    const userId = (req as any).user?.id || null; // replace with your auth
+    if (!userId) return res.status(401).json({ error: 'unauthorized' });
+    const { latitude, longitude } = req.body;
+    if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+      return res.status(400).json({ error: 'invalid-coordinates' });
+    }
+
+    await pool.query(
+      `UPDATE users
+       SET lat = $1, lon = $2, updated_at = NOW()
+       WHERE id = $3`,
+      [latitude, longitude, userId]
+    );
+    res.json({ ok: true });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message ?? 'update-location-error' });
+  }
+});
+
+// Nearby Incidents
+router.get('/incidents/nearby', async (req, res) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lon = Number(req.query.lon);
+    const radius = Number(req.query.radius ?? 2000);
+    if (Number.isNaN(lat) || Number.isNaN(lon)) return res.status(400).json({ error: 'invalid-coordinates' });
+
+    const { rows } = await pool.query(
+      `SELECT id, title, lat, lon,
+              earth_distance(ll_to_earth($1,$2), ll_to_earth(lat, lon)) AS meters
+       FROM incidents
+       WHERE earth_distance(ll_to_earth($1,$2), ll_to_earth(lat, lon)) <= $3
+       ORDER BY meters ASC
+       LIMIT 100`,
+      [lat, lon, radius]
+    );
+    res.json(rows);
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message ?? 'nearby-incidents-error' });
+  }
+});
+
+// Nearby Businesses
+router.get('/businesses/nearby', async (req, res) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lon = Number(req.query.lon);
+    const radius = Number(req.query.radius ?? 2000);
+    if (Number.isNaN(lat) || Number.isNaN(lon)) return res.status(400).json({ error: 'invalid-coordinates' });
+
+    const { rows } = await pool.query(
+      `SELECT id, name, lat, lon,
+              earth_distance(ll_to_earth($1,$2), ll_to_earth(lat, lon)) AS meters
+       FROM businesses
+       WHERE earth_distance(ll_to_earth($1,$2), ll_to_earth(lat, lon)) <= $3
+       ORDER BY meters ASC
+       LIMIT 100`,
+      [lat, lon, radius]
+    );
+    res.json(rows);
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message ?? 'nearby-businesses-error' });
+  }
+});
+
+// Nearby Events
+router.get('/events/nearby', async (req, res) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lon = Number(req.query.lon);
+    const radius = Number(req.query.radius ?? 5000);
+    if (Number.isNaN(lat) || Number.isNaN(lon)) return res.status(400).json({ error: 'invalid-coordinates' });
+
+    const { rows } = await pool.query(
+      `SELECT id, title, lat, lon,
+              earth_distance(ll_to_earth($1,$2), ll_to_earth(lat, lon)) AS meters
+       FROM events
+       WHERE earth_distance(ll_to_earth($1,$2), ll_to_earth(lat, lon)) <= $3
+       ORDER BY meters ASC
+       LIMIT 100`,
+      [lat, lon, radius]
+    );
+    res.json(rows);
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message ?? 'nearby-events-error' });
+  }
+});
+
+// Duplicate incident check
+router.post('/incidents/duplicates', express.json(), async (req, res) => {
+  try {
+    const { type, latitude, longitude } = req.body;
+    const radius = 150; // 150m duplicate window
+
+    const { rows } = await pool.query(
+      `SELECT id,
+              earth_distance(ll_to_earth($1,$2), ll_to_earth(lat, lon)) AS meters
+       FROM incidents
+       WHERE type = $3
+         AND earth_distance(ll_to_earth($1,$2), ll_to_earth(lat, lon)) <= $4
+       ORDER BY meters ASC
+       LIMIT 1`,
+      [latitude, longitude, type, radius]
+    );
+    res.json({ duplicate: rows[0] ?? null });
+  } catch (e: any) {
+    res.status(500).json({ error: e?.message ?? 'duplicate-check-error' });
+  }
+});
+
+export default router;
+```
+
+**`server/index.ts` (mount routes)**
+
+```ts
+import locationRoutes from './routes/location';
+app.use('/api', locationRoutes);
+```
+
+---
+
+## 13) PostgreSQL setup & indexes (earthdistance)
+
+```sql
+CREATE EXTENSION IF NOT EXISTS cube;
+CREATE EXTENSION IF NOT EXISTS earthdistance;
+
+-- Optional: computed index for frequent geo lookups
+-- Incidents
+CREATE INDEX IF NOT EXISTS incidents_earth_idx ON incidents USING gist (ll_to_earth(lat, lon));
+-- Businesses
+CREATE INDEX IF NOT EXISTS businesses_earth_idx ON businesses USING gist (ll_to_earth(lat, lon));
+-- Events
+CREATE INDEX IF NOT EXISTS events_earth_idx ON events USING gist (ll_to_earth(lat, lon));
+```
+
+---
+
+## 14) Minimal IP fallback endpoint (reuse if not added yet)
+
+**`server/routes/geo.ts`** (as provided earlier; ensure it’s mounted at `/api/geo/ip`)
+
+```ts
+// GET /api/geo/ip -> { lat, lon, accuracy }
+```
+
+---
+
+## 15) Swap-in for existing code paths
+
+* Replace usages of your older `geolocationService.getCurrentPosition(...)` with the new class method **without** changing call sites (same name), or export a wrapper that preserves your API.
+* Where you had a hard fallback to Windhoek when `accuracy > 100`, now keep the same UX but allow the **“Improve Accuracy”** button to start live updates which may quickly drop the accuracy below 100 m and auto-switch from default to current position.
+* Telemetry: throttle on the server (per-user min 10–15 s) and quantize to 20 m grids if storing history.

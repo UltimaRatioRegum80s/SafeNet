@@ -1,0 +1,184 @@
+Hey Replit teammate 👋 — amazing ship! The mobile UX sounds exactly like what @RDM asked for.
+
+Since you asked about the final polish, here’s how I’d land it with tiny, safe patches:
+
+A) Selected-marker pulse (visual clarity)
+1) Add CSS once
+/* client/src/styles/globals.css */
+.nn-marker-pulse {
+  box-shadow: 0 0 0 0 rgba(255,255,255,0.55);
+  animation: nn-pulse 1.6s ease-out infinite;
+}
+@keyframes nn-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(255,255,255,0.55) }
+  70%  { box-shadow: 0 0 0 14px rgba(255,255,255,0) }
+  100% { box-shadow: 0 0 0 0 rgba(255,255,255,0) }
+}
+
+2) Toggle the class on the selected marker
+
+Assuming you keep a Map<string, L.Marker> or similar registry:
+
+// client/src/pages/community/Map.tsx (excerpt)
+import { useIncidentStore } from "@/state/useIncidentStore";
+
+const markerByIdRef = useRef(new Map<string, L.Marker>());
+
+useEffect(() => {
+  const selectedId = useIncidentStore.getState().selectedId;
+  const sub = useIncidentStore.subscribe(
+    (s) => s.selectedId,
+    (id, prev) => {
+      if (prev) {
+        const mPrev = markerByIdRef.current.get(prev);
+        const elPrev = mPrev?.getElement();
+        if (elPrev) elPrev.classList.remove("nn-marker-pulse");
+      }
+      if (id) {
+        const m = markerByIdRef.current.get(id);
+        const el = m?.getElement();
+        if (el) el.classList.add("nn-marker-pulse");
+      }
+    }
+  );
+  return () => sub(); // cleanup
+}, []);
+
+
+When you create each marker, store it:
+
+markerByIdRef.current.set(incident.id, markerInstance);
+
+B) Drawer drag gesture (peek / half / full with snap)
+
+You’re already cycling states on tap. Let’s add a light drag on the handle without new deps (works nicely with vaul).
+
+1) Utilities
+// client/src/components/dragSheet.ts (tiny helper, optional)
+export function snapTo(value: number, snaps: number[]) {
+  let best = snaps[0], min = Infinity;
+  for (const s of snaps) { const d = Math.abs(value - s); if (d < min) { min = d; best = s; } }
+  return best;
+}
+export function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
+
+2) Add drag to IncidentSheet
+// client/src/components/IncidentSheet.tsx (additions)
+import { useRef, useState, useMemo } from "react";
+import { snapTo, clamp } from "@/components/dragSheet";
+
+export default function IncidentSheet(/* …props… */) {
+  // existing state:
+  const [height, setHeight] = useState<"peek"|"half"|"full">("peek");
+
+  // derive pixel snap points (responsive)
+  const { peekPx, halfPx, fullPx } = useMemo(() => {
+    const vh = (typeof window !== "undefined" ? window.innerHeight : 900);
+    return { peekPx: 96, halfPx: Math.round(vh * 0.52), fullPx: Math.round(vh * 0.80) };
+  }, []);
+
+  // live height while dragging (pixels). When null, use state-based height.
+  const [dragPx, setDragPx] = useState<number | null>(null);
+
+  // pointer tracking
+  const startY = useRef(0);
+  const startH = useRef(0);
+  const snaps = useMemo(() => [peekPx, halfPx, fullPx], [peekPx, halfPx, fullPx]);
+
+  const onHandlePointerDown: React.PointerEventHandler = (e) => {
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    startY.current = e.clientY;
+    // current height in px:
+    startH.current = height === "peek" ? peekPx : height === "half" ? halfPx : fullPx;
+    setDragPx(startH.current);
+  };
+  const onHandlePointerMove: React.PointerEventHandler = (e) => {
+    if (dragPx == null) return;
+    const dy = startY.current - e.clientY; // dragging up increases height
+    const next = clamp(startH.current + dy, peekPx, fullPx);
+    setDragPx(next);
+  };
+  const onHandlePointerUp: React.PointerEventHandler = (e) => {
+    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    if (dragPx == null) return;
+    const snapped = snapTo(dragPx, snaps);
+    setDragPx(null);
+    setHeight(snapped === fullPx ? "full" : snapped === halfPx ? "half" : "peek");
+  };
+
+  // computed height style
+  const hPx = dragPx ?? (height === "peek" ? peekPx : height === "half" ? halfPx : fullPx);
+
+  return (
+    <Drawer.Root /* …existing props… */>
+      {/* …Overlay/Portal… */}
+      <Drawer.Content className="fixed inset-x-0 bottom-0 z-30">
+        <div className="mx-auto max-w-md" style={{ height: hPx, transition: dragPx ? "none" : "height 180ms" }}>
+          <div className="mx-3 rounded-t-3xl bg-slate-900 border border-slate-800 shadow-2xl h-full flex flex-col">
+            {/* Handle with drag */}
+            <button
+              onPointerDown={onHandlePointerDown}
+              onPointerMove={onHandlePointerMove}
+              onPointerUp={onHandlePointerUp}
+              className="flex justify-center pt-2 w-full touch-none" aria-label="Resize incidents panel"
+            >
+              <div className="h-1.5 w-12 rounded-full bg-white/30" />
+            </button>
+
+            {/* …existing header, filters, <IncidentList/> … */}
+          </div>
+        </div>
+      </Drawer.Content>
+    </Drawer.Root>
+  );
+}
+
+
+This gives a smooth drag with snap to the three heights, no extra libraries. It respects your current “tap to cycle” too.
+
+C) Align time ranges (store vs UI)
+
+You mentioned the UI uses All / 1h / 6h / 12h, while earlier we had All / 24h / 7d / 30d. Let’s support both without breaking filters.
+
+1) Widen the union in the store
+// client/src/state/useIncidentStore.ts (types)
+export type TimeRange = "all" | "1h" | "6h" | "12h" | "24h" | "7d" | "30d";
+
+2) Adjust the filter predicate
+// wherever you filter by timeRange
+function withinTime(isoOrTs?: number | string, range: TimeRange = "all") {
+  if (range === "all" || isoOrTs == null) return true;
+  const ts = typeof isoOrTs === "number" ? (isoOrTs < 1e12 ? isoOrTs * 1000 : isoOrTs) : Date.parse(String(isoOrTs));
+  if (!Number.isFinite(ts)) return true;
+  const now = Date.now();
+  const limits: Record<Exclude<TimeRange,"all">, number> = {
+    "1h": 3600e3,
+    "6h": 6*3600e3,
+    "12h": 12*3600e3,
+    "24h": 24*3600e3,
+    "7d": 7*24*3600e3,
+    "30d": 30*24*3600e3,
+  };
+  const lim = limits[range as Exclude<TimeRange,"all">];
+  return now - ts <= lim;
+}
+
+3) Make the sheet show your chosen set
+
+Inside IncidentSheet, pick the labels you want mobile to show (e.g., ["all","1h","6h","12h"]), desktop can keep longer ranges.
+
+D) Tiny QA checklist (fast manual checks)
+
+Drag: drag up/down → snaps at ~peek/half/full; no scroll jank.
+
+Select: tap row → center & zoom; tap marker → row highlighted; marker pulses.
+
+Filters: change in sheet → Sidebar & map update; desktop filters still work and reflect state.
+
+BBox: “In view” toggle trims the list to visible markers; no error on first load (guard holds).
+
+Accessibility: Handle is a button with aria-label; list rows have aria-selected.
+
+If anything in your marker pipeline differs (e.g., you don’t keep a markerById map), tell me how you store markers and I’ll tailor the pulse toggle. Otherwise, these patches should drop in cleanly and give @RDM that last 10% of polish.

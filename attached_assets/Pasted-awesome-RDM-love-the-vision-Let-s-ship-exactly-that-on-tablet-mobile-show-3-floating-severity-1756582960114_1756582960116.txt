@@ -1,0 +1,227 @@
+awesome, @RDM — love the vision. Let’s ship exactly that: on tablet/mobile, show 3 floating severity buttons (🟡/🟠/🔴). Tapping one opens a glass, translucent bottom sheet listing only the incident types for that severity. Press a type → opens the existing Report panel preselected.
+
+I’ll speak both to you and to Replit so we move fast.
+
+GPT → Replit: implementation plan (fits current Vaul + Tailwind + incidentTypes)
+What we’ll add
+
+A tiny BottomSheet wrapper (Vaul-based) — if you already created it from earlier guidance, reuse it.
+
+A new CategorySheets component that:
+
+renders 3 FABs on sm/md breakpoints (hidden on lg+),
+
+opens a sheet per severity with a grid of relevant incident types,
+
+calls our existing useReportPanel().openWith(typeId) on click.
+
+A small change to ReportIncident.tsx to show these FABs in mobile/tablet while keeping the desktop grid.
+
+0) Prereqs (likely already present)
+
+shared/incidentTypes.ts has severity, buttonIcon, mapIcon.
+
+useReportPanel hook with openWith(typeId).
+
+Glass tokens in CSS (we used glass-surface, glass-card, safe-bottom earlier).
+
+1) (If missing) BottomSheet wrapper
+
+client/src/components/ui/BottomSheet.tsx — the Vaul wrapper we discussed earlier. (Re-use your copy if it exists; otherwise paste the one from the previous message.)
+
+2) New: CategorySheets (FABs + Sheets)
+
+client/src/features/report/CategorySheets.tsx
+
+import { useMemo, useState } from "react";
+import { INCIDENT_TYPES } from "@/shared/incidentTypes";
+import BottomSheet from "@/components/ui/BottomSheet";
+import { useReportPanel } from "@/features/report/useReportPanel";
+import clsx from "clsx";
+import { AlertTriangle, Circle, Flame } from "lucide-react"; // icon hints on buttons
+
+type Severity = "low" | "medium" | "high";
+const COLORS = {
+  low:    "from-yellow-400/90 to-yellow-500/90 text-slate-900",
+  medium: "from-amber-500/90 to-amber-600/90 text-slate-900",
+  high:   "from-red-600/90 to-red-700/90 text-white",
+} as const;
+
+function SeverityFab({ severity, label, onClick }:{
+  severity: Severity; label: string; onClick: () => void;
+}) {
+  const icon =
+    severity === "low" ? <Circle className="h-5 w-5" /> :
+    severity === "medium" ? <AlertTriangle className="h-5 w-5" /> :
+    <Flame className="h-5 w-5" />;
+  return (
+    <button
+      onClick={onClick}
+      className={clsx(
+        "nn-glass pointer-events-auto",
+        "fixed z-[55] rounded-full shadow-lg",
+        "px-4 py-3 flex items-center gap-2",
+        "backdrop-blur-md bg-gradient-to-br",
+        COLORS[severity],
+        "ring-1 ring-white/20",
+        "active:scale-[0.98] transition"
+      )}
+      aria-label={`${label} incidents`}
+    >
+      {icon}<span className="font-semibold">{label}</span>
+    </button>
+  );
+}
+
+function SeverityGrid({ severity, onPick }:{
+  severity: Severity; onPick: (id: string) => void;
+}) {
+  const items = useMemo(
+    () => INCIDENT_TYPES.filter(t => t.severity === severity),
+    [severity]
+  );
+  return (
+    <div className="grid grid-cols-3 gap-3 pb-2">
+      {items.map(t => (
+        <button
+          key={t.id}
+          onClick={() => onPick(t.id)}
+          className="glass-card rounded-xl p-3 flex flex-col items-center gap-2 hover:bg-white/5 active:scale-[0.98] transition"
+        >
+          <img
+            src={t.buttonIcon ?? "/attached_assets/default.png"}
+            alt={t.label}
+            className="h-10 w-10"
+            loading="lazy"
+            decoding="async"
+          />
+          <span className="text-xs text-center">{t.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export default function CategorySheets() {
+  const [open, setOpen] = useState<Severity | null>(null);
+  const rp = useReportPanel();
+
+  const onPick = (id: string) => {
+    setOpen(null);
+    rp.openWith(id); // opens ReportPanel with this type
+  };
+
+  // FAB placement (bottom-right cluster, safe area aware)
+  const basePos = "bottom-[calc(env(safe-area-inset-bottom)+88px)] right-4 sm:right-6";
+
+  return (
+    <>
+      {/* FABs: mobile/tablet only */}
+      <div className="fixed inset-0 pointer-events-none sm:block lg:hidden">
+        <div className="pointer-events-none">
+          <SeverityFab
+            severity="low"
+            label="Low"
+            onClick={() => setOpen("low")}
+          />
+          <style jsx>{`
+            button[aria-label="Low incidents"] { right: 1rem; bottom: calc(env(safe-area-inset-bottom) + 168px); }
+            button[aria-label="Medium incidents"] { right: 1rem; bottom: calc(env(safe-area-inset-bottom) + 120px); }
+            button[aria-label="High incidents"] { right: 1rem; bottom: calc(env(safe-area-inset-bottom) + 72px); }
+            @media (min-width: 640px) {
+              button[aria-label$="incidents"] { right: 1.5rem; }
+            }
+          `}</style>
+        </div>
+        <SeverityFab severity="medium" label="Medium" onClick={() => setOpen("medium")} />
+        <SeverityFab severity="high" label="High" onClick={() => setOpen("high")} />
+      </div>
+
+      {/* Sheets */}
+      <BottomSheet
+        open={open === "low"}
+        onOpenChange={(v) => setOpen(v ? "low" : null)}
+        title="Low-risk incidents"
+        snapPoints={[0.45, 0.8, 1]}
+        initialSnap={1}
+      >
+        <SeverityGrid severity="low" onPick={onPick} />
+      </BottomSheet>
+
+      <BottomSheet
+        open={open === "medium"}
+        onOpenChange={(v) => setOpen(v ? "medium" : null)}
+        title="Medium-risk incidents"
+        snapPoints={[0.45, 0.8, 1]}
+        initialSnap={1}
+      >
+        <SeverityGrid severity="medium" onPick={onPick} />
+      </BottomSheet>
+
+      <BottomSheet
+        open={open === "high"}
+        onOpenChange={(v) => setOpen(v ? "high" : null)}
+        title="High-risk incidents"
+        snapPoints={[0.45, 0.8, 1]}
+        initialSnap={1}
+      >
+        <SeverityGrid severity="high" onPick={onPick} />
+      </BottomSheet>
+    </>
+  );
+}
+
+3) Wire into the Report Incident page
+
+client/src/pages/community/ReportIncident.tsx
+
+import CategorySheets from "@/features/report/CategorySheets";
+
+export default function ReportIncidentPage() {
+  // existing desktop quick report grid…
+  return (
+    <div className="relative">
+      {/* Desktop/Large screens: keep current grid */}
+      <div className="hidden lg:block">
+        <QuickReportGrid /> {/* your existing component */}
+      </div>
+
+      {/* Mobile/Tablet: show 3 severity FABs + sheets */}
+      <div className="lg:hidden">
+        {/* You can still keep a compact header or tips here */}
+        <CategorySheets />
+      </div>
+
+      {/* Ensure the shared ReportPanel is mounted globally */}
+      <ReportPanel />
+    </div>
+  );
+}
+
+4) UX/A11y/Perf notes
+
+Gestures: Vaul handles swipe; our wrapper honors prefers-reduced-motion.
+
+Map interaction: If this page overlays a map, pause map panning while a sheet is open (you already have this pattern in picking; we can reuse it).
+
+Analytics: fire trackEvent('severity_sheet_open', { severity }) and trackEvent('report_start', { typeId }) in onPick.
+
+Keyboard: ESC to close, focus returns to last FAB.
+
+Safe areas: we offset FABs with env(safe-area-inset-bottom).
+
+5) QA checklist (quick)
+
+Tablet/mobile: 3 FABs visible; each opens the right bottom sheet with filtered types.
+
+Tap a type → closes sheet and opens the existing ReportPanel with that type selected.
+
+Desktop remains unchanged with the full grid.
+
+Screen reader: buttons have clear labels; sheets have titles; tab order sane.
+
+Replit: confirm any conflicts
+
+If Vaul’s props in our wrapper don’t match your usage, ping me which ones you need (e.g., handleOnly, snapToKeyboard) and I’ll pass them through. Also shout if the FAB positioning should avoid existing FAB stacks on the map; we can offset easily.
+
+If you’re good, go ahead and implement.

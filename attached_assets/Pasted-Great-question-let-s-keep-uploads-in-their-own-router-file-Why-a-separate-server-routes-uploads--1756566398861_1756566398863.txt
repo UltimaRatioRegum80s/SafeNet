@@ -1,0 +1,97 @@
+Great question — let’s keep uploads in their own router file.
+
+Why a separate server/routes/uploads.ts
+
+Keeps your centralized routes.ts lean (incidents/chat stay readable).
+
+Upload pipeline (multer + sharp + validations) is sizable and has its own limits/middleware.
+
+Easier to harden, test, and rate-limit independently later.
+
+Minimal integration plan
+Create server/routes/uploads.ts
+
+(Use the version I shared; no changes needed apart from your path aliases and auth.)
+
+Mount it in your central router
+// server/routes.ts (or server/index.ts where you mount all routers)
+import uploadsRouter from "./routes/uploads";
+
+// If you want uploads to work for anonymous reporters too:
+app.use("/api/uploads", requireAuthOptional, uploadsRouter);
+
+// If you want only authenticated users:
+ // app.use("/api/uploads", requireAuth, uploadsRouter);
+
+Ensure static serving is on
+// server/index.ts
+import path from "path";
+app.use(
+  "/uploads",
+  express.static(path.join(process.cwd(), "public/uploads"), {
+    immutable: true,
+    maxAge: "365d",
+  })
+);
+
+Add a tiny rate limiter (nice-to-have)
+// server/middleware/rateLimitUploads.ts
+import rateLimit from "express-rate-limit";
+export const limitUploads = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 20, // 20 upload requests per 5 mins
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+
+Mount it:
+
+app.use("/api/uploads", limitUploads, requireAuthOptional, uploadsRouter);
+
+Client wiring (quick)
+
+Keep your new compressImage, toFile, and uploadImages utils as-is.
+
+In ReportPanel, before calling your incidents mutation:
+
+compress → upload to /api/uploads → use returned URLs in photos: string[].
+
+Progress state (1-liner):
+
+const [uploading, setUploading] = useState(false);
+// ...
+setUploading(true);
+const urls = await prepareAndUpload(photosFiles, abort);
+setUploading(false);
+
+
+Disable submit while uploading.
+
+A couple of small, safe tweaks
+
+HEIC/HEIF: Some browsers can’t decode client-side; your server route already accepts them and converts. Good.
+
+File caps: You’re capping input at 8 MB and output by quality. If you want hard output cap, add a re-encode step if data.length > 700*1024.
+
+MIME by magic bytes: You’ve got file-type — keep rejecting unknowns; don’t trust Content-Type.
+
+No SVG: Already excluded (keep it that way).
+
+Path safety: We use UUID filenames only — ✅.
+
+Auth: You picked requireAuthOptional; that matches anonymous reports with photos. If you want to restrict media to logged-in users, flip to requireAuth.
+
+Tiny test checklist (manual)
+
+iOS HEIC photo → uploads → server returns .webp or .jpg URL; image renders; EXIF stripped.
+
+Huge 12 MP JPEG → client compresses; upload < ~1–2 MB; orientation correct.
+
+Anonymous report + photo → incident created with photos[] URLs; socket broadcast hides userId.
+
+Try .svg → 415 Unsupported.
+
+Hit rate limit → 429 with JSON error.
+
+If you’re good, proceed with the separate uploads.ts approach and mount it as above. I’m here if any wiring detail clashes with your current routes.ts conventions.

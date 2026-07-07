@@ -1,0 +1,107 @@
+One-stop patch (surface + text)
+1) Sheet surface (Vaul)
+// IncidentSheet.tsx
+import { Drawer, DrawerContent, DrawerOverlay } from "vaul";
+import { cn } from "@/lib/utils";
+
+export function IncidentSheet({ open, onOpenChange, children }: Props) {
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      {/* Dim map slightly behind the sheet */}
+      <DrawerOverlay className="fixed inset-0 z-[54] bg-black/10 dark:bg-black/40" />
+
+      <DrawerContent
+        className={cn(
+          "relative z-[55] rounded-t-3xl border will-change-transform pb-[calc(env(safe-area-inset-bottom)+12px)]",
+
+          // 🌑 Dark mode — keep your glass look intact
+          "dark:bg-background/60 dark:backdrop-blur-md dark:border-white/10",
+
+          // 🔦 Light mode — SOLID surface + subtle elevation (no glass washout)
+          "bg-white/98 border-border/60 shadow-[0_16px_40px_rgba(0,0,0,0.12)]"
+        )}
+      >
+        {children}
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+
+Dark path = unchanged from your good state.
+
+Light path = near-solid white, gentle shadow, no heavy blur → the map won’t bleed through.
+
+2) Cards inside the sheet
+// IncidentList.tsx (where a card renders)
+import { Card } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+
+<Card
+  className={cn(
+    "rounded-2xl",
+
+    // 🌑 Dark unchanged
+    "dark:backdrop-blur-md dark:bg-white/5 dark:border dark:border-white/10",
+
+    // 🔦 Light solid
+    "bg-white border border-border/60 shadow-[0_4px_14px_rgba(0,0,0,0.06)]"
+  )}
+>
+  {/* content */}
+</Card>
+
+3) Text tokens (titles, body, meta)
+// Title / section headings
+<h2 className="text-foreground font-semibold dark:text-white">Recent Incidents</h2>
+
+// Body / labels
+<p className="text-foreground/90 dark:text-white/90">Testing auto-flagging velocity</p>
+
+// Meta / timestamps
+<span className="text-muted-foreground dark:text-white/60">4h ago</span>
+
+
+Rule:
+
+Light → text-foreground / text-muted-foreground (dark neutral on light surface)
+
+Dark → text-white / text-white/60
+
+Remove any text-white/* used in light mode.
+
+4) Chips / filters
+// Selected
+<button className="h-7 px-3 rounded-full
+                   bg-foreground text-white
+                   dark:bg-white dark:text-black">
+  All
+</button>
+
+// Unselected
+<button className="h-7 px-3 rounded-full
+                   bg-black/5 text-foreground/85
+                   dark:bg-white/10 dark:text-white/85">
+  6h
+</button>
+
+
+This guarantees AA contrast in both themes.
+
+5) Small UX/perf guards (optional but recommended)
+
+Disable map pan/zoom while sheet is expanded (prevents gesture fight).
+
+Keep content clear of the home bar (done via pb-[calc(env(...)+12px)] above).
+
+Drop backdrop-blur in light (we already did) to save GPU on low-end phones.
+
+✅ What this achieves
+
+Light mode: solid/elevated white sheet, crisp text & chips, clear hierarchy.
+
+Dark mode: your original glass look remains untouched.
+
+Text colors: consistent tokens; no semi-transparent white on light surfaces.
+
+Apply these three areas (sheet, cards, text/chips) and your light screenshot will match the clarity of the dark one—without sacrificing the aesthetic.

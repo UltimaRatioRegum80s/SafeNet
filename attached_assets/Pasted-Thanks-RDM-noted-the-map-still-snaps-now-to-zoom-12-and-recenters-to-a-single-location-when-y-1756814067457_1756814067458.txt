@@ -1,0 +1,94 @@
+Thanks, @RDM — noted: the map still snaps (now to zoom 12) and recenters to a single location when you pan. We’ll keep the NRP guardrails.
+
+What this implies
+
+The switch to defaultZoom/defaultCenter helped, but something is still programmatically recentering the map after interactions.
+
+Snap to 12 strongly suggests a call to fitBounds(..., { maxZoom: 12 }) or a setView(..., 12) happening on a reactive change (filters, incidents, URL sync, etc.).
+
+👋 Replit — next, precise tracing (NRP-safe)
+
+Let’s catch the exact caller and options.
+
+1) Instrument with stack traces (temporary)
+
+Inside the whenCreated logger wrapper you added, enhance it to show a trace:
+
+const wrap = (name: keyof L.Map) => {
+  const orig = (m as any)[name].bind(m);
+  (m as any)[name] = (...args: any[]) => {
+    console.log("[Map] CALL:", name, "args:", args);
+    console.trace("[Map] TRACE for", name);
+    return orig(...args);
+  };
+};
+["setZoom", "setView", "flyTo", "flyToBounds", "fitBounds"].forEach(wrap);
+
+
+Action: Do a pan and a zoom. Paste the logs, especially when it snaps back—note:
+
+Which method (fitBounds vs setView) fired,
+
+The args (do we see { maxZoom: 12 }?),
+
+The stack trace top frames (filename:line).
+
+2) Search for the bound-fitters and maxZoom caps
+
+Run and paste any hits:
+
+rg -n "fitBounds|flyToBounds|maxZoom:\s*12|setView\(.+12\)" client/src
+
+3) Check for auto-center effects
+
+We likely have an effect like:
+
+“on incidents change → fit to all markers”,
+
+“on city/user change → setView(center, 12)”,
+
+“sync map to URL” or “restore from URL”.
+
+Search and paste the tiny blocks (10–15 lines around the call):
+
+rg -n -A 8 -B 8 "fitBounds|setView|flyTo|flyToBounds" client/src/pages/community/Map.tsx client/src/components/MapView.tsx client/src/features/**/*
+
+4) Confirm MapContainer props after your changes
+
+Paste the exact <MapContainer ...> props block you have now (just the opening tag with props). We’re confirming there’s no bounds, key, or another controlled prop resetting map.
+
+Likely culprits (we’ll neutralize whichever the trace shows)
+
+An effect that runs on incidents / filters / theme and calls:
+
+fitBounds(layer.getBounds(), { maxZoom: 12 }) → explains snap to 12.
+
+setView(center, 12) or similar → explains snap to 12.
+
+A “restore from URL” step that computes center/zoom and fires on each param update.
+
+A cluster plugin callback that refits bounds after expanding (less likely if it happens without cluster clicks).
+
+NRP-compliant remediation (once we identify the caller)
+
+Gate that call with a “run once on first load” ref:
+
+if (!hasAutoCentered.current) { ...; hasAutoCentered.current = true; }
+
+Or run it only when a specific user action happens (e.g., “In View” button).
+
+Keep the function available behind a boolean flag so we can toggle if needed.
+
+This will preserve all current UI & data behavior—only stopping the unwanted auto-recenter loop.
+
+Quick ask
+
+Replit, please share:
+
+The instrumented call log + trace when the snap occurs.
+
+Search results for fitBounds|setView|maxZoom: 12.
+
+The <MapContainer ...> props block.
+
+With that, I’ll point to the exact line to guard (usually a 2–3 line change) and we’ll keep everything else untouched.

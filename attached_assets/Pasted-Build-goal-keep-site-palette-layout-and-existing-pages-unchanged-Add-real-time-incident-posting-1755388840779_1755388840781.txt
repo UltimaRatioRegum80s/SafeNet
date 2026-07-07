@@ -1,0 +1,136 @@
+Build goal (keep site palette, layout, and existing pages unchanged):
+Add real-time incident posting to the map. Use the browser’s Geolocation API so location works even when GPS is off (the OS will fall back to Wi-Fi/cell triangulation). Stream live markers to all connected clients. Store incidents in a lightweight local database on the Replit project (SQLite). Show accuracy and only accept positions that meet our threshold.
+
+Do NOT add Firebase or any third-party storage/services.
+
+1) Backend (same project)
+
+Add a small Node/Express server with Socket.IO.
+
+Create a SQLite database file in the project for persistence (/data/incidents.db).
+
+Table incidents columns:
+id (text uuid), type (text), description (text), lat (real), lng (real), accuracy_m (integer), created_at (integer, epoch ms), reporter_id (text or null).
+
+Endpoints:
+
+GET /incidents?since=<epoch_ms> → returns recent incidents as JSON.
+
+Sockets:
+
+incident:new (client → server): payload {id, type, description, lat, lng, accuracy_m, created_at, reporter_id}.
+Server validates and writes to DB, then broadcasts incident:broadcast with the same payload to all clients.
+
+Validation rules (server must enforce):
+
+Required: lat, lng, accuracy_m.
+
+Reject if accuracy_m > 100 (configurable), or if coordinates are out of Namibia bounds when the user’s community is Namibia (leave a TODO to make this per-community later).
+
+Rate-limit by reporter_id/IP: max 1 new incident every 10 seconds.
+
+Serve the existing frontend and the Leaflet assets (leave our current UI intact).
+
+2) Frontend (keep current UI; add minimal hooks)
+
+Use Leaflet map already in the app.
+
+Add a “Report anonymously” toggle that we already have, and a Report button for each incident type card.
+
+When a user taps a report type:
+
+Call navigator.geolocation.getCurrentPosition with:
+
+enableHighAccuracy: true initially; if that times out, retry with enableHighAccuracy: false to allow network-based location.
+
+timeout: 6000 ms (first try), then 6000 ms again on the fallback.
+
+maximumAge: 10000 ms.
+
+If permission denied or no fix in 12s total, show a “Drop pin manually” mode (Leaflet click to set location).
+
+Always capture the returned coords.accuracy and pass it to the server as accuracy_m.
+
+If accuracy_m > 100, prompt the user:
+“Location is too imprecise right now (±{accuracy_m} m). Try again, move near a window, or use manual pin.”
+
+For live updates while a user is moving (e.g., SOS): add a “Share live location” toggle that uses navigator.geolocation.watchPosition with:
+
+enableHighAccuracy: true, maximumAge: 5000, timeout: 6000.
+
+Throttle emits to at most once every 3 seconds and only if the new point moved > 15 m or accuracy improved by > 20 m.
+
+Send updates over Socket.IO as incident:liveUpdate:{id}; server relays to room {id}. (Keep the simple single-point incidents first; live mode is optional.)
+
+3) Map rendering (Leaflet)
+
+When posting or receiving an incident:
+
+Plot a marker at (lat, lng).
+
+Draw a faint accuracy circle radius = accuracy_m meters around the marker.
+
+Use the incident type’s existing icon; do not change the color palette.
+
+On load:
+
+Fetch last 24h incidents via GET /incidents?since=<epoch_ms> and render.
+
+Subscribe to incident:broadcast and add markers instantly.
+
+Add a filter bar that we already have (“All / Crime / Suspicious / Alerts”)—reuse it to hide/show marker layers.
+
+4) Privacy & permissions (must-have UX)
+
+Show the standard browser permission prompt: explain that Location Services may use Wi-Fi/cell if GPS is off.
+
+Respect “anonymous” mode: do not store any personal fields when that toggle is on (leave reporter_id null).
+
+Provide a visible “Stop sharing live location” button when live mode is active.
+
+5) Accuracy & reliability rules
+
+Accept an incident only if:
+
+accuracy_m ≤ 100 (fail soft with a dialog).
+
+Position timestamp is ≤ 10 seconds old.
+
+If the initial enableHighAccuracy: true call fails (often indoors), automatically retry with enableHighAccuracy: false to allow network-based location (Wi-Fi positioning / cell triangulation).
+
+If still no fix, switch to manual pin mode.
+
+Show an accuracy badge in the incident card (e.g., “±18 m”).
+
+6) Security & abuse controls
+
+Server sanitizes text fields, strips HTML.
+
+Rate-limit incident creation per IP and per reporter_id.
+
+Optionally compute a simple signature on the client and verify on the server (prevent trivial replay).
+
+7) Keep everything on Replit
+
+Run the Node/Express + Socket.IO server inside the Replit project.
+
+Store the SQLite file locally in the project workspace (/data/incidents.db).
+
+No external storage, no Firebase, no outside services.
+
+8) QA checklist for Replit to complete
+
+ With GPS OFF but Location ON (Wi-Fi/cell available), the app can still get a location and post an incident.
+
+ Accuracy circle appears; incidents with accuracy_m > 100 are rejected with a friendly message.
+
+ New incidents appear instantly on all open clients via WebSockets.
+
+ Manual pin works when permission is denied or a fix fails.
+
+ Live location toggle (optional) streams updates and can be stopped.
+
+ Database persists incidents across restarts.
+
+Notes for the agent:
+Use the browser’s Geolocation API; the OS will supply Wi-Fi Positioning / Cell-ID data when GPS is off. This is exactly how Google Maps shows a blue dot indoors. Keep UI and color palette unchanged; only add the logic, endpoints, and small UI hooks described above.

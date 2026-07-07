@@ -1,0 +1,68 @@
+[
+  {
+    "id": "1",
+    "lat": -22.5597,
+    "lng": 17.0658,
+    "type": "crime",
+    "title": "Vehicle Break-in",
+    "description": "Car window smashed, items stolen from vehicle parked in Windhoek CBD",
+    "timestamp": "2 hours ago",
+    "category": "Theft",
+    "severity": "high"
+  },
+  {
+    "id": "2", 
+    "lat": -22.5497,
+    "lng": 17.0758,
+    "type": "suspicious",
+    "title": "Suspicious Person",
+    "description": "Individual taking photos of homes and checking door handles in Klein Windhoek",
+    "timestamp": "4 hours ago",
+    "category": "Suspicious Activity",
+    "severity": "medium"
+  },
+  {
+    "id": "3",
+    "lat": -22.5697,
+    "lng": 17.0558,
+    "type": "safety_alert",
+    "title": "Road Construction",
+    "description": "Road work on Independence Avenue causing traffic delays and detours",
+    "timestamp": "1 day ago",
+    "category": "Traffic",
+    "severity": "low"
+  },
+  {
+    "id": "4",
+    "lat": -22.5797,
+    "lng": 17.0458,
+    "type": "crime",
+    "title": "Package Theft",
+    "description": "Multiple packages stolen from residential area in Olympia",
+    "timestamp": "2 days ago",
+    "category": "Theft", 
+    "severity": "medium"
+  },
+  {
+    "id": "5",
+    "lat": -22.5397,
+    "lng": 17.0858,
+    "type": "crime",
+    "title": "Bike Theft",
+    "description": "Bicycle stolen from shopping center in Pioneers Park, lock was cut",
+    "timestamp": "3 hours ago",
+    "category": "Theft",
+    "severity": "medium"
+  },
+  {
+    "id": "6",
+    "lat": -22.5897,
+    "lng": 17.0358,
+    "type": "suspicious",
+    "title": "Unusual Activity",
+    "description": "Person attempting to look into parked cars late at night in Dorado Park",
+    "timestamp": "6 hours ago",
+    "category": "Suspicious Activity",
+    "severity": "medium"
+  }
+]

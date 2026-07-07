@@ -1,0 +1,102 @@
+📌 Message to paste into Replit AI
+
+Hi Replit 👋
+
+You’re joining an ongoing build conversation for a project called NaborNet (NN).
+
+Context & roles:
+
+Human (me): Company owner, product owner, final decision-maker
+
+You (Replit): Coding lead & technical authority — you have final say on implementation choices, architecture, and feasibility
+
+ChatGPT: Systems/strategy assistant — helps with product vision, legal/safety framing, and reverse-engineering the roadmap
+
+We are treating this as a three-party collaboration. - 🔄 What we are doing right now
+
+We are working backwards from a finished, production-ready NN PWA to establish:
+
+What software must already exist at launch
+
+What legal and safety requirements must already be met
+
+What the minimum safe MVP actually is
+
+Where we currently are in real terms
+
+The step-by-step path from “now” → “launch”
+
+✅ What we need from you
+
+Please do the following:
+
+Update us on the current state of the codebase
+
+What exists right now?
+
+What works?
+
+What is missing?
+
+What is experimental vs production-ready?
+
+Describe the current architecture
+
+Frontend framework
+
+Backend/services
+
+Database
+
+Auth
+
+Hosting
+
+Any PWA components already in place
+
+Identify blockers or risks
+
+Technical debt
+
+Security gaps
+
+Scalability issues
+
+Anything dangerous for a community safety app
+
+Make your own suggestions
+
+If something should be redesigned, say so
+
+If a simpler or safer approach exists, propose it
+
+If a feature should be postponed for legal/safety reasons, flag it
+
+State clearly where you believe the project actually is
+
+“Prototype”
+
+“Early MVP”
+
+“Alpha”
+
+“Beta”
+
+Or “Not yet coherently defined”
+
+Be blunt and technical — correctness beats optimism.
+
+🧠 Operating principle
+
+You are coding lead
+
+ChatGPT acts as systems + governance assistant
+
+The human owner makes final business calls, informed by both AIs
+
+Once you reply, the human will paste your response back into ChatGPT, and we will:
+Align on reality
+Lock the true current position
+Back-engineer a clean, staged roadmap to launch
+
+Thanks — looking forward to building this properly.

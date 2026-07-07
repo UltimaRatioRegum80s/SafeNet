@@ -1,0 +1,961 @@
+import type { Express, Request, Response, NextFunction } from "express";
+import { createServer, type Server } from "http";
+import { storage } from "./storage";
+import { 
+  insertUserSchema, 
+  insertIncidentSchema, 
+  insertReportSchema,
+  insertFollowSchema,
+  insertChatMessageSchema,
+  insertBusinessSchema,
+  insertEventSchema,
+  insertDrivebyRequestSchema,
+  signupSchema,
+  loginSchema,
+  anonJoinSchema
+} from "@shared/schema";
+import { 
+  createUser, 
+  createAnonymousUser, 
+  validateLogin 
+} from "./auth";
+import { getCitiesByCountry, getNeighbourhoodsByCity, getSupportedCountries } from "./locationService";
+import { Server as SocketIOServer } from "socket.io";
+import { incidentDB, validateIncidentData, checkRateLimit, type CreateIncidentData } from "./incidentDatabase";
+import { sanitizeText, normalizeText, validateCoordinates, incidentContentKey } from "./lib/dedupe";
+import { assertIdempotency, storeIdempotencyResult, getIdempotencyResult } from "./lib/idempotency";
+import uploadsRouter from "./routes/uploads";
+import { limitUploads } from "./middleware/rateLimitUploads";
+
+// Note: sanitizeText moved to server/lib/dedupe.ts for better organization
+
+// Security: RBAC helpers
+const MODERATOR_TYPES = new Set(["police", "municipal", "security", "fire", "medical", "ngo"]);
+
+async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const uid = (req.session as any)?.userId || (req.headers["x-user-id"] as string);
+  if (!uid) return res.status(401).json({ error: "Authentication required" });
+  (req as any).authUserId = uid;
+  next();
+}
+
+async function requireAuthOptional(req: Request, res: Response, next: NextFunction) {
+  const uid = (req.session as any)?.userId || (req.headers["x-user-id"] as string);
+  if (uid) (req as any).authUserId = uid;
+  next();
+}
+
+async function requireModerator(req: Request, res: Response, next: NextFunction) {
+  const uid = (req.session as any)?.userId || (req.headers["x-user-id"] as string);
+  if (!uid) return res.status(401).json({ error: "Authentication required" });
+
+  try {
+    const user = await storage.getUser(uid);
+    if (!user) return res.status(401).json({ error: "User not found" });
+    
+    // Check if user is verified and has moderator privileges
+    if (!(user.isVerified && user.verifiedType && MODERATOR_TYPES.has(String(user.verifiedType)))) {
+      return res.status(403).json({ error: "Moderator privileges required" });
+    }
+    
+    (req as any).authUserId = uid;
+    next();
+  } catch (error) {
+    return res.status(500).json({ error: "Authorization check failed" });
+  }
+}
+
+export async function registerRoutes(app: Express): Promise<Server> {
+  // Mount uploads router with rate limiting
+  app.use("/api/uploads", limitUploads, requireAuthOptional, uploadsRouter);
+  // Authentication routes
+      
+      res.json({ 
+        ok: true, 
+        user: { 
+          id: user.id, 
+          username: user.username, 
+          roles: user.roles, 
+          country: user.country, 
+          city: user.city,
+          neighbourhood: user.neighbourhood
+        } 
+      });
+    } catch (error: any) {
+      console.error('Signup error:', error);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { email, password } = loginSchema.parse(req.body);
+      
+      // Validate input
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required" });
+      }
+      
+      const user = await validateLogin(email, password);
+      
+      if (!user) {
+        return res.status(401).json({ error: "Invalid email or password" });
+      }
+      
+      // Store user in session
+      (req.session as any).userId = user.id;
+      
+      res.json({ 
+        ok: true, 
+        user: { 
+          id: user.id, 
+          username: user.username, 
+          roles: user.roles, 
+          country: user.country, 
+          city: user.city,
+          neighbourhood: user.neighbourhood
+        } 
+      });
+    } catch (error: any) {
+      console.error('Login error:', error);
+      
+      // Handle validation errors differently
+      if (error.name === 'ZodError') {
+        return res.status(400).json({ error: "Invalid email or password format" });
+      }
+      
+      res.status(500).json({ error: "An error occurred during login. Please try again." });
+    }
+  });
+
+  app.post("/api/auth/anon-join", async (req, res) => {
+    try {
+      const userData = anonJoinSchema.parse(req.body);
+      const user = await createAnonymousUser(userData);
+      
+      // Store user in session
+      (req.session as any).userId = user.id;
+      
+      res.json({ 
+        ok: true, 
+        user: { 
+          id: user.id, 
+          username: user.username, 
+          roles: user.roles, 
+          country: user.country, 
+          city: user.city,
+          neighbourhood: user.neighbourhood
+        } 
+      });
+    } catch (error: any) {
+      console.error('Anonymous join error:', error);
+      
+      // Handle specific database constraint errors
+      if (error.code === '23505') {
+        if (error.constraint === 'users_email_unique') {
+          return res.status(400).json({ error: 'An account with this email address already exists. Please try logging in instead.' });
+        }
+        if (error.constraint === 'users_username_unique') {
+          return res.status(400).json({ error: 'This username is already taken. Please choose a different one.' });
+        }
+      }
+      
+      res.status(400).json({ error: error.message || 'Unable to create account. Please try again.' });
+    }
+  });
+
+  app.post("/api/auth/logout", async (req, res) => {
+    req.session.destroy((err) => {
+      if (err) {
+        return res.status(500).json({ error: "Could not log out" });
+      }
+      res.clearCookie('connect.sid');
+      res.json({ ok: true });
+    });
+  });
+
+  app.get("/api/auth/me", async (req, res) => {
+    try {
+      const userId = (req.session as any).userId;
+      if (!userId) {
+        return res.status(401).json({ error: "Not authenticated" });
+      }
+      
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
+      
+      res.json({ 
+        user: { 
+          id: user.id, 
+          username: user.username, 
+          roles: user.roles, 
+          country: user.country, 
+          city: user.city,
+          neighbourhood: user.neighbourhood
+        } 
+      });
+    } catch (error: any) {
+      console.error('Auth check error:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // User routes
+  app.post("/api/users", async (req, res) => {
+    try {
+      const userData = insertUserSchema.parse(req.body);
+      const user = await storage.createUser(userData);
+      res.json(user);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/users/:id", async (req, res) => {
+    try {
+      const user = await storage.getUser(req.params.id);
+      if (!user) return res.status(404).json({ error: "User not found" });
+      res.json(user);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Update user location for geo-notifications
+  app.post("/api/users/:id/location", async (req, res) => {
+    try {
+      const { latitude, longitude } = req.body;
+      await storage.updateUserLocation(req.params.id, latitude, longitude);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Verify user (admin only)
+  // Security: Admin/moderator only - verify user accounts
+  app.post("/api/users/:id/verify", requireModerator, async (req, res) => {
+    try {
+      const { type, badge } = req.body;
+      const user = await storage.verifyUser(req.params.id, type, badge);
+      res.json(user);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Enhanced incident creation with duplicate detection, idempotency, and anonymous reporting  
+  app.post("/api/incidents", async (req, res) => {
+    try {
+      const incidentData = insertIncidentSchema.parse(req.body);
+
+      // Phase 1: Idempotency-Key support (without Redis)
+      const idempotencyKey = req.header("Idempotency-Key");
+      if (idempotencyKey) {
+        const cachedResult = getIdempotencyResult(idempotencyKey);
+        if (cachedResult) {
+          return res.json(cachedResult); // Return cached response
+        }
+        if (!assertIdempotency(idempotencyKey)) {
+          return res.status(409).json({ error: "Duplicate submission detected" });
+        }
+      }
+
+      // Security: Enhanced sanitization and validation
+      const sanitizedData = {
+        ...incidentData,
+        title: sanitizeText(incidentData.title),
+        description: sanitizeText(incidentData.description),
+      };
+
+      // Validate coordinates are within supported region
+      const lat = Number(sanitizedData.latitude);
+      const lon = Number(sanitizedData.longitude);
+      if (!validateCoordinates(lat, lon)) {
+        return res.status(400).json({ 
+          error: "Location outside supported region (Southern Africa)" 
+        });
+      }
+
+      // Security: Enhanced rate limiting with configurable parameters
+      const key = (req.session as any)?.userId || 
+                 (req.headers["x-user-id"] as string) || 
+                 `ip:${req.ip}`;
+
+      const isAnonymous = Boolean(sanitizedData.isAnonymous);
+      if (!checkRateLimit(key, isAnonymous)) {
+        return res.status(429).json({ 
+          error: "Too many reports, please slow down",
+          retryAfter: isAnonymous ? 20 : 10
+        });
+      }
+
+      const userId = key.startsWith("ip:") ? null : key;
+
+      // Enhanced duplicate detection with configurable parameters
+      const duplicateIncident = await storage.findDuplicateIncident(
+        sanitizedData.type,
+        lat,
+        lon
+      );
+
+      if (duplicateIncident) {
+        // Increment duplicate count instead of creating new incident
+        await storage.incrementDuplicateCount(duplicateIncident.id);
+        const result = { ...duplicateIncident, isDuplicate: true };
+        
+        // Cache idempotent result
+        if (idempotencyKey) {
+          storeIdempotencyResult(idempotencyKey, result);
+        }
+        
+        return res.json(result);
+      }
+
+      // Create new incident
+      const incidentToCreate = { 
+        ...sanitizedData, 
+        userId,
+        source: "gps" as const
+      };
+      
+      const incident = await storage.createIncident(incidentToCreate);
+      
+      // Cache idempotent result for successful creation
+      if (idempotencyKey) {
+        storeIdempotencyResult(idempotencyKey, incident);
+      }
+      
+      // Return incident with status aliasing
+      res.json(toApiIncident(incident, true)); // Reporter sees full data
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/incidents", async (req, res) => {
+    try {
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = Math.min(parseInt(req.query.limit as string) || 50, 100); // Max 100 items per page
+      
+      // Add caching headers for better performance
+      res.set('Cache-Control', 'public, max-age=60'); // Cache for 1 minute
+      
+      const incidents = await storage.getIncidents(limit);
+      
+      // Apply status aliasing to all incidents
+      const apiIncidents = incidents.map(inc => toApiIncident(inc, false));
+      
+      res.json({
+        incidents: apiIncidents,
+        pagination: {
+          page,
+          limit,
+          hasMore: incidents.length === limit,
+          total: incidents.length
+        }
+      });
+    } catch (error: any) {
+      console.error('Error fetching incidents:', error);
+      res.status(500).json({ error: "Failed to fetch incidents" });
+    }
+  });
+
+  // Enhanced nearby incidents with time filtering
+  app.get("/api/incidents/nearby", async (req, res) => {
+    try {
+      const { latitude, longitude, radius = 1000, sinceHours = 12 } = req.query;
+      
+      // Security: Robust numeric validation (prevents rejecting valid zeros)
+      const lat = Number(latitude);
+      const lng = Number(longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return res.status(400).json({ error: "Valid latitude and longitude coordinates required" });
+      }
+      
+      const rad = Number(radius);
+      const safeRadius = Number.isFinite(rad) && rad > 0 ? rad : 1000;
+      
+      // Time filtering: default 12h, allow 24h max, never >24h for map
+      const hours = Math.min(Number(sinceHours) || 12, 24);
+      
+      const incidents = await storage.getIncidentsNearby(lat, lng, safeRadius, hours);
+      // Apply status aliasing to nearby incidents
+      const apiIncidents = incidents.map(inc => toApiIncident(inc, false));
+      res.json(apiIncidents);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Enhanced moderation routes
+  // Security: Moderator only - incident moderation
+  app.post("/api/incidents/:id/moderate", requireModerator, async (req, res) => {
+    try {
+      const moderatorId = (req as any).authUserId; // From middleware
+      const { reason } = req.body;
+      await storage.moderateIncident(req.params.id, moderatorId, reason);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Security: Moderator only - resolve incident
+  app.post("/api/incidents/:id/resolve", requireModerator, async (req, res) => {
+    try {
+      const moderatorId = (req as any).authUserId;
+      const { resolveNote } = req.body;
+      const incident = await storage.resolveIncident(req.params.id, moderatorId, resolveNote || "Resolved by moderator");
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Security: Moderator only - get anonymous incidents queue
+  app.get("/api/mod/anonymous", requireModerator, async (req, res) => {
+    try {
+      const incidents = await storage.getAnonymousIncidentsQueue();
+      res.json(incidents);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Report incident route
+  // Security: Require authentication for incident reporting
+  app.post("/api/incidents/:id/report", requireAuth, async (req, res) => {
+    try {
+      const reportData = insertReportSchema.parse({
+        ...req.body,
+        incidentId: req.params.id
+      });
+      const reporterId = (req as any).authUserId; // From auth middleware
+      const report = await storage.reportIncident({ ...reportData, reporterId });
+      res.json(report);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Follow incident routes
+  // Security: Require authentication for following incidents  
+  app.post("/api/incidents/:id/follow", requireAuth, async (req, res) => {
+    try {
+      const userId = (req as any).authUserId; // From auth middleware
+      const follow = await storage.followIncident({ 
+        incidentId: req.params.id, 
+        userId 
+      });
+      res.json(follow);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/incidents/:id/follow", requireAuth, async (req, res) => {
+    try {
+      const userId = (req as any).authUserId; // From auth middleware
+      await storage.unfollowIncident(userId, req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // Notifications routes
+  app.get("/api/notifications", async (req, res) => {
+    try {
+      const userId = req.headers['x-user-id'] as string;
+      const notifications = await storage.getUserNotifications(userId);
+      res.json(notifications);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/notifications/:id/read", async (req, res) => {
+    try {
+      await storage.markNotificationRead(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  // IP Geolocation fallback endpoint
+  app.get("/api/geo/ip", async (req, res) => {
+    try {
+      // Get client IP address
+      const clientIp = req.headers['x-forwarded-for'] || 
+                      req.headers['x-real-ip'] || 
+                      req.connection.remoteAddress || 
+                      req.socket.remoteAddress || 
+                      (req.connection as any)?.socket?.remoteAddress ||
+                      '127.0.0.1';
+
+      // For localhost/development, return Windhoek coordinates
+      if (clientIp === '127.0.0.1' || clientIp === '::1' || (clientIp as string).includes('localhost')) {
+        return res.json({
+          lat: -22.5609,
+          lon: 17.0658,
+          accuracy: 25000,
+          city: 'Windhoek',
+          country: 'Namibia',
+          source: 'ip-fallback-dev'
+        });
+      }
+
+      // In production, you could integrate with IP geolocation services like:
+      // - ipapi.co
+      // - ipgeolocation.io
+      // - MaxMind GeoIP2
+      // For now, return Southern Africa region center as fallback
+      res.json({
+        lat: -22.5609, // Windhoek, Namibia (regional center)
+        lon: 17.0658,
+        accuracy: 50000, // ~50km accuracy for IP-based geolocation
+        city: 'Windhoek',
+        country: 'Namibia',
+        source: 'ip-fallback'
+      });
+    } catch (error: any) {
+      console.error('IP geolocation error:', error);
+      res.status(500).json({ error: "IP geolocation unavailable" });
+    }
+  });
+
+  // Location API routes (with both singular and plural endpoints for compatibility)
+  app.get("/api/location/countries", (req, res) => {
+    try {
+      const countries = getSupportedCountries();
+      res.json({ countries });
+    } catch (error: any) {
+      console.error('Error fetching countries:', error);
+      res.status(500).json({ error: "Failed to fetch countries" });
+    }
+  });
+
+  app.get("/api/locations/countries", (req, res) => {
+    try {
+      const countries = getSupportedCountries();
+      res.json({ countries });
+    } catch (error: any) {
+      console.error('Error fetching countries:', error);
+      res.status(500).json({ error: "Failed to fetch countries" });
+    }
+  });
+
+  app.get("/api/location/cities/:country", (req, res) => {
+    try {
+      const { country } = req.params;
+      const cities = getCitiesByCountry(country);
+      res.json({ cities: cities.map(city => ({ name: city.name, population: city.population })) });
+    } catch (error: any) {
+      console.error('Error fetching cities:', error);
+      res.status(500).json({ error: "Failed to fetch cities" });
+    }
+  });
+
+  app.get("/api/locations/cities/:country", (req, res) => {
+    try {
+      const { country } = req.params;
+      const cities = getCitiesByCountry(country);
+      res.json({ cities: cities.map(city => ({ name: city.name, population: city.population })) });
+    } catch (error: any) {
+      console.error('Error fetching cities:', error);
+      res.status(500).json({ error: "Failed to fetch cities" });
+    }
+  });
+
+  app.get("/api/location/neighbourhoods/:country/:city", (req, res) => {
+    try {
+      const { country, city } = req.params;
+      const neighbourhoods = getNeighbourhoodsByCity(city, country);
+      res.json({ neighbourhoods: neighbourhoods.map(n => ({ name: n.name, population: n.population })) });
+    } catch (error: any) {
+      console.error('Error fetching neighbourhoods:', error);
+      res.status(500).json({ error: "Failed to fetch neighbourhoods" });
+    }
+  });
+
+  app.get("/api/locations/neighbourhoods/:country/:city", (req, res) => {
+    try {
+      const { country, city } = req.params;
+      const neighbourhoods = getNeighbourhoodsByCity(city, country);
+      res.json({ neighbourhoods: neighbourhoods.map(n => ({ name: n.name, population: n.population })) });
+    } catch (error: any) {
+      console.error('Error fetching neighbourhoods:', error);
+      res.status(500).json({ error: "Failed to fetch neighbourhoods" });
+    }
+  });
+
+  // Community chat routes
+  app.post("/api/chat/:room", async (req, res) => {
+    try {
+      const { room } = req.params;
+      const messageData = insertChatMessageSchema.parse({
+        ...req.body,
+        room
+      });
+      
+      const userId = req.headers['x-user-id'] as string || null;
+      const message = await storage.createChatMessage({ ...messageData, userId });
+      
+      // Broadcast to connected clients via WebSocket
+      io.to(`chat:${room}`).emit("message", message);
+      
+      res.json(message);
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/chat/:room", async (req, res) => {
+    try {
+      const { room } = req.params;
+      const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
+      const messages = await storage.getChatHistory(room, limit);
+      res.json(messages.reverse()); // Return in chronological order
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Real-time incident endpoints
+  app.get("/api/incidents/live", async (req, res) => {
+    try {
+      const since = req.query.since ? parseInt(req.query.since as string) : (Date.now() - 24 * 60 * 60 * 1000);
+      const incidents = await storage.getIncidents();
+      const filtered = incidents.filter(i => i.createdAt && new Date(i.createdAt).getTime() > since);
+      // Apply status aliasing to live incidents
+      const apiIncidents = filtered.map(inc => toApiIncident(inc, false));
+      res.json(apiIncidents);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Phase 2: Community Business routes
+  app.post("/api/businesses", requireAuth, async (req, res) => {
+    try {
+      const businessData = insertBusinessSchema.parse(req.body);
+      const business = await storage.createBusiness({
+        ...businessData,
+        ownerId: (req as any).authUserId
+      });
+      res.json({ ok: true, business });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Invalid business data" });
+    }
+  });
+
+  app.get("/api/businesses/nearby", async (req, res) => {
+    try {
+      const { lat, lng, radius = 2000 } = req.query;
+      if (!lat || !lng) return res.status(400).json({ error: "Coordinates required" });
+      
+      const businesses = await storage.getBusinessesNearby(
+        Number(lat), 
+        Number(lng), 
+        Number(radius)
+      );
+      res.json(businesses);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch businesses" });
+    }
+  });
+
+  // Phase 2: Community Events routes
+  app.post("/api/events", requireAuth, async (req, res) => {
+    try {
+      const eventData = insertEventSchema.parse(req.body);
+      const event = await storage.createEvent({
+        ...eventData,
+        organizerId: (req as any).authUserId
+      });
+      res.json({ ok: true, event });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Invalid event data" });
+    }
+  });
+
+  app.get("/api/events/nearby", async (req, res) => {
+    try {
+      const { lat, lng, radius = 5000, sinceHours = 0, untilHours = 168 } = req.query;
+      if (!lat || !lng) return res.status(400).json({ error: "Coordinates required" });
+      
+      const events = await storage.getEventsNearby(
+        Number(lat), 
+        Number(lng), 
+        Number(radius),
+        Number(sinceHours),
+        Number(untilHours)
+      );
+      res.json(events);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch events" });
+    }
+  });
+
+  app.get("/api/promotions/nearby", async (req, res) => {
+    try {
+      const { lat, lng, radius = 5000 } = req.query;
+      if (!lat || !lng) return res.status(400).json({ error: "Coordinates required" });
+      
+      const promotions = await storage.getActivePromotions(
+        Number(lat), 
+        Number(lng), 
+        Number(radius)
+      );
+      res.json(promotions);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch promotions" });
+    }
+  });
+
+  // Phase 2: Drive-by Security Request routes
+  app.post("/api/driveby-requests", requireAuth, async (req, res) => {
+    try {
+      const requestData = insertDrivebyRequestSchema.parse(req.body);
+      const request = await storage.createDrivebyRequest({
+        ...requestData,
+        requesterId: (req as any).authUserId
+      });
+      res.json({ ok: true, request });
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : "Invalid request data" });
+    }
+  });
+
+  app.get("/api/driveby-requests", requireAuth, async (req, res) => {
+    try {
+      const requests = await storage.getUserDrivebyRequests((req as any).authUserId);
+      res.json(requests);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch requests" });
+    }
+  });
+
+  app.get("/api/driveby-requests/inbox", requireModerator, async (req, res) => {
+    try {
+      const requests = await storage.getDrivebyInbox();
+      res.json(requests);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch inbox" });
+    }
+  });
+
+  app.post("/api/driveby-requests/:id/accept", requireModerator, async (req, res) => {
+    try {
+      const { estimatedArrival } = req.body;
+      const request = await storage.acceptDrivebyRequest(
+        req.params.id, 
+        (req as any).authUserId,
+        estimatedArrival ? new Date(estimatedArrival) : undefined
+      );
+      res.json({ ok: true, request });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to accept request" });
+    }
+  });
+
+  app.post("/api/driveby-requests/:id/complete", requireModerator, async (req, res) => {
+    try {
+      const { completionNotes } = req.body;
+      const request = await storage.completeDrivebyRequest(req.params.id, sanitizeText(completionNotes));
+      res.json({ ok: true, request });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to complete request" });
+    }
+  });
+
+  // Phase 2: Enhanced incident authority actions
+  app.post("/api/incidents/:id/acknowledge", requireModerator, async (req, res) => {
+    try {
+      const incident = await storage.acknowledgeIncident(req.params.id, (req as any).authUserId);
+      res.json({ ok: true, incident });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to acknowledge incident" });
+    }
+  });
+
+  app.post("/api/incidents/:id/resolve", requireModerator, async (req, res) => {
+    try {
+      const { resolveNote } = req.body;
+      const incident = await storage.resolveIncident(
+        req.params.id, 
+        (req as any).authUserId, 
+        sanitizeText(resolveNote)
+      );
+      res.json({ ok: true, incident });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to resolve incident" });
+    }
+  });
+
+  // Create HTTP server
+  const httpServer = createServer(app);
+  
+  // Setup Socket.IO
+  const io = new SocketIOServer(httpServer, {
+    path: '/socket.io',
+    cors: {
+      origin: "*",
+      methods: ["GET", "POST"]
+    }
+  });
+
+  // Helper to get session data from socket request
+  async function getSessionForSocket(req: any): Promise<{ userId?: string; neighborhood?: string }> {
+    try {
+      if (req.session?.userId) {
+        const user = await storage.getUser(req.session.userId);
+        if (user) {
+          const neighborhood = `${user.city}:${user.neighbourhood || 'general'}`;
+          return { userId: user.id, neighborhood };
+        }
+      }
+      return {};
+    } catch (error) {
+      console.error('Session lookup error:', error);
+      return {};
+    }
+  }
+
+  // Helper to convert DB incident to API format with status aliasing
+  function toApiIncident(incident: any, isAdmin: boolean = false) {
+    const result = {
+      ...incident,
+      status: incident.state === "new" ? "pending" : incident.state, // Alias state->status
+    };
+    
+    // Hide userId from non-admins when anonymous
+    if (!isAdmin && incident.isAnonymous) {
+      delete result.userId;
+    }
+    
+    return result;
+  }
+
+  // Socket.IO incident and chat handling
+  io.on('connection', async (socket) => {
+    console.log('Client connected:', socket.id);
+    
+    // Join neighborhood room based on user session
+    try {
+      const sessionData = await getSessionForSocket(socket.request);
+      if (sessionData.neighborhood) {
+        socket.join(`nh:${sessionData.neighborhood}`);
+        console.log(`Client ${socket.id} joined neighborhood: ${sessionData.neighborhood}`);
+      }
+    } catch (error) {
+      console.error('Failed to join neighborhood room:', error);
+    }
+
+    // Join chat rooms
+    socket.on('join:chat', (room) => {
+      socket.join(`chat:${room}`);
+      console.log(`Client ${socket.id} joined chat room: ${room}`);
+    });
+
+    socket.on('leave:chat', (room) => {
+      socket.leave(`chat:${room}`);
+      console.log(`Client ${socket.id} left chat room: ${room}`);
+    });
+
+    // Enhanced incident handling with rate limiting and validation
+    socket.on('incident:new', async (data) => {
+      try {
+        // Basic validation
+        if (!data.type || !data.latitude || !data.longitude) {
+          socket.emit('incident:error', { error: 'Missing required fields' });
+          return;
+        }
+
+        // Enhanced rate limiting for socket connections
+        const reporterId = data.reporter_id || socket.id;
+        const isAnonymous = !data.reporter_id;
+        
+        if (!checkRateLimit(reporterId, isAnonymous)) {
+          socket.emit('incident:error', { 
+            error: 'Rate limit exceeded. Please wait before reporting another incident.',
+            retryAfter: isAnonymous ? 20 : 10
+          });
+          return;
+        }
+
+        // Enhanced validation and sanitization
+        const lat = Number(data.latitude);
+        const lon = Number(data.longitude);
+        
+        if (!validateCoordinates(lat, lon)) {
+          socket.emit('incident:error', { 
+            error: 'Location outside supported region (Southern Africa)' 
+          });
+          return;
+        }
+
+        // Create sanitized incident data
+        const incidentData = {
+          type: sanitizeText(data.type),
+          title: sanitizeText(data.description) || `${data.type} reported`,
+          description: sanitizeText(data.description) || `${data.type} incident reported via quick report`,
+          latitude: lat.toString(),
+          longitude: lon.toString(),
+          severity: 'medium' as const,
+          category: sanitizeText(data.type),
+          isAnonymous: isAnonymous,
+          source: 'gps' as const,
+          userId: data.reporter_id || null,
+          state: 'new' as const
+        };
+
+        // Check for duplicates before creating
+        const duplicateIncident = await storage.findDuplicateIncident(
+          incidentData.type,
+          lat,
+          lon
+        );
+
+        if (duplicateIncident) {
+          await storage.incrementDuplicateCount(duplicateIncident.id);
+          socket.emit('incident:created', { ...toApiIncident(duplicateIncident, true), isDuplicate: true });
+          return;
+        }
+
+        const incident = await storage.createIncident(incidentData);
+        
+        // Emit success to the reporter with admin view (sees userId)
+        socket.emit('incident:created', toApiIncident(incident, true));
+
+        // Get reporter's neighborhood for targeted broadcast
+        const sessionData = await getSessionForSocket(socket.request);
+        const broadcastIncident = toApiIncident(incident, false); // Hide userId for public
+        
+        if (sessionData.neighborhood) {
+          // Broadcast to neighborhood room only
+          io.to(`nh:${sessionData.neighborhood}`).emit('incident:created', broadcastIncident);
+          console.log(`Broadcasted incident to neighborhood: ${sessionData.neighborhood}`);
+        } else {
+          // Fallback to general broadcast if no neighborhood
+          io.emit('incident:created', broadcastIncident);
+        }
+        
+        console.log('New incident broadcasted:', data.type);
+      } catch (error: any) {
+        console.error('Error creating incident:', error);
+        socket.emit('incident:error', { error: 'Failed to create incident' });
+      }
+    });
+
+    socket.on('disconnect', () => {
+      console.log('Client disconnected:', socket.id);
+    });
+  });
+
+  return httpServer;
+}

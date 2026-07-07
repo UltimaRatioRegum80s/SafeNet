@@ -1,0 +1,148 @@
+GPT → Replit (troubleshoot huddle)
+
+ok—matrix says “doesn’t work,” let’s zero in fast. please reply inline with results; where possible, run the one-liners exactly.
+
+0) Environment sanity (desktop path actually active)
+
+In console:
+
+console.log('isDesktop?', window.matchMedia('(min-width: 1024px)').matches);
+console.log('featureFlag?', window.NN_DESKTOP_TAP_TO_REPORT);
+
+
+Expect: true, and flag either true or undefined if not using one.
+
+1) Report button → overlay
+
+Click Report; immediately run:
+
+import('@/state/useQuickReportStore').then(m => console.log(m.useQuickReportStore.getState()));
+
+
+Expect: { reportMode: true }.
+
+DOM probes:
+
+!!document.querySelector('#map');
+!!document.querySelector('#map.cursor-crosshair, .cursor-crosshair'); // tailwind class applied?
+!!document.querySelector('*:is([role="status"])')?.textContent?.includes('Click the map');
+
+
+If any are false, paste which.
+
+2) Map click → pin & right sheet
+
+Before clicking the map (overlay visible), check Leaflet listeners and double-click state:
+
+const map = (window as any)._nnMap || document.querySelector('#map')?.__leaflet?.map || null;
+// if you expose mapRef.current to window._nnMap during init, use that instead
+console.log('dblClickZoom.enabled?', map?.doubleClickZoom?.enabled?.());
+console.log('click listeners', map?._events?.click?.length);
+
+
+Expect during report mode: dblClickZoom disabled (false), at least 1 click listener.
+
+Click the map once. Then:
+
+console.log('sheet right?', !!document.querySelector('[data-side="right"]'));
+console.log('coords line?', !!document.querySelector('*:is(p,div,span)').textContent?.match(/Location set:\s*-?\d+\.\d+,\s*-?\d+\.\d+/));
+
+
+Both should be true.
+
+3) “Drop a pin” button
+
+Click Drop a pin (desktop sheet). Console should show:
+
+import('@/state/useQuickReportStore').then(m => console.log('after click', m.useQuickReportStore.getState()));
+
+
+Expect: { sheetOpen:false, reportMode:true (or pendingReportMode:true then → true) }.
+
+DOM:
+
+!!document.querySelector('[role="status"]') && !document.querySelector('[data-side="right"]');
+
+
+Overlay visible; sheet closed.
+
+4) Esc to cancel
+
+With overlay visible, press Esc then run:
+
+import('@/state/useQuickReportStore').then(m => console.log(m.useQuickReportStore.getState()));
+!!document.querySelector('[role="status"]')
+
+
+Expect: reportMode:false, overlay absent, focus on Report.
+
+5) If any step fails → targeted fix
+A) Report click does not set reportMode:true
+
+Verify handler:
+
+const handleReportClick = () => { isDesktop ? startReportMode() : openSheet(); }
+
+
+If you adopted the queued start pattern, make sure queueReportMode() + closeSheet() are not being called from the Report button (that pattern is for Drop a pin, not initial Report click).
+
+B) Overlay shows but map click does nothing
+
+Likely a stale Radix portal/backdrop intercepting clicks. Quick fix: raise map z-index and ensure overlay is pointer-events-none:
+
+- <div id="map" className={`h-full w-full ${reportMode ? "cursor-crosshair" : ""}`} />
++ <div id="map" className={`h-full w-full ${reportMode ? "cursor-crosshair" : ""} z-[1] relative`} />
++ {/* overlay */}
+- <div className="pointer-events-none absolute inset-x-0 top-3 z-[500] ...">
++ <div className="pointer-events-none absolute inset-x-0 top-3 z-[600] ...">
+
+
+Also ensure Sheet/Portal backdrop is unmounted when closed; in onOpenChange, do not re-open on blur.
+
+C) Sheet doesn’t open on click
+
+Confirm the handler path:
+
+useEffect(() => {
+  if (!reportMode || !mapRef.current) return;
+  const onClick = (e: L.LeafletMouseEvent) => confirmTempPin({ lat: e.latlng.lat, lng: e.latlng.lng });
+  mapRef.current.once ? mapRef.current.once('click', onClick) : mapRef.current.on('click', onClick);
+  return () => mapRef.current.off('click', onClick);
+}, [reportMode, confirmTempPin]);
+
+
+And confirmTempPin sets sheetOpen:true:
+
+confirmTempPin: (ll) => set({ tempPin: ll, location: ll, sheetOpen: true, reportMode: false })
+
+D) Right-side sheet still opens bottom
+
+Ensure side logic:
+
+<SheetContent side={isDesktop ? "right" : "bottom"} data-side={isDesktop ? "right" : "bottom"} />
+
+
+If hydration mismatch warning appears, gate on useEffect with a local mounted flag to avoid SSR/CSR mismatch.
+
+E) Double-click causes weirdness
+
+Confirm dblclick zoom toggling retains original state:
+
+const dblStateRef = useRef<boolean | null>(null);
+useEffect(() => {
+  const map = mapRef.current; if (!map) return;
+  if (dblStateRef.current === null) dblStateRef.current = map.doubleClickZoom.enabled();
+  if (reportMode) map.doubleClickZoom.disable();
+  else if (dblStateRef.current) map.doubleClickZoom.enable();
+}, [reportMode]);
+
+Optional: tiny HUD to see state live
+
+Temporarily render in Map.tsx:
+
+<div className="absolute left-3 top-3 z-[700] rounded bg-black/60 text-white text-xs px-2 py-1">
+  {JSON.stringify({ sheetOpen, reportMode, pendingReportMode })}
+</div>
+
+
+Your turn: paste the first failing step’s console results (from the probes above). I’ll give you the exact micro-patch to land.

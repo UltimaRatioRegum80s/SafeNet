@@ -1,0 +1,133 @@
+you’re looking at two bars in mobile:
+
+the segment tabs (“All / Incidents / Chat”)
+
+the primary nav (Home / Report / Map / Feed)
+
+You want to be able to swap which one is at the top vs bottom on mobile. Here are two clean patterns you can use, depending on how your current layout is built.
+
+Option A — Fixed bars with a runtime “swap” toggle (most reliable)
+
+Works whether you use sticky or fixed today. We render a TopSlot and a BottomSlot and decide at runtime which component goes where. We also measure heights so the scroll area gets correct padding.
+
+// FeedChrome.tsx
+import React from "react";
+
+const MOBILE_BP = 768;
+function useIsMobile() {
+  const [m, setM] = React.useState(() => typeof window !== "undefined" && window.innerWidth < MOBILE_BP);
+  React.useEffect(() => {
+    const onR = () => setM(window.innerWidth < MOBILE_BP);
+    window.addEventListener("resize", onR);
+    return () => window.removeEventListener("resize", onR);
+  }, []);
+  return !!m;
+}
+
+export function FeedChrome({
+  TabsBar,
+  BottomNav,
+  swapBarsOnMobile = false, // turn on to swap in mobile
+  children,
+}: {
+  TabsBar: React.ReactNode;
+  BottomNav: React.ReactNode;
+  swapBarsOnMobile?: boolean;
+  children: React.ReactNode;
+}) {
+  const isMobile = useIsMobile();
+  const swapped = isMobile && swapBarsOnMobile;
+
+  const topRef = React.useRef<HTMLDivElement>(null);
+  const bottomRef = React.useRef<HTMLDivElement>(null);
+  const [topH, setTopH] = React.useState(0);
+  const [botH, setBotH] = React.useState(0);
+
+  React.useLayoutEffect(() => {
+    const recalc = () => {
+      setTopH(topRef.current?.offsetHeight ?? 0);
+      setBotH(bottomRef.current?.offsetHeight ?? 0);
+    };
+    recalc();
+    window.addEventListener("resize", recalc);
+    return () => window.removeEventListener("resize", recalc);
+  }, []);
+
+  const TopSlot = swapped ? BottomNav : TabsBar;
+  const BottomSlot = swapped ? TabsBar : BottomNav;
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100">
+      {/* TOP BAR */}
+      <div ref={topRef} className="fixed inset-x-0 top-0 z-40">
+        {TopSlot}
+      </div>
+
+      {/* MAIN SCROLL AREA */}
+      <main style={{ paddingTop: topH, paddingBottom: botH }}>
+        {children}
+      </main>
+
+      {/* BOTTOM BAR */}
+      <div ref={bottomRef} className="fixed inset-x-0 bottom-0 z-40">
+        {BottomSlot}
+      </div>
+    </div>
+  );
+}
+
+
+Use it like:
+
+// in FeedPage.tsx (or your route)
+<FeedChrome
+  TabsBar={<SegmentedTabs value={tab} onValueChange={setTab} />}
+  BottomNav={<PrimaryNav active="feed" />}
+  swapBarsOnMobile={true} // flip them on mobile
+>
+  <FeedList tab={tab} />
+</FeedChrome>
+
+
+Notes
+
+This avoids weirdness with position: sticky + bottom:0 on some Android/iOS combos.
+
+If you want iOS safe-area comfort: add extra padding inside the bars using style={{ paddingBottom: 'env(safe-area-inset-bottom)' }} for the bottom one and paddingTop for the top.
+
+Option B — CSS-only reorder (if both bars live in the same flow container)
+
+If you’re using sticky (not fixed) and both bars are siblings, you can reorder them with Tailwind’s order-* responsive utilities.
+
+<div className="flex flex-col min-h-[100dvh] bg-slate-950">
+  {/* By default on mobile, show PrimaryNav on top and Tabs on bottom */}
+  <div className="order-1 sticky top-0 z-30">{/* <PrimaryNav /> */}</div>
+  <div className="flex-1 overflow-y-auto">{/* content */}</div>
+  <div className="order-2 sticky bottom-0 z-30">{/* <SegmentedTabs /> */}</div>
+
+  {/* On md+ swap back: tabs at top, nav at bottom */}
+  {/* Apply md:order-2 / md:order-1 to the two wrappers */}
+</div>
+
+
+Flip the orders as needed:
+
+Tabs wrapper: order-2 md:order-1
+
+Nav wrapper: order-1 md:order-2
+
+Caveats
+
+sticky with bottom:0 is widely supported now, but nested scroll containers or transforms can break it. If you see jitter, use Option A.
+
+Replit ↔ GPT handoff
+
+Replit, can you confirm:
+
+Are these bars currently fixed or sticky?
+
+Are they rendered in separate layout roots (e.g., header portal + bottom nav) or as siblings in one page?
+
+Any existing safe-area handling? (we’ll add it if not)
+
+With that, I’ll adapt the snippet to your exact file/paths and wire it into the Feed page you have.

@@ -1,0 +1,119 @@
+✅ Instruction for Replit / App Development Context
+
+Goal:
+The app currently has 4 pages — Home, Map, Report, and Feed — each available in both mobile and desktop views.
+
+In mobile view, only the Map page currently has a modern design with a Floating Navigation Bar (top-centered, card-style navigation with rounded corners and subtle elevation).
+
+I want all pages (Home, Map, Report, Feed) to include this same Floating Navigation Bar at the top of the page, with identical styling, layout, and behavior as on the Map page.
+
+🔍 Current Differences in Mobile View Menus
+
+In app development terminology:
+
+Dashboard / Feed Pages (Images 1 & 2):
+
+Current Style:
+
+App Bar (Top App Bar in Material Design).
+
+Fixed to the top of the screen.
+
+Contains a page title and optional action icons.
+
+The secondary row below acts as Horizontal Navigation or Primary Navigation.
+
+Result:
+Functional but static — lacks the modern floating look.
+
+Map Page (Image 3):
+
+Current Style:
+
+Floating Tab Bar (also called Floating Navigation or Floating App Bar).
+
+Detached from edges, centered, rounded, slightly elevated.
+
+Has a modern, lightweight, layered feel.
+
+🎯 What We Want to Achieve
+
+We want all pages (Home, Map, Report, Feed) — in mobile view only — to share the same Floating Navigation Bar design as the Map page.
+
+Target outcome:
+
+Unified, modern navigation bar across all mobile pages.
+
+Floating design (rounded, blurred, elevated).
+
+Seamless routing and active-page highlighting.
+
+Zero loss of functionality or logic.
+
+Desktop layouts remain unchanged for now.
+
+Manual testing only.
+
+🔒 Important Requirements
+
+Preserve all existing page logic, hooks, states, and backend integrations.
+
+Do not remove or alter current working logic.
+
+Integrate new UI carefully to maintain current user experience.
+
+Ensure consistency with Tailwind + shadcn/ui design conventions.
+
+Focus only on mobile for this phase — desktop refactor will come later.
+
+💡 Suggestion for Replit (Refactor Plan — Suggestion Only)
+
+⚠️ This is a suggestion only.
+Please review, adapt, and confirm before applying any code changes in Replit.
+
+Suggested Safe Refactor Steps
+
+Create a Shared Component
+
+File: src/components/FloatingNav.tsx
+
+Contains the same floating bar logic as used in the Map page.
+
+Exports a reusable <FloatingNav /> component.
+
+Integrate into Pages Carefully
+
+For each of Home.tsx, Report.tsx, and Feed.tsx:
+Add:
+
+import FloatingNav from "@/components/FloatingNav";
+
+
+Then, inside the top-level JSX container:
+
+<div className="relative h-screen">
+  <FloatingNav />
+  {/* existing content */}
+</div>
+
+
+Keep all existing logic, hooks, and layouts intact.
+
+Restrict to Mobile View
+
+Wrap <FloatingNav /> with:
+
+<div className="block md:hidden">
+  <FloatingNav />
+</div>
+
+
+to prevent interference with desktop layouts.
+
+Manual Verification
+
+Test all navigation links for correct routing and state persistence.
+
+Verify appearance across mobile devices and browser developer tools.
+
+Ensure that the Map page behavior remains unchanged.

@@ -1,0 +1,148 @@
+1) Upgrade the socket client (singleton helpers)
+
+client/src/lib/socketService.ts
+
+// client/src/lib/socketService.ts
+import { io, Socket } from "socket.io-client";
+
+class SocketService {
+  private socket: Socket | null = null;
+
+  connect() {
+    if (this.socket?.connected) return this.socket;
+    this.socket = io(window.location.origin, {
+      path: "/socket.io",
+      transports: ["websocket", "polling"],
+      withCredentials: true,
+      reconnection: true,
+      reconnectionDelay: 500,
+      reconnectionAttempts: Infinity,
+      timeout: 8000,
+    });
+    return this.socket;
+  }
+
+  ensureConnected() {
+    return this.socket?.connected ? this.socket : this.connect();
+  }
+
+  joinChat(room: string) {
+    this.ensureConnected()?.emit("join:chat", room);
+  }
+  leaveChat(room: string) {
+    this.socket?.emit("leave:chat", room);
+  }
+
+  onMessage(cb: (msg: any) => void) {
+    this.ensureConnected()?.on("message", cb);
+  }
+  offMessage(cb: (msg: any) => void) {
+    this.socket?.off("message", cb);
+  }
+
+  emit(event: string, data?: any) {
+    this.ensureConnected()?.emit(event, data);
+  }
+}
+
+export const socketService = new SocketService();
+
+2) Subscribe to live messages and update React Query
+
+client/src/pages/community/Feed.tsx (or wherever your feed component lives)
+
+Add the socket join + listener near the top of the component:
+
+import { socketService } from "../../lib/socketService";
+import { useQueryClient } from "@tanstack/react-query";
+import React from "react";
+
+const ROOM = "general"; // same room used by /api/chat/general
+
+export default function CommunityFeed() {
+  // ...existing state and queries...
+  const queryClient = useQueryClient();
+
+  React.useEffect(() => {
+    // 1) connect + join the chat room
+    socketService.connect();
+    socketService.joinChat(ROOM);
+
+    // 2) live message handler: append to React Query cache
+    const handleMessage = (msg: any) => {
+      // If your query key includes params, match them here
+      queryClient.setQueryData<any[]>(['/api/chat/general'], (prev = []) => [...prev, msg]);
+    };
+
+    socketService.onMessage(handleMessage);
+
+    return () => {
+      socketService.offMessage(handleMessage);
+      socketService.leaveChat(ROOM);
+    };
+  }, [queryClient]);
+  
+  // ...rest of component
+}
+
+
+If you use query keys with limits (recommended), just align the key:
+
+const CHAT_KEY = ['/api/chat/general', { limit: 50 }];
+// useQuery({ queryKey: CHAT_KEY, ... })
+queryClient.setQueryData<any[]>(CHAT_KEY, (prev = []) => [...prev, msg]);
+
+3) (Optional) Optimistic send + server echo
+
+When you POST a new message, add an optimistic item so the sender sees it immediately (even before the server echo). You already have a mutation—just add onMutate:
+
+const CHAT_KEY = ['/api/chat/general', { limit: 50 }];
+
+const sendMessageMutation = useMutation({
+  mutationFn: async (message: string) => {
+    const r = await fetch('/api/chat/general', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message })
+    });
+    if (!r.ok) throw new Error('Failed to send message');
+    return r.json();
+  },
+  onMutate: async (message) => {
+    await queryClient.cancelQueries({ queryKey: CHAT_KEY });
+    const previous = queryClient.getQueryData<any[]>(CHAT_KEY) || [];
+    const temp = {
+      id: `temp-${Date.now()}`,
+      message,
+      userId: user?.id || 'anonymous',
+      createdAt: new Date().toISOString()
+    };
+    queryClient.setQueryData(CHAT_KEY, [...previous, temp]);
+    setInput("");
+    return { previous };
+  },
+  onError: (_err, _msg, ctx) => {
+    if (ctx?.previous) queryClient.setQueryData(CHAT_KEY, ctx.previous);
+  },
+  onSettled: () => {
+    queryClient.invalidateQueries({ queryKey: CHAT_KEY });
+  }
+});
+
+
+Server already broadcasts via:
+
+io.to(`chat:${room}`).emit("message", message);
+
+
+so the message will also arrive on other devices instantly.
+
+4) (Nice to have) Align backend event naming
+
+You’re using generic "message". That’s fine, but if you want to future-proof:
+
+Server: io.to(room).emit("chat:message", message)
+
+Client: onChatMessage / offChatMessage handlers that bind to "chat:message"
+
+Not required—just clearer.

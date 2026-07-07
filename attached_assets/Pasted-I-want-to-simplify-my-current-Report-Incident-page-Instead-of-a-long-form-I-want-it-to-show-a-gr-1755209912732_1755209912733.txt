@@ -1,0 +1,47 @@
+I want to simplify my current “Report Incident” page. Instead of a long form, I want it to show a grid of big icon buttons for different incident types. These should be large, touch-friendly, and laid out in 3–4 per row on desktop and 2 per row on mobile.
+
+When the page loads, the user should see these options:
+
+Suspicious Person (medium severity)
+
+Suspicious Activity (medium)
+
+Fight (high)
+
+Car Accident (high)
+
+Theft (high)
+
+House Alarm (medium)
+
+Traffic Jam (low)
+
+Construction (low)
+
+When the user taps one of these buttons, a confirmation popup should appear. The popup shows the icon and label, automatically detects the user’s location (reverse geocode if possible, otherwise lat/lng), and allows them to optionally type a short note (max 200 characters) and add an optional photo. The popup has two buttons: Submit and Cancel.
+
+On Submit:
+
+Get the user’s current GPS location. If GPS fails or is denied, let the user drop a pin on a small map in the popup.
+
+Create a new incident entry in the existing incidents collection, including tenant ID from auth, type, title, severity, createdBy user ID, timestamp, location, and any note or photos.
+
+Close the popup and show a toast message like “Reported to feed & map.”
+
+The new incident should immediately appear in both the Neighborhood Feed and on the Map. The Feed shows it as a normal post with the correct label, severity color, and time. The Map shows it as a marker with a color based on the type, and the marker’s popup shows the title, note, time ago, and location/address.
+
+The “Report Incident” page should also have a small “Report something else” link at the bottom that opens the old full form for other incident types.
+
+Keep everything else in the app the same (navigation, sidebars, stats, etc.).
+
+Acceptance criteria:
+
+Grid of 8 icon buttons replaces the long form.
+
+Tapping a button opens the confirmation popup.
+
+Submitting creates an incident with correct default values, and it appears instantly in Feed and Map.
+
+If location fails, I can set it manually.
+
+Nothing else in the app changes visually or functionally.

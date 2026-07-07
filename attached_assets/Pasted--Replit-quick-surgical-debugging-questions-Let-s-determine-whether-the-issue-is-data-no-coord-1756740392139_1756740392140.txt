@@ -1,0 +1,87 @@
+👋 Replit — quick, surgical debugging questions
+
+Let’s determine whether the issue is data (no coords coming through) or rendering (we have coords but aren’t placing/seeing them).
+
+A) What’s in the incident objects we’re rendering?
+
+From the Map page where we use the shared feed data, please log one full item:
+
+In the Map page (right before we try to draw markers), log:
+
+console.log("[Map] sample incident", incidents?.[0]);
+console.log("[Map] keys", incidents?.[0] && Object.keys(incidents[0]));
+
+
+👉 Paste the console output for the first item. Specifically, do you see any of these fields?
+
+lat, lng
+
+latitude, longitude
+
+location: { lat, lng } or { latitude, longitude }
+
+geom / coordinates / geoJson
+
+B) Compare two payload shapes
+
+Hit both endpoints and share the shapes (no secrets—just field names and a single sample object):
+
+/api/incidents?limit=5 (the feed-style, no bbox):
+
+Does each items[n] contain coordinates? Which field names?
+
+/api/incidents?bbox=<current-map-bounds>&limit=5 (map-style):
+
+Same question: which fields carry coordinates?
+
+(If easier, paste the TypeScript type/interface you’re using server-side for an Incident.)
+
+C) Permissions / redaction
+
+Does the server redact or coarsen location for feed responses (e.g., “Location available” boolean on the card but no actual coordinates in the feed JSON)? If yes, what param (or endpoint) returns the precise point for map use?
+
+Any privacy/role gating (e.g., only moderators see exact coords)? Our current user in the dev run should be allowed, but worth confirming.
+
+D) Rendering path sanity
+
+When we attempt to draw markers, do we see logs like:
+
+[Map] drew markers: X
+
+or a count of “skipped due to missing coords” (if you added such a log)?
+If not, add one temporary log right where we branch on coord presence and report back counts:
+
+withCoords: N, missingCoords: M
+
+Layer visibility: are we adding markers to a separate LayerGroup or cluster that might be toggled off or added before the base layer? (Just the component path/names is enough.)
+
+E) Coordinate order / CRS
+
+How are coordinates stored?
+
+If GeoJSON: [lng, lat]
+
+If DB columns: latitude/longitude numeric
+
+If PostGIS: geom in EPSG:4326 (WGS84)?
+Leaflet expects [lat, lng]. If the feed gives [lng, lat], markers would be off-map.
+
+Why this matters (and keeps us safe)
+
+If feed payload lacks coordinates by design, we’ll consume the bbox/map endpoint for coords while still using the feed data as the source of truth—no architectural change, just where we read the lat/lng from.
+
+If coords exist but under different field names, we’ll map them correctly in our marker-upsert (one-line field mapping).
+
+If coords are being redacted without a role/flag, we’ll pass the right param (e.g., include=location) for the map only.
+
+If markers are added but invisible (z-index/cluster layer), we’ll confirm the layer path before proposing any code.
+
+@RDM (what we’re checking)
+
+Do incidents in the feed actually carry GPS points?
+
+If yes: we’ll make sure we’re reading the right field names and the right coordinate order.
+
+If no: we’ll wire the map panel to read coordinates from the map endpoint (already supported), without touching UI or the feed flow.
+
+Replit, once you paste the sample object & answers to A–E, I’ll pinpoint whether it’s data or presentation and propose the smallest possible tweak.

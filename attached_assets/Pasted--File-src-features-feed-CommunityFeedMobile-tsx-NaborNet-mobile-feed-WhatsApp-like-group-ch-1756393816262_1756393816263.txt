@@ -1,0 +1,266 @@
+// File: src/features/feed/CommunityFeedMobile.tsx
+// NaborNet mobile feed (WhatsApp-like, group chat-ready)
+// New in this version:
+// 1) Avatars for chat contributors (uses shadcn/ui Avatar with fallback initials)
+// 2) Own messages align RIGHT, others align LEFT automatically (based on currentUserId)
+// Still includes: Camera + Send bottom bar, incident cards w/ severity colors, FAB + Drawer for reporting.
+
+import React, { useMemo, useRef, useState } from "react";
+import { Camera, Send, Plus, AlertTriangle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerFooter,
+} from "@/components/ui/drawer";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import clsx from "clsx";
+
+/** ---------------- Types ---------------- */
+type FeedFilter = "all" | "incidents" | "chat";
+type Severity = "low" | "medium" | "high";
+
+type User = { id: string; name: string; avatarUrl?: string };
+
+type BaseItem = { id: string; createdAt: string };
+type ChatItem = BaseItem & { kind: "chat"; text: string; userId: string };
+type IncidentItem = BaseItem & {
+  kind: "incident"; title: string; description?: string; severity: Severity; attachments?: string[];
+};
+type FeedItem = ChatItem | IncidentItem;
+
+/** ---------------- Demo data (replace with API) ---------------- */
+const users: Record<string, User> = {
+  u1: { id: "u1", name: "You" },                       // current user
+  u2: { id: "u2", name: "Alice K" },
+  u3: { id: "u3", name: "Ben S" },
+};
+const CURRENT_USER_ID = "u1";
+
+const demoItems: FeedItem[] = [
+  { id: "1", kind: "chat", text: "Hello neighbors 👋", userId: "u2", createdAt: new Date().toISOString() },
+  { id: "2", kind: "incident", title: "Dog found near the beach", description: "Brown lab, no collar.", severity: "low", createdAt: new Date().toISOString() },
+  { id: "3", kind: "chat", text: "Testing real-time chat", userId: "u1", createdAt: new Date().toISOString() },
+  { id: "4", kind: "incident", title: "Suspicious noise last night", description: "Around 2am near Vine St.", severity: "medium", createdAt: new Date().toISOString() },
+];
+
+/** ---------------- Utils ---------------- */
+const timeShort = (iso: string) =>
+  new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+
+const nameToInitials = (name: string) =>
+  name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
+
+/** ---------------- Chat Bubble ---------------- */
+function ChatBubble({ item, currentUserId }: { item: ChatItem; currentUserId: string }) {
+  const mine = item.userId === currentUserId;
+  const user = users[item.userId] ?? { id: item.userId, name: "User" };
+
+  return (
+    <div className={clsx("px-2 w-full mb-1", mine ? "flex justify-end" : "flex justify-start")}>
+      <div className={clsx("flex max-w-[92%] items-end gap-2", mine ? "flex-row-reverse" : "flex-row")}>
+        {/* Avatar */}
+        <Avatar className="h-7 w-7 shrink-0">
+          {user.avatarUrl ? (
+            <AvatarImage src={user.avatarUrl} alt={user.name} />
+          ) : (
+            <AvatarFallback className="bg-zinc-700 text-[10px]">{nameToInitials(user.name)}</AvatarFallback>
+          )}
+        </Avatar>
+
+        {/* Bubble */}
+        <div className={clsx(
+          "inline-block max-w-[82%] rounded-2xl px-3 py-2 text-sm leading-snug",
+          mine ? "bg-[#4cc0ff]/90 text-white rounded-br-sm" : "bg-zinc-800 text-zinc-100 rounded-bl-sm"
+        )}>
+          <div className="whitespace-pre-wrap break-words">{item.text}</div>
+        </div>
+      </div>
+
+      {/* Timestamp outside bubble */}
+      <div className={clsx(
+        "mt-0.5 text-[10px] w-full",
+        mine ? "text-right pr-10 text-white/70" : "text-left pl-10 text-zinc-400"
+      )}>
+        {timeShort(item.createdAt)}
+      </div>
+    </div>
+  );
+}
+
+/** ---------------- Incident Card ---------------- */
+const severityStyles: Record<Severity, string> = {
+  low: "border-yellow-500/40 bg-yellow-500/10",
+  medium: "border-amber-500/40 bg-amber-500/10",
+  high: "border-red-500/40 bg-red-500/10",
+};
+
+function IncidentCard({ item }: { item: IncidentItem }) {
+  return (
+    <div className="px-2 mb-2">
+      <div className={clsx("rounded-2xl border p-3", severityStyles[item.severity])}>
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="h-4 w-4 opacity-80" />
+          <div className="font-semibold text-sm">{item.title}</div>
+          <span className={clsx(
+            "ml-auto text-[10px] px-2 py-0.5 rounded-full font-semibold",
+            item.severity === "high" ? "bg-red-500 text-white"
+            : item.severity === "medium" ? "bg-amber-500 text-black"
+            : "bg-yellow-400 text-black"
+          )}>
+            {item.severity.toUpperCase()}
+          </span>
+        </div>
+        {item.description && (
+          <div className="mt-1 text-sm text-zinc-300">{item.description}</div>
+        )}
+        <div className="mt-1 text-[10px] text-zinc-400">{timeShort(item.createdAt)}</div>
+      </div>
+    </div>
+  );
+}
+
+/** ---------------- Main ---------------- */
+export default function CommunityFeedMobile() {
+  const [filter, setFilter] = useState<FeedFilter>("all");
+  const [input, setInput] = useState("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const fileCameraRef = useRef<HTMLInputElement>(null);
+
+  const feed = useMemo(() => {
+    switch (filter) {
+      case "incidents": return demoItems.filter((i) => i.kind === "incident");
+      case "chat": return demoItems.filter((i) => i.kind === "chat");
+      default: return demoItems;
+    }
+  }, [filter]);
+
+  const handleSend = () => {
+    if (!input.trim()) return;
+    // TODO: socket emit → add chat message with currentUserId
+    // Example payload:
+    // socket.emit("chat:new", { text: input, userId: CURRENT_USER_ID, createdAt: new Date().toISOString() });
+    setInput("");
+  };
+
+  return (
+    <div className="flex flex-col h-[100dvh] bg-[#0b1220] text-white">
+      {/* Top */}
+      <div className="sticky top-0 z-20 border-b border-white/5 bg-[#0b1220]/80 backdrop-blur">
+        <div className="px-3 py-2 font-semibold text-base">Community Feed</div>
+        <Tabs value={filter} onValueChange={(v) => setFilter(v as FeedFilter)} className="px-2 pb-2">
+          <TabsList className="grid grid-cols-3 w-full bg-zinc-900 rounded-full p-1">
+            <TabsTrigger value="all" className="rounded-full">All</TabsTrigger>
+            <TabsTrigger value="incidents" className="rounded-full">Incidents</TabsTrigger>
+            <TabsTrigger value="chat" className="rounded-full">Chat</TabsTrigger>
+          </TabsList>
+          <TabsContent value="all" />
+          <TabsContent value="incidents" />
+          <TabsContent value="chat" />
+        </Tabs>
+      </div>
+
+      {/* Feed (extra bottom padding so FAB/input never cover content) */}
+      <div className="flex-1 overflow-y-auto pt-2 pb-36">
+        {feed.map((item) =>
+          item.kind === "chat" ? (
+            <ChatBubble key={item.id} item={item} currentUserId={CURRENT_USER_ID} />
+          ) : (
+            <IncidentCard key={item.id} item={item} />
+          )
+        )}
+      </div>
+
+      {/* Bottom input bar — Camera + Send only */}
+      <div className="sticky bottom-0 z-30 bg-[#0b1220]/95 backdrop-blur border-t border-white/5">
+        <div className="px-2 py-2 flex items-end gap-2">
+          {/* Hidden camera input triggers phone camera */}
+          <input
+            ref={fileCameraRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              // TODO: attach to message or open incident draft
+              setDrawerOpen(true);
+            }}
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-10 w-10 rounded-full"
+            onClick={() => fileCameraRef.current?.click()}
+            aria-label="Open camera"
+          >
+            <Camera className="h-5 w-5" />
+          </Button>
+
+          <div className="flex-1">
+            <Input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Type a message…"
+              className="bg-zinc-900 border-zinc-800 text-sm rounded-full px-4 h-10"
+            />
+          </div>
+
+          <Button
+            onClick={handleSend}
+            className="h-10 w-10 rounded-full p-0 bg-cyan-600 hover:bg-cyan-500"
+            aria-label="Send"
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        </div>
+        {/* Safe-area spacer for iOS home indicator */}
+        <div style={{ height: "calc(env(safe-area-inset-bottom))" }} />
+      </div>
+
+      {/* FAB: Report Incident */}
+      <Button
+        onClick={() => setDrawerOpen(true)}
+        className="fixed right-4"
+        style={{
+          bottom: "calc(72px + env(safe-area-inset-bottom))", // above input bar
+          height: 56, width: 56, borderRadius: 9999,
+        }}
+      >
+        <Plus className="h-6 w-6" />
+      </Button>
+
+      {/* Mobile Drawer for Incident Report */}
+      <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <DrawerContent className="bg-[#0b1220] text-white border-t border-white/10">
+          <DrawerHeader><DrawerTitle>Report Incident</DrawerTitle></DrawerHeader>
+          <div className="px-4 space-y-3">
+            <Select defaultValue="medium">
+              <SelectTrigger className="bg-zinc-900 border-zinc-800">
+                <SelectValue placeholder="Severity" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="low">Low (Yellow)</SelectItem>
+                <SelectItem value="medium">Medium (Amber)</SelectItem>
+                <SelectItem value="high">High (Red)</SelectItem>
+              </SelectContent>
+            </Select>
+            <Input placeholder="Title" className="bg-zinc-900 border-zinc-800" />
+            <Textarea placeholder="Describe what happened…" className="bg-zinc-900 border-zinc-800 min-h-[120px]" />
+            {/* TODO: image previews if captured/attached */}
+          </div>
+          <DrawerFooter>
+            <Button className="bg-cyan-600 hover:bg-cyan-500">Submit</Button>
+            <Button variant="outline" className="border-zinc-700" onClick={() => setDrawerOpen(false)}>Cancel</Button>
+          </DrawerFooter>
+        </DrawerContent>
+      </Drawer>
+    </div>
+  );
+}

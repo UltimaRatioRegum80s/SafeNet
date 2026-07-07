@@ -1,0 +1,156 @@
+ this is a pure layout collision between the top menu bar and the left control column on certain device widths/heights.
+here’s a clean, low-risk plan that fits your current architecture (Leaflet + glass UI + shadcn) and fixes it across iPhone / Pixel / Galaxy sizes.
+
+what’s happening
+the top menu is centered and full-width-ish.
+
+
+the left control stack is absolutely positioned near the top.
+
+
+on narrower viewports, the menu’s height + padding eats into the same vertical space → overlap.
+
+
+
+fixes (pick all; they’re complementary)
+1) reserve vertical space for the left controls (no overlap)
+Measure the top menu’s rendered height and push the left control stack below it with a CSS var.
+Map.tsx (or the page wrapper that renders both)
+// top-level wrapper around the map page
+export default function Map() {
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!menuRef.current || !shellRef.current) return;
+    const el = menuRef.current;
+    const shell = shellRef.current;
+
+    const apply = () => {
+      const h = el.getBoundingClientRect().height;
+      shell.style.setProperty("--nn-menu-h", `${Math.ceil(h)}px`);
+    };
+
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    apply();
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <div
+      ref={shellRef}
+      className="relative h-[100dvh]"
+      style={{
+        // expose safe-area for calc()
+        paddingTop: "max(env(safe-area-inset-top),0px)",
+      }}
+    >
+      <MobileFloatingTopMenu ref={menuRef as any} />
+      <MapView />
+    </div>
+  );
+}
+
+MapView.tsx (left control column container)
+// wherever you position the left-side stack:
+<div
+  className="
+    absolute left-3 md:left-4 z-50 flex flex-col gap-2
+  "
+  style={{
+    top: "calc(max(env(safe-area-inset-top),0px) + var(--nn-menu-h,56px) + 8px)",
+  }}
+>
+  {/* left controls (theme, expand, etc.) */}
+</div>
+
+This guarantees the column starts below whatever the top menu’s real height is (icons wrap, density changes, etc.).
+
+2) cap the top menu width & add “clearance” margins
+Keep the menu centered, but ensure it never spans into the left-controls’ lane.
+MobileFloatingTopMenu.tsx (outer wrapper)
+<div
+  className="
+    absolute z-[55] left-0 right-0
+    top-[max(env(safe-area-inset-top),0px)]
+    flex justify-center pointer-events-auto
+  "
+>
+  <div
+    className="
+      /* your themed glass classes here */
+      rounded-2xl px-3 py-2 backdrop-blur-md border
+      bg-white/85 dark:bg-background/60 border-border/50 shadow-lg
+
+      /* keep it centered but leave lanes free on both sides */
+      w-[min(680px,calc(100vw-112px))]  /* 112px ≈ 2×(left stack ~56px) */
+    "
+  >
+    {/* icons */}
+  </div>
+</div>
+
+the inner w-[min(680px,calc(100vw-112px))] keeps ~56px “no-fly zone” on each side on tiny devices so it can’t collide with the columns.
+
+
+adjust 112px if your left stack is wider/narrower (e.g., 48–64px).
+
+
+
+3) compact mode for very narrow devices
+On extra small widths, reduce horizontal padding and allow gentle horizontal scroll to avoid wrapping (which increases height and raises collision risk).
+<div
+  className="
+    rounded-2xl border backdrop-blur-md
+    px-2 sm:px-3 py-2
+    overflow-x-auto no-scrollbar  /* add .no-scrollbar in globals if you like */
+    flex gap-2 sm:gap-3
+  "
+>
+  {/* icons */}
+</div>
+
+no-scrollbar helper (globals.css)
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+
+4) hide the top menu when the sheet is expanded (optional polish)
+If IncidentList exposes isExpanded (>50%), fade the top menu to prevent any interaction confusion.
+<div className={cn(
+  "absolute z-[55] left-0 right-0 transition-opacity duration-150",
+  isSheetExpanded ? "opacity-0 pointer-events-none" : "opacity-100"
+)}>
+  {/* menu */}
+</div>
+
+
+why this fits your repo
+zero refactors; just layout math with a ResizeObserver.
+
+
+safe-area aware; works across iPhone/Pixel/Galaxy.
+
+
+honors your z-index policy (map base → controls z-50 → menus z-55 → modals z-60).
+
+
+keeps the glass look intact.
+
+
+
+quick QA checklist
+iPhone SE / XR / 16 Pro, Pixel 9/Pro XL, Galaxy S25/S25+ simulate: no overlap.
+
+
+rotate device → observer recomputes --nn-menu-h.
+
+
+confirm left column retains 44px hit areas.
+
+
+check RTL (if applicable): lane margin still respected (swap to right side if you later mirror the column).
+
+
+if you want, i can prep a tiny useMenuHeightVar(ref) hook to reuse elsewhere, but the above is copy-paste ready.

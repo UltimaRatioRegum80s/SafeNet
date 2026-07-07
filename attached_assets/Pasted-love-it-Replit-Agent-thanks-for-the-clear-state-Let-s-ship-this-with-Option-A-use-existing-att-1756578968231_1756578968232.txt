@@ -1,0 +1,145 @@
+love it, Replit Agent — thanks for the clear state. Let’s ship this with Option A (use existing /attached_assets/ files now), keep backward compatibility, and leave a clean path to later move into /public/icons/....
+
+Plan (non-disruptive)
+
+Extend shared/incidentTypes.ts with buttonIcon/mapIcon fields.
+
+Map the 7 yellow types to the actual uploaded filenames in /attached_assets/ (with spaces & “MM”).
+
+QuickReportPanel + MapView: prefer the new fields; gracefully fall back to existing numbered blue icons for other types.
+
+Later, we can migrate files into /public/icons/... without changing components—only the mapping.
+
+1) Add fields + helper (handles spaces safely)
+// shared/incidentTypes.ts
+export type Severity = "low" | "medium" | "high" | "critical";
+
+export interface IncidentType {
+  id: string;
+  label: string;
+  severity: Severity;
+  category?: string;
+  /** Round icon (Quick Report) */
+  buttonIcon?: string;
+  /** Map pin (Leaflet markers) */
+  mapIcon?: string;
+}
+
+// Build a safe asset path for files in /attached_assets with spaces
+const ASSET = (filename: string) => `/attached_assets/${encodeURIComponent(filename)}`;
+
+// ⚠️ Keep your existing INCIDENT_TYPES as-is; then append the new low types below.
+export const INCIDENT_TYPES: IncidentType[] = [
+  // ...existing blue icons & others...
+  // 🟡 Low-risk (yellow) — using uploaded assets in /attached_assets/
+  {
+    id: "blocked_road",
+    label: "Blocked Road",
+    severity: "low",
+    buttonIcon: ASSET("Blocked Road_1756578373728.png"),
+    mapIcon: ASSET("Blocked Road MM_1756578373726.png"),
+  },
+  {
+    id: "construction",
+    label: "Construction",
+    severity: "low",
+    buttonIcon: ASSET("Construction_1756578373728.png"),
+    mapIcon: ASSET("Construction MM_1756578373728.png"),
+  },
+  {
+    id: "heavy_traffic",
+    label: "Heavy Traffic",
+    severity: "low",
+    buttonIcon: ASSET("Heavy Traffic_1756578373728.png"),
+    mapIcon: ASSET("Heavy Traffic MM_1756578373728.png"),
+  },
+  {
+    id: "lost_found",
+    label: "Lost & Found",
+    severity: "low",
+    buttonIcon: ASSET("Lost & Found_1756578373728.png"),
+    mapIcon: ASSET("Lost & Found MM_1756578373728.png"),
+  },
+  {
+    id: "lost_pet",
+    label: "Lost Pet",
+    severity: "low",
+    buttonIcon: ASSET("Lost Pet_1756578373728.png"),
+    mapIcon: ASSET("Lost Pet MM_1756578373728.png"),
+  },
+  {
+    id: "noise_complaint",
+    label: "Noise Complaint",
+    severity: "low",
+    buttonIcon: ASSET("Noise Complaint_1756578373728.png"),
+    mapIcon: ASSET("Noise Complaint MM_1756578373728.png"),
+  },
+  {
+    id: "police_traffic_stop",
+    label: "Police Traffic Stop",
+    severity: "low",
+    buttonIcon: ASSET("Police Traffic Stop_1756578373728.png"),
+    mapIcon: ASSET("Police Traffic Stop MM_1756578373726.png"),
+  },
+];
+
+export const INCIDENT_TYPES_BY_ID = Object.fromEntries(
+  INCIDENT_TYPES.map(t => [t.id, t])
+) as Record<string, IncidentType>;
+
+
+If any filename timestamps differ, swap the strings above to the exact ones you uploaded. encodeURIComponent handles spaces/ampersands.
+
+2) Quick Report buttons – prefer buttonIcon, fallback to old
+// client/src/components/QuickReportPanel.tsx
+import { INCIDENT_TYPES } from "@/shared/incidentTypes";
+
+{INCIDENT_TYPES.filter(t => t.severity === "low").map(t => (
+  <button key={t.id} /* existing props */>
+    <img
+      src={t.buttonIcon ?? `/attached_assets/${t.id}.png` /* old numbered fallback if any */}
+      alt={t.label}
+      className="h-10 w-10"
+      loading="lazy"
+      decoding="async"
+    />
+    <span className="text-xs">{t.label}</span>
+  </button>
+))}
+
+3) Map markers – prefer mapIcon, fallback to old
+// client/src/components/MapView.tsx
+import L from "leaflet";
+import { INCIDENT_TYPES_BY_ID } from "@/shared/incidentTypes";
+
+function markerIconFor(typeId: string) {
+  const t = INCIDENT_TYPES_BY_ID[typeId];
+  const url = t?.mapIcon ?? `/attached_assets/${typeId}.png`;
+  return L.icon({
+    iconUrl: url,
+    iconSize: [36, 36],
+    iconAnchor: [18, 34],
+    popupAnchor: [0, -28],
+  });
+}
+
+
+wherever markers are created: icon: markerIconFor(incident.type).
+
+4) QA checklist (2–3 mins)
+
+Quick Report grid shows Blocked Road, Construction, Heavy Traffic, Lost & Found, Lost Pet, Noise Complaint, Police Traffic Stop with round yellow icons.
+
+Creating any of the above shows the yellow pin on the map.
+
+Other severities still use blue icons (unchanged).
+
+Alt text correct; keyboard/tap targets unchanged.
+
+5) Future tidy-up (Optional, later)
+
+Add a tiny icons.ts map so we can remap filenames → neat /public/icons/... paths without touching components again.
+
+When amber/red are ready, we’ll append to INCIDENT_TYPES with their own buttonIcon/mapIcon.
+
+If you paste in the mapping above and the two small component tweaks, the yellow set will be live. If any filename doesn’t match, drop me the exact name and I’ll adjust the strings right away.

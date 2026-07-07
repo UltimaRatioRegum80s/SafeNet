@@ -1,0 +1,141 @@
+you’re right to be frustrated. the toast says “incident reported”, but nothing shows — that’s a miss on our side. let’s make the dot appear immediately and make the map auto-pan to it, then let your normal socket flow replace that dot with the real marker.
+
+below are three tiny patches. copy-paste them and you’ll get: press submit → map pans → a dot appears right there → socket-confirmed icon replaces it when it arrives. if the socket doesn’t arrive, the dot still shows (so the user sees something).
+
+1) Map: add a simple dot layer + event listener (no UX redesign)
+
+In your map component (e.g., client/src/pages/community/Map.tsx), after you create the Leaflet map:
+
+// simple dot layer (MVP overlay)
+const simpleDots = L.layerGroup().addTo(map);
+const simpleDotById = new Map<string, L.CircleMarker>();
+const severityColor: Record<string, string> = {
+  low: "#facc15", medium: "#f59e0b", high: "#ef4444", critical: "#b91c1c",
+};
+
+// global helpers so other code can use them if needed
+(window as any).__nnSimpleDot = function addSimpleDot(
+  id: string, lat: number, lng: number, severity: string = "low"
+) {
+  if (simpleDotById.has(id)) return;
+  const color = severityColor[severity] || "#f59e0b";
+  const m = L.circleMarker([lat, lng], {
+    radius: 7, color, weight: 1.5, fillColor: color, fillOpacity: 0.9,
+  }).addTo(simpleDots);
+  simpleDotById.set(id, m);
+};
+(window as any).__nnRemoveSimpleDot = function removeSimpleDot(id: string) {
+  const m = simpleDotById.get(id); if (!m) return;
+  simpleDots.removeLayer(m); simpleDotById.delete(id);
+};
+
+// kill the runtime error you saw earlier if it still appears anywhere
+(window as any).refreshClusterFor = (/* _bbox? */) => {};
+
+
+Listen for a local submit event and auto-pan to the new point:
+
+// inside the same component, after map is ready:
+function onLocalIncident(e: CustomEvent<{
+  tempId: string; lat: number; lng: number; severity: string;
+}>) {
+  const { tempId, lat, lng, severity } = e.detail;
+  // draw the dot immediately
+  (window as any).__nnSimpleDot?.(tempId, lat, lng, severity);
+  // pan the map so it's in view (ensures bbox includes it)
+  map.panTo([lat, lng], { animate: true });
+}
+const localHandler = (e: any) => onLocalIncident(e as any);
+window.addEventListener("nn:incident:local", localHandler as any);
+
+
+When real incidents arrive via sockets, remove the temporary dot:
+
+In your cluster add/upsert function (e.g., client/src/features/map/createIncidentMarker.ts):
+
+export function addIncidentToCluster(inc: Incident) {
+  // ignore probes if you’ve added them
+  if (inc?.type === "__probe__" || inc?.category === "__probe__" || (inc as any)?.metadata?.probe) return;
+
+  // remove optimistic dot (if present)
+  (window as any).__nnRemoveSimpleDot?.(inc.id);
+
+  // ... existing de-dupe + cluster.addLayer(marker)
+}
+
+2) Submit handler: emit a local event on success (and still show dot even if socket lags)
+
+Where you submit the incident (the modal’s Submit button), after you have coords and before/after the POST, emit a local event with the coordinates so the map can pan and draw the dot.
+
+import { v4 as uuid } from "uuid";
+
+async function submitIncidentQuick({ title, description, category, severity }: {
+  title: string; description?: string; category: string; severity: "low"|"medium"|"high"|"critical";
+}) {
+  // 1) get coords (fallback to map center if GPS is off)
+  let coords: { lat: number; lng: number };
+  try { coords = await getCoordsWithTimeout(6000); }
+  catch {
+    const center = (window as any).__nnMap?.getCenter?.();
+    if (!center) throw new Error("Location unavailable");
+    coords = { lat: center.lat, lng: center.lng };
+  }
+
+  // 2) create a temp id and notify the map immediately
+  const tempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+  window.dispatchEvent(new CustomEvent("nn:incident:local", {
+    detail: { tempId, lat: coords.lat, lng: coords.lng, severity }
+  }));
+
+  // 3) POST with timeout
+  const ac = new AbortController(); const t = setTimeout(() => ac.abort(), 12000);
+  const res = await fetch("/api/incidents", {
+    method: "POST", credentials: "include",
+    headers: { "Content-Type": "application/json", "x-idempotency-key": uuid() },
+    body: JSON.stringify({
+      title, description: description ?? "", category, severity,
+      latitude: coords.lat, longitude: coords.lng, isAnonymous: true,
+    }),
+    signal: ac.signal,
+  }).finally(() => clearTimeout(t));
+
+  if (!res.ok) {
+    // leave the dot for 30s so the user still sees something
+    setTimeout(() => (window as any).__nnRemoveSimpleDot?.(tempId), 30000);
+    throw new Error(await res.text());
+  }
+
+  // success: your server broadcasts `incident:created`
+  // when the socket event arrives, addIncidentToCluster(...) will remove the temp dot
+  return await res.json();
+}
+
+
+crucial: this does two things—it shows the dot immediately and pans the map so your bbox includes it. that removes “it succeeded but I can’t see it”.
+
+3) One safety net if sockets are quiet
+
+Add this tiny watchdog inside the map page (fires a one-off bbox fetch only if no socket events for 15s):
+
+const lastEventAt = useRef(Date.now());
+socket.onAny(() => (lastEventAt.current = Date.now()));
+setInterval(async () => {
+  if (Date.now() - lastEventAt.current <= 15000) return;
+  const b = map.getBounds();
+  const url = `/api/incidents?bbox=${b.getWest()},${b.getSouth()},${b.getEast()},${b.getNorth()}&sinceHours=72&limit=300`;
+  const res = await fetch(url, { credentials: "include" });
+  if (!res.ok) return;
+  const arr = await res.json();
+  for (const inc of arr) (window as any).__nnRemoveSimpleDot?.(inc.id); // ensure temp dots go away
+  // your existing upsert for cluster:
+  for (const inc of arr) (window as any).__nnAddIncident?.(inc);
+  lastEventAt.current = Date.now();
+}, 5000);
+
+What you should see now (mobile):
+
+Tap Submit → map pans to your location and a dot appears immediately.
+
+A moment later, the real icon appears via Socket.IO and the dot disappears.
+
+If sockets hiccup, the dot stays (so the map is never “empty after success”), and the watchdog backfills.

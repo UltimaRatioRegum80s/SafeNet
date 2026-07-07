@@ -1,0 +1,67 @@
+modules = ["nodejs-20", "web", "postgresql-16"]
+run = "npm run dev"
+hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
+
+[nix]
+channel = "stable-24_05"
+packages = ["glib", "nspr", "nss", "dbus", "at-spi2-atk", "xorg.libXcomposite", "xorg.libXdamage", "xorg.libXext", "xorg.libXfixes", "xorg.libXrandr", "mesa", "xorg.libxcb", "libxkbcommon", "alsa-lib", "xorg.libX11", "atk", "at-spi2-core", "gtk3", "pango", "cairo", "gdk-pixbuf", "cups"]
+
+[deployment]
+deploymentTarget = "autoscale"
+build = ["npm", "run", "build"]
+run = ["npm", "run", "start"]
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 24678
+externalPort = 3000
+
+[env]
+PORT = "5000"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+waitForPort = 5000
+
+[agent]
+integrations = ["javascript_object_storage:2.0.0"]
+
+[userenv]
+
+[userenv.shared]
+SIGNUP_MODE = "whitelist"
+ALLOWED_EMAILS = "nabornetinfo@gmail.com,dwmoolman@gmail.com,carlin.king@gmail.com,test+ui@nabornet.app"
+KENYA_FIELD_TEST_ENABLED = "true"
+EXPRESS_REPORT_ENABLED = "false"
+VITE_EXPRESS_REPORT_ENABLED = "false"
+ADMIN_EMAILS = "nabornetinfo@gmail.com,dwmoolman@gmail.com"
+
+[userenv.development]
+E2E_TEST_MODE = "true"
+
+[userenv.production]
+APP_URL = "https://nabornet.io"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 20000

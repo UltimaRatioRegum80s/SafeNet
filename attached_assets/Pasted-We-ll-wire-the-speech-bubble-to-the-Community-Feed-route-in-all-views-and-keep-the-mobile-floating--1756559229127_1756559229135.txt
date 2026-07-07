@@ -1,0 +1,102 @@
+We’ll wire the speech-bubble to the Community Feed route in all views, and keep the mobile floating menu working.
+
+Below are drop-in patches.
+
+1) Floating menu: map speech-bubble → /community/feed
+// client/src/components/MobileFloatingTopMenu.tsx
+import React from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Home, PlusCircle, MapPin, MessageSquare, BarChart3 } from "lucide-react";
+import { useToast } from "@/components/ui/use-toast";
+
+// Declare only real routes
+const ROUTES = {
+  home: "/",                 // adjust if your home is different
+  report: "/report",
+  map: "/community/map",
+  feed: "/community/feed",   // ✅ NEW: community feed route
+  // stats: "/dashboard",    // keep disabled if not live
+} as const;
+
+type Key = "home" | "report" | "map" | "feed" | "stats";
+
+function keyFromPath(path: string): Key {
+  if (path.startsWith("/community/map"))  return "map";
+  if (path.startsWith("/community/feed")) return "feed";   // ✅ highlight on feed
+  if (path.startsWith("/report"))         return "report";
+  if (path.startsWith("/dashboard"))      return "stats";
+  return "home";
+}
+
+export default function MobileFloatingTopMenu() {
+  const { pathname } = useLocation();
+  const active = keyFromPath(pathname);
+  const nav = useNavigate();
+  const { toast } = useToast?.() ?? { toast: (x: any) => alert(x?.description || x?.title || "Coming soon") };
+
+  const items: Array<{ key: Key; label: string; icon: React.ReactNode; to?: string }> = [
+    { key: "home",   label: "Home",   icon: <Home className="w-5 h-5" />,        to: ROUTES.home },
+    { key: "report", label: "Report", icon: <PlusCircle className="w-5 h-5" />,  to: ROUTES.report },
+    { key: "map",    label: "Map",    icon: <MapPin className="w-5 h-5" />,      to: ROUTES.map },
+    { key: "feed",   label: "Feed",   icon: <MessageSquare className="w-5 h-5" />,to: ROUTES.feed }, // ✅ speech bubble
+    { key: "stats",  label: "Stats",  icon: <BarChart3 className="w-5 h-5" /> }, // toast until live
+  ];
+
+  const safeNavigate = (to?: string, label?: string) => {
+    if (to) nav(to);
+    else toast({ title: "Coming soon", description: `${label ?? "This page"} isn’t available yet.` });
+  };
+
+  return (
+    <div className="absolute top-0 left-0 right-0 z-30 xl:hidden pointer-events-none">
+      <div className="h-[calc(env(safe-area-inset-top)+12px)] bg-gradient-to-b from-black/60 to-transparent" />
+      <div className="flex justify-center px-3">
+        <nav className="pointer-events-auto nn-glass rounded-2xl px-3 py-2 flex items-center gap-5" aria-label="Mobile top menu">
+          {items.map((it) => (
+            <button
+              key={it.key}
+              onClick={() => safeNavigate(it.to, it.label)}
+              aria-label={it.label}
+              aria-current={active === it.key ? "page" : undefined}
+              className={`relative grid place-items-center w-10 h-10 rounded-xl transition
+                ${active === it.key ? "bg-cyan-400 text-slate-900" : "text-white/80 hover:bg-white/10"}`}
+            >
+              {it.icon}
+            </button>
+          ))}
+        </nav>
+      </div>
+    </div>
+  );
+}
+
+2) Ensure the route exists in the router (all views)
+// client/src/AppRouter.tsx (or wherever your routes are declared)
+import CommunityFeed from "@/pages/community/Feed"; // adjust import path
+
+<Routes>
+  {/* existing routes... */}
+  <Route path="/community/map" element={<CommunityMap />} />
+  <Route path="/community/feed" element={<CommunityFeed />} /> {/* ✅ add this */}
+  {/* ... */}
+  <Route path="*" element={<NotFound />} />
+</Routes>
+
+
+If your feed page lives at a different path, update ROUTES.feed and the <Route> to match.
+
+3) Desktop top bar (already works)
+
+Your desktop nav already highlights Feed; no change needed. But if you reuse a shared menu there, make sure its feed item points to /community/feed too.
+
+4) Quick test checklist
+
+Tap the speech bubble on mobile/tablet → navigates to /community/feed, cyan highlight moves to Feed.
+
+Use browser back → returns to previous page; highlight updates.
+
+Desktop top bar → still navigates correctly.
+
+No more 404 overlay when pressing the speech bubble.
+
+If your actual feed route differs (e.g., /feed or /community/news), tell me the exact path and I’ll tweak the constants and matcher.

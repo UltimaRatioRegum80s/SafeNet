@@ -1,0 +1,100 @@
+gotcha — the error is crystal clear:
+
+"null value in column \"severity\" of relation \"incidents\" violates not-null constraint"
+
+That means your POST /api/incidents is inserting severity = null/undefined. So the DB rejects it. Nothing to do with the map; the write never succeeds.
+
+Let’s take the shortest path: guarantee a severity value on all three layers so this can never happen again.
+
+A) Replit → GPT (what’s happening)
+
+On mobile (dev env), the selected severity isn’t making it into the payload you send when you click Submit in the category modal.
+
+DB column incidents.severity is NOT NULL (good), but because client sends nothing / server doesn’t default, insert fails → toast “Couldn’t submit”.
+
+B) GPT → Replit (drop-in fixes — pick ALL, they’re tiny)
+1) Client: always send a severity (default “low”)
+
+Where you manage the report flow (the modal’s Submit), make sure you keep severity in state and pass it to your submit function. Also hard-default to "low" if anything is missing.
+
+// types
+type Severity = "low" | "medium" | "high" | "critical";
+
+// ensure this exists at the top of the report screen
+const [severity, setSeverity] = useState<Severity>("low");
+
+// your 4 severity buttons should call setSeverity("low"|"medium"|"high"|"critical")
+
+// on submit (category modal)
+await submitIncidentQuick({
+  title, description, category,
+  severity: (severity as Severity) || "low", // hard default
+});
+
+
+If you’re using a Zustand store for the wizard steps, make sure the modal reads the selected severity from that store and not from a stale local state. Either way: force the payload to include a string and never undefined.
+
+2) Server: default severity in validation
+
+If you use Zod for the create schema, add a default:
+
+const Severity = z.enum(["low","medium","high","critical"]);
+const CreateIncident = z.object({
+  // ... other fields
+  severity: Severity.default("low"),
+});
+
+const parsed = CreateIncident.parse(req.body);
+const { severity = "low" } = parsed;
+
+
+And ensure the Drizzle insert uses that severity (never null).
+
+3) Database: set a safe default (belt-and-braces)
+
+Even though we’ll never send null after steps 1–2, add a default on the column so future callers don’t break:
+
+-- one-time migration
+alter table incidents alter column severity set default 'low';
+update incidents set severity = 'low' where severity is null;
+
+
+Note: DEFAULT only applies when the column is omitted; if you explicitly pass null, Postgres still errors. That’s why client+server guards matter.
+
+Quick self-test (now)
+
+In dev, open the report flow. Tap Low / Medium / High / Critical — your button should visually select.
+
+Submit. You should not see the red toast anymore.
+
+On success, your existing Socket.IO flow will broadcast incident:created; your map will show the marker (and your optimistic dot, if you added it, will be removed).
+
+If you still see the toast, run this from dev console before submitting and confirm it prints a valid value:
+
+// should log "low"|"medium"|"high"|"critical"
+console.log(window.__nnSelectedSeverity);
+
+
+If you don’t have that, temporarily add:
+
+// wherever severity changes
+(window as any).__nnSelectedSeverity = newValue;
+
+
+This is just for debugging—remove later.
+
+Bonus: bulletproof the submit helper you pasted earlier
+
+In submitIncidentQuick, make the parameter required and assert it:
+
+export async function submitIncidentQuick({ title, description, category, severity }: {
+  title: string; description?: string; category: string; severity: Severity;
+}) {
+  const sev = (severity ?? "low") as Severity;
+  // ...
+  body: JSON.stringify({ title, description: description ?? "", category, severity: sev, latitude: coords.lat, longitude: coords.lng }),
+}
+
+Why incidents weren’t appearing on the map
+
+Because the create call fails at the DB, there’s nothing to broadcast to sockets → nothing new to render. Fixing severity defaults restores the pipeline.

@@ -1,0 +1,83 @@
+got your screenshots — thanks. Since flag=ON and we still see no markers/clusters on mobile, the most likely thing is: the gated path didn’t run (we’re still creating L.circleMarker, which markercluster ignores). That can happen if our isLikelyMobile check is false in your test environment/PWA shell.
+
+Here’s a tight, non-destructive verify → fix plan that keeps Progress Law intact.
+
+Verify (console only, no edits)
+
+Run these with ?NN_FIX_MOBILE_MARKERS=1 after the map loads:
+
+// 1) Are our fallback divIcons being created?
+[...document.querySelectorAll('.nn-divicon-wrapper')].length
+
+// 2) Any cluster icons present?
+[...document.querySelectorAll('.marker-cluster')].length
+
+// 3) How many layers in the cluster group?
+window.clusterRef?.current?.getLayers().length
+
+// 4) What kind of layers are inside the cluster?
+(window.clusterRef?.current?.getLayers() || []).slice(0,5)
+  .map(l => ({isMarker: l instanceof L.Marker, isCircle: l instanceof L.CircleMarker}))
+
+
+Interpretation
+
+If divIcons = 0 and isMarker=false / isCircle=true, we’re still hitting the circleMarker branch ⇒ the mobile gate blocked the fix.
+
+If layers > 0 and isMarker=true, but .marker-cluster = 0, check if the MarkerCluster CSS is loaded:
+
+[...document.styleSheets].some(s => {
+  try { return [...(s.cssRules||[])].some(r => (r.selectorText||'').includes('.marker-cluster')); }
+  catch { return false; } // cross-origin CSS
+})
+
+Surgical code tweak (safe & reversible)
+
+Goal: make the fallback run whenever getIncidentIcon(...) returns null — regardless of UA — but only when the flag is ON. This keeps desktop unchanged (desktop has icons) and ensures mobile (or any environment with broken icons) gets a cluster-compatible L.Marker.
+
+In the file with addIncidentToCluster:
+
+// BEFORE (gated by isLikelyMobile)
+} else if (Flags.fixMobileMarkers && isLikelyMobile) {
+  layer = L.marker(ll, { icon: buildFallbackDivIcon({ size: 14, color: '#2563eb' }), title: inc.title ?? inc.type });
+} else {
+  layer = L.circleMarker(ll, { radius: 7, color: '#2563eb' });
+}
+
+// AFTER (gated only by the flag + icon === null)
+} else if (Flags.fixMobileMarkers) {
+  layer = L.marker(ll, { icon: buildFallbackDivIcon({ size: 14, color: '#2563eb' }), title: inc.title ?? inc.type });
+} else {
+  layer = L.circleMarker(ll, { radius: 7, color: '#2563eb' });
+}
+
+
+Nothing else changes:
+
+Desktop path (when icons load) = identical.
+
+If desktop ever failed to load icons, you’d still get markers (divIcon) instead of disappearing — which is safer.
+
+If CSS is the culprit
+
+If the style check returns false (cluster CSS not present), temporarily inject the default styles in DevTools to confirm:
+
+const link=document.createElement('link');
+link.rel='stylesheet';
+link.href='https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css';
+document.head.appendChild(link);
+
+
+If clusters appear, ensure the CSS is imported in your bundle for the PWA route.
+
+Rollout safety (unchanged)
+
+Keep NN_FIX_MOBILE_MARKERS default OFF.
+
+Test mobile with ?NN_FIX_MOBILE_MARKERS=1.
+
+Desktop with no param must remain pixel-identical.
+
+Instant rollback: ?NN_FIX_MOBILE_MARKERS=0 or localStorage.NN_FIX_MOBILE_MARKERS='0'.
+
+Ping back the console counts from the verify step. If the gate was the issue, the small tweak above will fix mobile without touching desktop.

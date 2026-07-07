@@ -1,0 +1,182 @@
+Fantastic—looks great! For the Recent Incidents panel, let’s make it scroll through the last 24 hours of reports with smooth infinite-scroll. We’ll keep the current architecture (Feed cache remains the single source for “latest”) and layer a panel-only infinite query that fetches older items as you scroll—no UI disruptions.
+
+Plan (non-disruptive)
+
+Keep useFeedIncidents() as is for the initial set (fast, shared cache).
+
+Add a tiny infinite query just for the panel:
+
+Key: ['/api/incidents', {window: '24h'}]
+
+Uses sinceHours=24 + server pagination (nextCursor) if available.
+
+Seeds with the Feed cache items (filtered to ≤24h) so the panel is instantly populated.
+
+Add an IntersectionObserver sentinel at the bottom to load more pages.
+
+Stop fetching when:
+
+API returns no nextCursor, or
+
+next page’s newest item is older than 24h (safety guard).
+
+No changes to Feed, Map markers, or other pages.
+
+Questions for Replit 🔧 (quick confirm)
+
+Does /api/incidents support pagination with a nextCursor (as you mentioned earlier) when no bbox is used?
+
+If not cursor, do we have before=<iso> or page/offset?
+
+Is sinceHours=24 already supported server-side (we saw sinceHours used in bbox mode)?
+
+If not, we can pass from=<iso-24h> (server already supports timeRange on Feed).
+
+If both are yes (cursor + sinceHours), we’ll use them. If not, I’ll switch to from=<iso24h>&before=<oldestSeenIso>.
+
+Minimal additions
+1) New hook for 24h infinite scroll
+// client/src/features/incidents/useIncidents24hInfinite.ts
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
+import { itemsFromAnyPayload, type Incident } from "@/lib/incidentsShape";
+
+const KEY = ["/api/incidents", { window: "24h" }];
+
+function iso24hAgo() {
+  const d = new Date(Date.now() - 24 * 3600 * 1000);
+  return d.toISOString();
+}
+
+export function useIncidents24hInfinite() {
+  const qc = useQueryClient();
+  // seed from feed cache (fast first paint)
+  const seed = useMemo(() => {
+    const payload = qc.getQueryData(["/api/incidents"]);
+    const initial = itemsFromAnyPayload(payload);
+    const from = +new Date(iso24hAgo());
+    return initial.filter(i => +new Date(i.createdAt) >= from);
+  }, [qc]);
+
+  return useInfiniteQuery({
+    queryKey: KEY,
+    queryFn: async ({ pageParam }) => {
+      const params = new URLSearchParams();
+      params.set("limit", "50");
+      params.set("sinceHours", "24"); // or replace with ?from= if needed
+      if (pageParam?.cursor) params.set("cursor", pageParam.cursor);
+      if (pageParam?.before) params.set("before", pageParam.before); // fallback path if no cursor
+
+      const res = await fetch(`/api/incidents?${params.toString()}`);
+      if (!res.ok) throw new Error("Failed to load incidents 24h");
+      const payload = await res.json();
+
+      // payload could be { items, nextCursor } or array
+      const items = itemsFromAnyPayload(payload);
+      const nextCursor =
+        (payload && payload.nextCursor) ||
+        null;
+
+      return { items, nextCursor };
+    },
+    getNextPageParam: (lastPage) => {
+      // stop if server says no nextCursor
+      if (!lastPage?.nextCursor) return undefined;
+      return { cursor: lastPage.nextCursor };
+    },
+    initialPageParam: undefined,
+    initialData: {
+      pages: [{ items: seed, nextCursor: undefined }],
+      pageParams: [undefined],
+    },
+    staleTime: 30_000,
+  });
+}
+
+
+If your API doesn’t return nextCursor, tell me which pagination it uses; I’ll swap getNextPageParam to use before=<oldestSeenIso>.
+
+2) Panel: use the new hook + sentinel (visuals unchanged)
+// client/src/features/map/RecentIncidentsPanel.tsx
+import { useEffect, useMemo, useRef } from "react";
+import { useIncidents24hInfinite } from "@/features/incidents/useIncidents24hInfinite";
+import { useFeedIncidents } from "@/features/incidents/useFeedIncidents"; // still used implicitly via seed
+
+export default function RecentIncidentsPanel() {
+  const { data, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useIncidents24hInfinite();
+
+  const items = useMemo(
+    () => (data?.pages ?? []).flatMap(p => p.items ?? []),
+    [data]
+  );
+
+  // Intersection observer to trigger next page
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      const [e] = entries;
+      if (e.isIntersecting && hasNextPage && !isFetchingNextPage) {
+        fetchNextPage();
+      }
+    }, { root: document.querySelector(".custom-scroll") as Element | null ?? undefined, rootMargin: "120px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+
+  return (
+    <section className="card h-full overflow-hidden">
+      <header className="sticky top-0 z-10 card-header/ghost bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <h3 className="text-lg font-semibold flex items-center gap-2">
+          <span className="i-lucide-eye w-4 h-4" />
+          Recent Incidents
+          <span className="ml-2 text-xs text-muted-foreground">(last 24h)</span>
+        </h3>
+      </header>
+
+      <div className="card-content p-3 pt-2 h-full overflow-y-auto pr-2 custom-scroll">
+        {!items.length ? (
+          <div className="text-muted-foreground text-sm">No incidents in the last 24h.</div>
+        ) : (
+          <ul className="space-y-2">
+            {items.map((i) => (
+              <li key={i.id}>{/* existing item markup here (unchanged) */}</li>
+            ))}
+          </ul>
+        )}
+
+        {/* load-more sentinel */}
+        <div ref={sentinelRef} className="h-8" />
+        {isFetchingNextPage && (
+          <div className="py-3 text-center text-xs text-muted-foreground">Loading more…</div>
+        )}
+        {!hasNextPage && items.length > 0 && (
+          <div className="py-3 text-center text-xs text-muted-foreground">End of last 24 hours</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+
+The panel looks the same; we just added “(last 24h)” in the header and invisible sentinel/loading text at the bottom.
+
+Small UX suggestion (optional, purely visual)
+
+In the top filters next to All / Last Hour, add a subtle “Last 24h” chip and set it active on this page. This is consistent with the UX in your screenshot and clarifies scope. (We can wire it later; today the panel is already restricted to 24h.)
+
+Replit 🔧 next steps
+
+Confirm API supports:
+
+sinceHours=24 on /api/incidents (no bbox), and
+
+nextCursor in the paginated response (or provide the actual pagination field/param).
+
+Drop in the two new files and swap the panel to the infinite hook (no other code touched).
+
+Keep the existing item markup inside the <li> to preserve style; only the data source changed.
+
+If sinceHours isn’t supported in the non-bbox endpoint, I’ll switch to from=<iso24h> based on Feed’s time filter. Either way, we’ll cap the panel to 24 hours and let users scroll through the full day’s history smoothly.

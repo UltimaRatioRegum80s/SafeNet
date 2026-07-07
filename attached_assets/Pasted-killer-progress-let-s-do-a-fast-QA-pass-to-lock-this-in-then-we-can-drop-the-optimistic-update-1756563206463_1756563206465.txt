@@ -1,0 +1,136 @@
+killer progress 💪 — let’s do a fast QA pass to lock this in, then we can drop the optimistic updates + GPS-denied callout (tiny). I’ll give you a step-by-step test script first, then copy-paste snippets for the next pass.
+
+Quick QA script (5 mins)
+
+Cooldown persist
+
+Submit one report → refresh → button shows Wait Ns and unblocks after 30s.
+
+Location required
+
+Load page with GPS allowed → Submit enabled once coords arrive.
+
+Block GPS in browser → Submit stays disabled; “Set location” label shows.
+
+Refine handshake
+
+Click “Drop a pin” → place pin on map → toast shows; panel location line updates with new lat/lng.
+
+Route cleanup
+
+Open panel → navigate to another route → panel closes automatically.
+
+Photos limit
+
+Try adding 3+ photos → only first 2 included in payload.
+
+If that passes, let’s ship the tiny polish items below.
+
+Next pass: Optimistic updates + GPS-denied callout
+1) Extend your existing useIncidentStore
+
+Add two minimal methods; keep your structure unchanged elsewhere.
+
+// client/src/store/incidentStore.ts
+import { create } from "zustand";
+
+type Incident = {
+  id: string;
+  type: string;
+  status: "pending" | "approved" | "rejected";
+  lat?: number; lng?: number;
+  createdAt: string;
+  // ...your other fields
+};
+
+type State = {
+  incidents: Incident[];
+  addIncident: (i: Incident) => void;
+  reconcileIncident: (tempId: string, real: Incident) => void;
+};
+
+export const useIncidentStore = create<State>()((set, get) => ({
+  incidents: get()?.incidents ?? [],
+  addIncident: (i) => set((s) => ({ incidents: [i, ...(s.incidents ?? [])] })),
+  reconcileIncident: (tempId, real) =>
+    set((s) => ({
+      incidents: (s.incidents ?? []).map(x => x.id === tempId ? real : x),
+    })),
+}));
+
+2) Optimistic add in ReportPanel
+
+Insert right before mutation.mutate(...) and reconcile on success.
+
+// client/src/features/report/ReportPanel.tsx
+import { useIncidentStore } from "@/store/incidentStore";
+
+// inside component
+const addIncident = useIncidentStore((s) => s.addIncident);
+const reconcileIncident = useIncidentStore((s) => s.reconcileIncident);
+
+function handleSubmit() {
+  if (!selected || cooldownActive || !hasCoords) return;
+
+  const tempId = `temp-${crypto.randomUUID()}`;
+  addIncident({
+    id: tempId,
+    type: selected.id,
+    status: "pending",
+    lat: chosenCoords?.lat,
+    lng: chosenCoords?.lng,
+    createdAt: new Date().toISOString(),
+  });
+
+  mutation.mutate({
+    type: selected.id,
+    severity: selected.severity,
+    description: description.trim() || undefined,
+    isAnonymous,
+    lat: chosenCoords?.lat,
+    lng: chosenCoords?.lng,
+    photos: photos.length ? photos.slice(0, 2) : undefined,
+  }, {
+    onSuccess: (resp) => {
+      reconcileIncident(tempId, resp.incident);
+    }
+  });
+}
+
+3) Reconcile on socket receive (in your socket bootstrap)
+
+If the optimistic one exists, replace; otherwise add fresh.
+
+// client/src/lib/realtime.ts (or where you init sockets)
+import { useIncidentStore } from "@/store/incidentStore";
+import { socket } from "./socket"; // your existing client
+
+socket.on("incident:created", (incident) => {
+  const state = useIncidentStore.getState();
+  const temp = state.incidents.find(i =>
+    i.id.startsWith("temp-") &&
+    i.type === incident.type &&
+    Math.hypot((i.lat ?? 0) - (incident.lat ?? 0), (i.lng ?? 0) - (incident.lng ?? 0)) < 0.0007
+  );
+  temp ? state.reconcileIncident(temp.id, incident) : state.addIncident(incident);
+});
+
+4) GPS-denied callout (tiny UI hint)
+
+Add this below your location line in the panel (only when permission is off).
+
+{!hasPermission && (
+  <div className="text-xs text-slate-300/80">
+    Location is off. You can still <button className="underline" onClick={beginRefineOnMap}>drop a pin</button>.
+  </div>
+)}
+
+Optional micro-polish
+
+Disable submit while photos are uploading (if ImageUpload exposes an isUploading flag).
+
+Haptics on mobile (if you have a small util, call it on success/failure).
+
+Toast on socket for incidents from others: “New report nearby: {type}”.
+
+If you’re good with this plan, go ahead and paste these in. I can then draft a tiny Milestone 3 checklist (entry points parity + style touches) and we’ll keep momentum.

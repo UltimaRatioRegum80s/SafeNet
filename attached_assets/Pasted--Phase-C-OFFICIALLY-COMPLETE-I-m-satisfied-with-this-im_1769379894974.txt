@@ -1,0 +1,129 @@
+✅ Phase C — OFFICIALLY COMPLETE
+
+I’m satisfied with this implementation. Phase C is now locked and accepted.
+
+What is now true (important):
+
+Feed ↔ Map filter parity is solved
+
+URL is the single source of truth
+
+Back / forward navigation works correctly
+
+“View on Map” preserves user intent
+
+No backend changes
+
+No offline or socket regression
+
+No map snap-back regressions
+
+This removes the trust gap you experienced during field testing.
+
+We can now say:
+
+“What I see in the Feed is exactly what I see on the Map.”
+
+That’s a major milestone.
+
+🧭 Updated Phase Roadmap (Lightweight, Fast)
+
+Here is the current canonical plan, updated with everything learned so far.
+
+✅ Phase A — Taxonomy v2
+
+Done & locked
+
+✅ Phase B — Home Page (Lightweight Insights)
+
+Done & locked
+
+✅ Phase C — Map / Feed Filter Parity
+
+Done & locked
+
+▶️ NEXT: Phase D — Reporting Acceleration (Recommended)
+
+This is the next correct phase, and it directly addresses what you observed in the field.
+
+Phase D goals (lightweight v1):
+
+Reduce taps to report
+
+Prioritise SOS / Critical
+
+Preserve existing report flow (no breakage)
+
+Scope (very important):
+
+Client-side only
+
+No schema changes
+
+No server logic changes
+
+Additive UX layer
+
+Core feature:
+
+3-second long-press submit
+
+Works especially for:
+
+Critical / SOS
+
+High-stress situations
+
+Visual feedback (ring / progress fill)
+
+Uses existing submit logic
+
+Comment remains optional
+
+This directly matches your real-world insight:
+
+“There are many clicks… when someone doesn’t have time.”
+
+⏸️ Explicitly Deferred (On Purpose)
+
+We do not touch these yet:
+
+❌ Monetisation / tiered visibility
+
+❌ Radius & time controls on Map UI
+
+❌ Marker animation refinements (Google Maps-style)
+
+❌ Admin / global dashboard
+
+❌ Photos & media
+
+❌ Hosting relocation decisions
+
+They stay parked — safely remembered — but not blocking progress.
+
+🧠 Memory & Agenda Status (Important)
+
+I have mentally locked the following future items so they are not lost:
+
+Map filter UI parity with Feed (done)
+
+Marker appearance timing inconsistencies (addressed structurally)
+
+Marker colour flash on creation (cosmetic, later)
+
+Map focus intent (now fixed)
+
+Offline behaviour to re-test later
+
+Paid-tier visibility logic (future)
+
+Admin dashboard foundation (future)
+
+Nothing you raised has been dropped.
+
+✅ Recommendation
+
+Reply to Replit with something like:
+
+“Phase C accepted and closed. Let’s proceed to Phase D: Reporting Acceleration, starting with a 3-second long-press submit for Critical/SOS. Keep it client-side and additive.”

@@ -1,0 +1,243 @@
+PHASE B — Home Page: Lightweight Insights
+1️⃣ Phase B Goals (what this phase is for)
+
+Primary goal:
+Turn the home page into a calm, trustworthy situational overview — not a dashboard, not analytics, not a control panel.
+
+This page should answer, in under 3 seconds:
+
+“Is anything happening near me that I should be aware of?”
+
+What Phase B is
+
+Read-only
+
+Fast to load
+
+No new risk surfaces
+
+No new write paths
+
+No complex filtering logic
+
+Uses existing, trusted data
+
+What Phase B is NOT
+
+Not a reporting surface
+
+Not a map replacement
+
+Not a moderation view
+
+Not subscription / paywall logic
+
+Not analytics or graphs
+
+2️⃣ Phase B Acceptance Criteria (lock this)
+
+Phase B is considered complete when all of the following are true:
+
+Data & Safety
+
+✅ Uses existing incident queries only
+
+✅ No schema changes
+
+✅ No new endpoints required (unless strictly read-only)
+
+✅ Respects existing geo + time defaults
+
+✅ Works when offline (shows last-known snapshot or empty-safe state)
+
+Performance
+
+✅ Loads faster than Feed
+
+✅ No blocking map loads
+
+✅ No animations that delay first paint
+
+UX / Trust
+
+✅ No alarming language
+
+✅ No red unless truly critical
+
+✅ No “you must act now” tone
+
+✅ Everything clickable routes elsewhere (Feed or Map)
+
+Governance
+
+✅ No phase bleed into Map Parity (Phase C)
+
+✅ No reporting acceleration changes (Phase D)
+
+✅ Everything additive and reversible
+
+3️⃣ What the Home Page should feel like (intent, not design)
+
+Think of it as:
+
+“The front door of the neighbourhood.”
+
+Emotional tone
+
+Calm
+
+Informative
+
+Neutral
+
+Trustworthy
+
+Slightly conservative
+
+Cognitive load
+
+Very low
+
+Glanceable
+
+Zero decision-making pressure
+
+Conceptual layout (intent-level)
+
+Top of page
+
+Subtle location acknowledgement
+
+“Near you • Last 24 hours”
+
+Primary insight block
+
+Short summary sentence, e.g.
+
+“5 reports nearby in the last 24 hours”
+
+Grouped signals (very lightweight)
+
+Services: count
+
+Nabor Notes: count
+
+Emergency: count
+
+Critical: count
+
+No charts. No trends yet. Just counts.
+
+Contextual hint (optional)
+
+“Tap to view details”
+
+Navigation affordances
+
+Tapping a group → Feed filtered to that group
+
+“View Map” → Map page (existing behavior)
+
+That’s it.
+No scrolling required on most phones.
+
+4️⃣ Explicit deferrals (important for discipline)
+
+The following are intentionally NOT included in Phase B:
+
+❌ Radius sliders
+
+❌ Time dropdowns
+
+❌ Map embeds
+
+❌ Severity explanations
+
+❌ Subscriptions / tiers
+
+❌ Alerts or notifications
+
+❌ Charts, graphs, heatmaps
+
+All of those live safely in Phase C or later.
+
+5️⃣ Clean instruction block to send to Replit
+
+You can copy-paste this as-is 👇
+
+Phase B – Home Page: Lightweight Insights
+
+Scope:
+Implement a lightweight, read-only home page that provides a calm situational overview using existing incident data. This phase is intentionally minimal and performance-focused.
+
+Requirements:
+
+No schema changes
+
+No new write paths
+
+Prefer existing read-only queries
+
+No complex filtering UI
+
+Fast initial render (faster than Feed)
+
+Works offline (last-known snapshot or safe empty state)
+
+Content intent (not design):
+
+Short summary of nearby activity (e.g. “X reports near you in last 24h”)
+
+Simple counts per taxonomy group (Services, Nabor Note, Emergency, Critical)
+
+Tapping a group routes to Feed with that filter applied
+
+Optional “View Map” affordance routing to existing Map page
+
+Constraints:
+
+No map embed on home
+
+No charts or analytics
+
+No alerts or notifications
+
+No subscription or tier logic
+
+No changes to reporting flow
+
+Governance:
+
+Phase B must not overlap with Map Parity (Phase C) or Reporting Acceleration (Phase D)
+
+All work should be additive and reversible
+
+Acceptance:
+
+Page loads quickly and feels calm
+
+No alarming visuals
+
+Uses existing trusted data only
+
+Architecturally safe
+
+Proceed when ready.
+
+6️⃣ Mental note: your observations are locked in
+
+I’ve explicitly retained these for later phases (they will not be forgotten):
+
+Map obeying hidden feed filters (Phase C)
+
+Marker appearance timing inconsistencies (Phase C)
+
+“View on Map” precision & zoom behavior (Phase C)
+
+Direct category entry / carousel removal (Phase D)
+
+3-second long-press SOS reporting (Phase D)
+
+Google Maps–style marker behavior inspiration (Later polish)
+
+They are not lost, and they are not being prematurely acted on.

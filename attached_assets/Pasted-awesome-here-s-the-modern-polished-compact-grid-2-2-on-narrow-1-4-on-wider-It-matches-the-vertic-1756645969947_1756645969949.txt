@@ -1,0 +1,427 @@
+awesome—here’s the modern-polished compact grid (2×2 on narrow, 1×4 on wider).
+It matches the vertical version’s upgrades: soft elevation, colored hover glow, quick tap scale, bold icon hues, strong focus rings.
+
+Drop-in replacement for src/components/SeveritySelectCompact.tsx.
+
+import { useState } from "react";
+import clsx from "clsx";
+import { Smile, AlertTriangle, Flame, Zap } from "lucide-react";
+
+export type Severity = "low" | "medium" | "high" | "critical";
+
+type Props = {
+  onSelect: (v: Severity) => void;
+  /** "solid" = filled red, "ring" = neutral + thick red ring */
+  criticalStyle?: "solid" | "ring";
+  className?: string;
+  trackEvent?: boolean;
+  vibrate?: boolean;
+};
+
+export default function SeveritySelectCompact({
+  onSelect,
+  criticalStyle = "solid",
+  className,
+  trackEvent = true,
+  vibrate = true,
+}: Props) {
+  const [selected, setSelected] = useState<Severity | null>(null);
+
+  const click = (v: Severity) => {
+    if (trackEvent) {
+      try { (window as any).track?.("severity_sheet_open", { severity: v }); } catch {}
+    }
+    if (vibrate && navigator.vibrate) navigator.vibrate(8);
+    setSelected(v);
+    onSelect(v);
+  };
+
+  const baseNeutral =
+    "h-12 rounded-full font-semibold text-sm " +
+    "bg-slate-200/90 text-slate-900 flex items-center justify-center gap-2 px-4 " +
+    "shadow-sm motion-safe:transition-all motion-safe:duration-150 motion-safe:ease-out active:scale-95 " +
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950";
+
+  const Item = ({
+    children, className, checked, onClick, ariaLabel,
+  }: {
+    children: React.ReactNode;
+    className?: string;
+    checked: boolean;
+    onClick: () => void;
+    ariaLabel: string;
+  }) => (
+    <button
+      role="radio"
+      aria-label={ariaLabel}
+      aria-checked={checked}
+      className={clsx("w-full", baseNeutral, className)}
+      onClick={onClick}
+    >
+      {children}
+    </button>
+  );
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Choose incident severity"
+      className={clsx(
+        "grid grid-cols-2 gap-3 sm:grid-cols-4 max-w-xl",
+        className
+      )}
+    >
+      {/* Low */}
+      <Item
+        ariaLabel="Low severity"
+        checked={selected === "low"}
+        onClick={() => click("low")}
+        className="ring-2 ring-yellow-400 hover:shadow-md hover:shadow-yellow-400/25"
+      >
+        <Smile className="w-5 h-5 text-yellow-600" aria-hidden />
+        <span>Low</span>
+      </Item>
+
+      {/* Medium */}
+      <Item
+        ariaLabel="Medium severity"
+        checked={selected === "medium"}
+        onClick={() => click("medium")}
+        className="ring-2 ring-amber-600 hover:shadow-md hover:shadow-amber-600/25"
+      >
+        <AlertTriangle className="w-5 h-5 text-amber-600" aria-hidden />
+        <span>Medium</span>
+      </Item>
+
+      {/* High */}
+      <Item
+        ariaLabel="High severity"
+        checked={selected === "high"}
+        onClick={() => click("high")}
+        className="ring-2 ring-red-500 hover:shadow-md hover:shadow-red-500/25"
+      >
+        <Flame className="w-5 h-5 text-red-600" aria-hidden />
+        <span>High</span>
+      </Item>
+
+      {/* Critical */}
+      {criticalStyle === "solid" ? (
+        <Item
+          ariaLabel="Critical severity"
+          checked={selected === "critical"}
+          onClick={() => click("critical")}
+          className={clsx(
+            "bg-red-700 text-white hover:shadow-lg hover:shadow-red-600/30",
+            "focus-visible:ring-red-400"
+          )}
+        >
+          <Zap className="w-5 h-5" aria-hidden />
+          <span>Critical</span>
+        </Item>
+      ) : (
+        <Item
+          ariaLabel="Critical severity"
+          checked={selected === "critical"}
+          onClick={() => click("critical")}
+          className="ring-4 ring-red-600 hover:shadow-md hover:shadow-red-600/25"
+        >
+          <Zap className="w-5 h-5 text-red-600" aria-hidden />
+          <span>Critical</span>
+        </Item>
+      )}
+    </div>
+  );
+}
+
+
+Usage stays the same:
+
+<SeveritySelectCompact onSelect={onSeveritySelect} criticalStyle="solid" />
+// or A/B:
+<SeveritySelectCompact onSelect={onSeveritySelect} criticalStyle="ring" />
+
+
+Want me to merge vertical + compact into a single component with layout="vertical|compact" and responsive switching (e.g., vertical on xs, compact on sm+)?
+
+You said:
+
+Want me to merge **vertical + compact** into a single component with `layout="vertical|compact"` and responsive switching (e.g., vertical on xs, compact on sm+)?
+
+yes
+NN Builder & Coder said:
+Thought for 10s
+
+awesome—here’s a single, unified selector that supports
+layout="vertical" | "compact" | "auto" (vertical on xs, compact on sm+).
+It keeps analytics + haptics + modern styling.
+
+src/components/SeveritySelectUnified.tsx
+import { useState } from "react";
+import clsx from "clsx";
+import { Smile, AlertTriangle, Flame, Zap } from "lucide-react";
+
+export type Severity = "low" | "medium" | "high" | "critical";
+
+type Layout = "vertical" | "compact" | "auto";
+
+type Props = {
+  onSelect: (v: Severity) => void;
+  /** "solid" = filled red, "ring" = neutral + thick red ring */
+  criticalStyle?: "solid" | "ring";
+  /** vertical | compact | auto (vertical on <sm, compact on ≥sm) */
+  layout?: Layout;
+  className?: string;
+  trackEvent?: boolean;
+  vibrate?: boolean;
+};
+
+export default function SeveritySelectUnified({
+  onSelect,
+  criticalStyle = "solid",
+  layout = "auto",
+  className,
+  trackEvent = true,
+  vibrate = true,
+}: Props) {
+  const [selected, setSelected] = useState<Severity | null>(null);
+
+  const click = (v: Severity) => {
+    if (trackEvent) {
+      try { (window as any).track?.("severity_sheet_open", { severity: v }); } catch {}
+    }
+    if (vibrate && navigator.vibrate) navigator.vibrate(8);
+    setSelected(v);
+    onSelect(v);
+  };
+
+  // Shared button bases (modern polish: soft elevation, hover glow, tap scale)
+  const baseNeutralVertical =
+    "h-14 w-full rounded-full font-semibold text-base " +
+    "bg-slate-200/90 text-slate-900 flex items-center justify-center gap-2 " +
+    "shadow-sm motion-safe:transition-all motion-safe:duration-150 motion-safe:ease-out active:scale-95 " +
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950";
+
+  const baseNeutralCompact =
+    "h-12 rounded-full font-semibold text-sm " +
+    "bg-slate-200/90 text-slate-900 flex items-center justify-center gap-2 px-4 " +
+    "shadow-sm motion-safe:transition-all motion-safe:duration-150 motion-safe:ease-out active:scale-95 " +
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950";
+
+  const Vertical = (
+    <div
+      role="radiogroup"
+      aria-label="Choose incident severity"
+      className={clsx("w-full max-w-sm space-y-4", className)}
+    >
+      <button
+        role="radio"
+        aria-checked={selected === "low"}
+        onClick={() => click("low")}
+        className={clsx(
+          baseNeutralVertical,
+          "ring-2 ring-yellow-400 hover:shadow-md hover:shadow-yellow-400/25"
+        )}
+      >
+        <Smile className="w-5 h-5 text-yellow-600" aria-hidden />
+        Low
+      </button>
+
+      <button
+        role="radio"
+        aria-checked={selected === "medium"}
+        onClick={() => click("medium")}
+        className={clsx(
+          baseNeutralVertical,
+          "ring-2 ring-amber-600 hover:shadow-md hover:shadow-amber-600/25"
+        )}
+      >
+        <AlertTriangle className="w-5 h-5 text-amber-600" aria-hidden />
+        Medium
+      </button>
+
+      <button
+        role="radio"
+        aria-checked={selected === "high"}
+        onClick={() => click("high")}
+        className={clsx(
+          baseNeutralVertical,
+          "ring-2 ring-red-500 hover:shadow-md hover:shadow-red-500/25"
+        )}
+      >
+        <Flame className="w-5 h-5 text-red-600" aria-hidden />
+        High
+      </button>
+
+      {criticalStyle === "solid" ? (
+        <button
+          role="radio"
+          aria-checked={selected === "critical"}
+          onClick={() => click("critical")}
+          className={clsx(
+            "h-14 w-full rounded-full font-semibold text-base flex items-center justify-center gap-2",
+            "bg-red-700 text-white shadow-md hover:shadow-lg hover:shadow-red-600/30",
+            "motion-safe:transition-all motion-safe:duration-150 motion-safe:ease-out active:scale-95",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
+          )}
+        >
+          <Zap className="w-5 h-5" aria-hidden />
+          Critical
+        </button>
+      ) : (
+        <button
+          role="radio"
+          aria-checked={selected === "critical"}
+          onClick={() => click("critical")}
+          className={clsx(
+            baseNeutralVertical,
+            "ring-4 ring-red-600 hover:shadow-md hover:shadow-red-600/25"
+          )}
+        >
+          <Zap className="w-5 h-5 text-red-600" aria-hidden />
+          Critical
+        </button>
+      )}
+    </div>
+  );
+
+  const Compact = (
+    <div
+      role="radiogroup"
+      aria-label="Choose incident severity"
+      className={clsx("grid grid-cols-2 gap-3 sm:grid-cols-4 max-w-xl", className)}
+    >
+      {/* Low */}
+      <button
+        role="radio"
+        aria-label="Low severity"
+        aria-checked={selected === "low"}
+        onClick={() => click("low")}
+        className={clsx(
+          "w-full",
+          baseNeutralCompact,
+          "ring-2 ring-yellow-400 hover:shadow-md hover:shadow-yellow-400/25"
+        )}
+      >
+        <Smile className="w-5 h-5 text-yellow-600" aria-hidden />
+        <span>Low</span>
+      </button>
+
+      {/* Medium */}
+      <button
+        role="radio"
+        aria-label="Medium severity"
+        aria-checked={selected === "medium"}
+        onClick={() => click("medium")}
+        className={clsx(
+          "w-full",
+          baseNeutralCompact,
+          "ring-2 ring-amber-600 hover:shadow-md hover:shadow-amber-600/25"
+        )}
+      >
+        <AlertTriangle className="w-5 h-5 text-amber-600" aria-hidden />
+        <span>Medium</span>
+      </button>
+
+      {/* High */}
+      <button
+        role="radio"
+        aria-label="High severity"
+        aria-checked={selected === "high"}
+        onClick={() => click("high")}
+        className={clsx(
+          "w-full",
+          baseNeutralCompact,
+          "ring-2 ring-red-500 hover:shadow-md hover:shadow-red-500/25"
+        )}
+      >
+        <Flame className="w-5 h-5 text-red-600" aria-hidden />
+        <span>High</span>
+      </button>
+
+      {/* Critical */}
+      {criticalStyle === "solid" ? (
+        <button
+          role="radio"
+          aria-label="Critical severity"
+          aria-checked={selected === "critical"}
+          onClick={() => click("critical")}
+          className={clsx(
+            "w-full",
+            baseNeutralCompact,
+            "bg-red-700 text-white hover:shadow-lg hover:shadow-red-600/30 focus-visible:ring-red-400"
+          )}
+        >
+          <Zap className="w-5 h-5" aria-hidden />
+          <span>Critical</span>
+        </button>
+      ) : (
+        <button
+          role="radio"
+          aria-label="Critical severity"
+          aria-checked={selected === "critical"}
+          onClick={() => click("critical")}
+          className={clsx(
+            "w-full",
+            baseNeutralCompact,
+            "ring-4 ring-red-600 hover:shadow-md hover:shadow-red-600/25"
+          )}
+        >
+          <Zap className="w-5 h-5 text-red-600" aria-hidden />
+          <span>Critical</span>
+        </button>
+      )}
+    </div>
+  );
+
+  if (layout === "vertical") return Vertical;
+  if (layout === "compact") return Compact;
+
+  // auto: vertical on <sm, compact on ≥sm (render both, show/hide via responsive classes)
+  return (
+    <>
+      <div className="sm:hidden">{Vertical}</div>
+      <div className="hidden sm:block">{Compact}</div>
+    </>
+  );
+}
+
+Usage (CategorySheets or Report entry)
+import SeveritySelectUnified, { type Severity } from "@/components/SeveritySelectUnified";
+import { useIncidentStore } from "@/stores/useIncidentStore";
+
+export function ReportIncidentEntry() {
+  const setSeverity = useIncidentStore((s) => s.setSeverity);
+  const openSheet = /* your existing function defined here */ (sev: Severity) => { /* ... */ };
+
+  const onSeverity = (sev: Severity) => {
+    setSeverity(sev);
+    openSheet(sev);
+  };
+
+  return (
+    <section className="lg:hidden px-4 sm:px-6 pt-10 pb-[calc(env(safe-area-inset-bottom)+24px)] grid place-items-center md:place-items-start">
+      <h1 className="text-xl md:text-2xl font-bold text-center md:text-left">Report Incident</h1>
+      <p className="mt-2 text-sm text-slate-400 text-center md:text-left">
+        Choose a severity level. You’ll select the incident type next.
+      </p>
+
+      <div className="mt-8 w-full">
+        {/* Auto = vertical on phones, compact on sm+ */}
+        <SeveritySelectUnified onSelect={onSeverity} layout="auto" criticalStyle="solid" />
+
+        {/* Force a layout if needed: */}
+        {/* <SeveritySelectUnified onSelect={onSeverity} layout="vertical" /> */}
+        {/* <SeveritySelectUnified onSelect={onSeverity} layout="compact" /> */}
+      </div>
+    </section>
+  );
+}
+
+
+Notes
+
+A11y: radiogroup + focus-visible rings; icons are aria-hidden.
+
+Motion honors prefers-reduced-motion via motion-safe.
+
+Analytics + haptics are built in; set trackEvent={false} / vibrate={false} if you want to disable.

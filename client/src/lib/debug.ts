@@ -1,0 +1,1 @@
+export const showDebug = new URLSearchParams(location.search).has("debug");

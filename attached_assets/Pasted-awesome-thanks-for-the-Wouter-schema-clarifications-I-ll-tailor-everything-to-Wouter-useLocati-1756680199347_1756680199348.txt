@@ -1,0 +1,320 @@
+awesome—thanks for the Wouter + schema clarifications. I’ll tailor everything to:
+
+Wouter (useLocation for redirects, window.location.search for reading params)
+
+Leaflet + MarkerCluster
+
+Schema fields named latitude / longitude (frontend still can pass lat/lng internally, but we’ll normalize to those names before POST)
+
+Below are copy-paste patches that drop in cleanly.
+
+✅ Recommendations (answering your qs)
+
+Use the full focus param system: lat, lng, z, highlight. It’s deterministic, deep-linkable, and great for debugging.
+
+Pulse style: 3–4s auto-dismiss, subtle, high-contrast on OSM tiles. I’ll set 4s with a soft red ring; easy to tweak.
+
+1) Accurate GPS at submit (with Wouter redirect + param focus)
+// client/src/features/report/useMobileLocation.ts
+export async function getAccuratePosition(): Promise<{ lat: number; lng: number }> {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error("Geolocation unavailable"));
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lng = Number(pos.coords.longitude.toFixed(6));
+        resolve({ lat, lng });
+      },
+      (err) => reject(err),
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+    );
+  });
+}
+
+// client/src/features/report/useSubmitIncident.ts
+import { getAccuratePosition } from "./useMobileLocation";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useLocation } from "wouter";
+import { RoutePaths } from "@/router/routePaths";
+
+type Values = {
+  title: string;
+  type: string;
+  // Frontend may have either {lat,lng} or {latitude,longitude}
+  lat?: number | string;
+  lng?: number | string;
+  latitude?: number | string;
+  longitude?: number | string;
+  // ...other fields
+};
+
+export function useSubmitIncident() {
+  const qc = useQueryClient();
+  const [, setLocation] = useLocation();
+
+  const mutation = useMutation({
+    mutationFn: async (payload: any) => {
+      const r = await fetch("/api/incidents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error("Failed to create incident");
+      return r.json();
+    },
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: ["incidents"] });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["incidents"] });
+    },
+  });
+
+  return async (values: Values) => {
+    // Normalize coord names & types (frontend → schema)
+    const lat = values.lat ?? values.latitude;
+    const lng = values.lng ?? values.longitude;
+
+    let numLat = Number(lat);
+    let numLng = Number(lng);
+
+    if (!Number.isFinite(numLat) || !Number.isFinite(numLng)) {
+      try {
+        const p = await getAccuratePosition();
+        numLat = p.lat;
+        numLng = p.lng;
+      } catch {
+        // allow submit without focus, but ideally show a toast
+      }
+    }
+
+    // Stash for fallback focus
+    const last = { lat: numLat, lng: numLng, t: Date.now(), type: values.type };
+    localStorage.setItem("nn:last-incident", JSON.stringify(last));
+
+    // Submit with schema field names
+    await mutation.mutateAsync({
+      ...values,
+      latitude: Number(numLat.toFixed(6)),
+      longitude: Number(numLng.toFixed(6)),
+    });
+
+    // Redirect with focus params (Wouter)
+    const sp = new URLSearchParams({
+      lat: String(numLat),
+      lng: String(numLng),
+      z: "17",
+      highlight: "1",
+    });
+    setLocation(`${RoutePaths.Map}?${sp.toString()}`);
+  };
+}
+
+2) Map: read focus params (Wouter) + pulse highlight + localStorage fallback
+// client/src/components/InteractiveMap.tsx
+import { useEffect, useMemo, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
+import L, { Map as LeafletMap } from "leaflet";
+import "leaflet/dist/leaflet.css";
+import "leaflet.markercluster";
+import "leaflet.markercluster/dist/MarkerCluster.css";
+import "leaflet.markercluster/dist/MarkerCluster.Default.css";
+import { getIncidentIcon } from "@/lib/incidentIcons";
+
+type Incident = {
+  id: string;
+  latitude: number;   // schema fields
+  longitude: number;
+  type: string;
+  title?: string;
+  __optimistic?: boolean;
+};
+
+function useFocusParams() {
+  // Wouter doesn't expose search; use window.location.search
+  const sp = useMemo(() => new URLSearchParams(window.location.search), [window.location.search]);
+  const lat = Number(sp.get("lat"));
+  const lng = Number(sp.get("lng"));
+  const z = Number(sp.get("z") ?? 17);
+  const highlight = sp.get("highlight") === "1";
+  return { lat, lng, z, highlight, valid: Number.isFinite(lat) && Number.isFinite(lng) };
+}
+
+export default function InteractiveMap() {
+  const mapRef = useRef<LeafletMap | null>(null);
+  const clusterRef = useRef<L.MarkerClusterGroup | null>(null);
+
+  const { data: incidents = [] } = useQuery<Incident[]>({
+    queryKey: ["incidents"],
+    queryFn: async () => (await fetch("/api/incidents")).json(),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    networkMode: "always",
+  });
+
+  const focus = useFocusParams();
+
+  useEffect(() => {
+    if (mapRef.current) return;
+
+    const map = L.map("nn-map", {
+      center: [-33.9249, 18.4241],
+      zoom: 12,
+      zoomControl: false,
+    });
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap",
+    }).addTo(map);
+
+    const cluster = L.markerClusterGroup({
+      chunkedLoading: true,
+      removeOutsideVisibleBounds: false,
+      spiderfyOnMaxZoom: true,
+    }).addTo(map);
+
+    const invalidate = () => setTimeout(() => map.invalidateSize(), 0);
+    window.addEventListener("resize", invalidate);
+    window.addEventListener("orientationchange", invalidate);
+    const container = document.getElementById("nn-map");
+    const ro = new ResizeObserver(invalidate);
+    if (container) ro.observe(container);
+
+    mapRef.current = map;
+    clusterRef.current = cluster;
+
+    return () => {
+      window.removeEventListener("resize", invalidate);
+      window.removeEventListener("orientationchange", invalidate);
+      ro.disconnect();
+      map.remove();
+      mapRef.current = null;
+      clusterRef.current = null;
+    };
+  }, []);
+
+  // Render markers
+  const keyOf = (i: Incident) => `${i.id}-${i.latitude}-${i.longitude}-${i.type}`;
+  const prevKeyRef = useRef<string>("");
+  useEffect(() => {
+    if (!mapRef.current || !clusterRef.current) return;
+
+    const currentKey = incidents.map(keyOf).join("|");
+    if (prevKeyRef.current === currentKey) return;
+    prevKeyRef.current = currentKey;
+
+    const map = mapRef.current;
+    const cluster = clusterRef.current;
+    cluster.clearLayers();
+
+    for (const inc of incidents) {
+      const lat = Number(inc.latitude);
+      const lng = Number(inc.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+
+      const marker = L.marker([lat, lng], {
+        icon: getIncidentIcon(inc.type),
+        keyboard: false,
+      }).bindPopup(`<strong>${inc.title ?? "Incident"}</strong>`);
+
+      cluster.addLayer(marker);
+    }
+
+    setTimeout(() => map.invalidateSize(), 0);
+  }, [incidents]);
+
+  // Focus on redirected coordinates & pulse highlight
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (!focus.valid) return;
+
+    const map = mapRef.current;
+    map.setView([focus.lat, focus.lng], focus.z, { animate: true });
+
+    if (focus.highlight) {
+      const pulse = L.circleMarker([focus.lat, focus.lng], {
+        radius: 16,
+        color: "#ef4444",
+        fillColor: "#ef4444",
+        fillOpacity: 0.25,
+        weight: 2,
+        className: "nn-pulse",
+      }).addTo(map);
+      setTimeout(() => {
+        try { map.removeLayer(pulse); } catch {}
+      }, 4000);
+    }
+  }, [focus.valid, focus.lat, focus.lng, focus.z, focus.highlight]);
+
+  // Fallback: center on last incident if no URL params (first load)
+  useEffect(() => {
+    if (!mapRef.current || focus.valid) return;
+    const raw = localStorage.getItem("nn:last-incident");
+    if (!raw) return;
+    try {
+      const { lat, lng, t } = JSON.parse(raw);
+      if (Date.now() - t < 5 * 60 * 1000 && Number.isFinite(lat) && Number.isFinite(lng)) {
+        mapRef.current!.setView([lat, lng], 17, { animate: true });
+        localStorage.removeItem("nn:last-incident");
+      }
+    } catch {}
+  }, [focus.valid]);
+
+  return <div id="nn-map" className="h-[calc(100vh-8rem)] w-full rounded-2xl shadow-md" />;
+}
+
+/* client/src/styles/map.css */
+.nn-pulse { animation: nn-pulse 1s ease-out infinite; }
+@keyframes nn-pulse {
+  0% { transform: scale(0.8); opacity: 0.7; }
+  100% { transform: scale(1.2); opacity: 0.1; }
+}
+
+
+(Import map.css once in your app entry.)
+
+3) Optimistic normalization uses latitude/longitude
+// client/src/hooks/useCreateIncident.ts (only the onMutate part needs aligning)
+const toNum = (v: any) => (v == null ? NaN : Number(v));
+onMutate: async (vars: any) => {
+  await qc.cancelQueries({ queryKey: ["incidents"] });
+  const prev = qc.getQueryData<any[]>(["incidents"]) || [];
+
+  const lat = toNum(vars.lat ?? vars.latitude);
+  const lng = toNum(vars.lng ?? vars.longitude);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    return { previous: prev }; // don't seed invisible marker
+  }
+
+  const optimistic = {
+    ...vars,
+    id: `temp-${Date.now()}`,
+    latitude: Number(lat.toFixed(6)),
+    longitude: Number(lng.toFixed(6)),
+    __optimistic: true,
+  };
+  qc.setQueryData(["incidents"], [optimistic, ...prev]);
+  return { previous: prev };
+},
+
+4) Route constants (Wouter-safe) + legacy redirect (optional)
+// client/src/router/routePaths.ts
+export const RoutePaths = {
+  Map: "/community/map",
+  Report: "/report",
+  Home: "/",
+} as const;
+
+
+If you have any lingering /map links, keep a small server 301 to /community/map as we discussed earlier.
+
+What this gives @RDM immediately
+
+When you submit on mobile, the app navigates to the exact coordinates with a visible pulse.
+
+Your marker shows optimistically and then persists via real-time/socket + server fetch.
+
+Even if the query params get dropped, the map still recenters using a 5-minute local fallback.

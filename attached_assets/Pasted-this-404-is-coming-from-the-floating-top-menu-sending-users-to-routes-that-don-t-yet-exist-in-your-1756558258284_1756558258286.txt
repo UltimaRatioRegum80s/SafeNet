@@ -1,0 +1,141 @@
+this 404 is coming from the floating top menu sending users to routes that don’t (yet) exist in your router. Let’s make the menu route-safe so it only navigates to registered pages and shows a friendly “Coming soon” toast for the rest.
+
+Below is a drop-in patch for MobileFloatingTopMenu.tsx that:
+
+points to the known-good routes you already have,
+
+uses a safeNavigate guard (no 404s),
+
+shows a toast for unimplemented pages (Chat / Stats, etc.),
+
+keeps auto-highlighting based on current URL,
+
+remains mobile/tablet only (desktop unchanged).
+
+1) Safer floating menu (copy-paste)
+// client/src/components/MobileFloatingTopMenu.tsx
+import React from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { Home, PlusCircle, MapPin, MessageSquare, BarChart3 } from "lucide-react";
+// If you use shadcn/ui toast:
+import { useToast } from "@/components/ui/use-toast";
+
+// 1) Declare ONLY the routes you actually have right now.
+//    Update these to match your router config.
+const ROUTES = {
+  home: "/",                  // or "/community"
+  report: "/report",          // or "/community/report"
+  map: "/community/map",      // <-- this one exists
+  // chat: "/community/chat", // UNIMPLEMENTED (commented on purpose)
+  // stats: "/dashboard",     // UNIMPLEMENTED (commented on purpose)
+} as const;
+
+type Key = "home" | "report" | "map" | "chat" | "stats";
+
+// 2) Map URL -> active key (match the paths you really use)
+function keyFromPath(path: string): Key {
+  if (path.startsWith("/community/map")) return "map";
+  if (path.startsWith("/report") || path.startsWith("/community/report")) return "report";
+  if (path.startsWith("/community/chat")) return "chat";
+  if (path.startsWith("/dashboard")) return "stats";
+  return "home";
+}
+
+export default function MobileFloatingTopMenu() {
+  const { pathname } = useLocation();
+  const active = keyFromPath(pathname);
+  const nav = useNavigate();
+  const { toast } = useToast?.() ?? { toast: (x: any) => alert(x?.description || x?.title || "Coming soon") };
+
+  const items: Array<{ key: Key; label: string; icon: React.ReactNode; to?: string }> = [
+    { key: "home",   label: "Home",   icon: <Home className="w-5 h-5" />,        to: ROUTES.home },
+    { key: "report", label: "Report", icon: <PlusCircle className="w-5 h-5" />,  to: ROUTES.report },
+    { key: "map",    label: "Map",    icon: <MapPin className="w-5 h-5" />,      to: ROUTES.map },
+    { key: "chat",   label: "Chat",   icon: <MessageSquare className="w-5 h-5" /> }, // no 'to' → toast
+    { key: "stats",  label: "Stats",  icon: <BarChart3 className="w-5 h-5" /> },     // no 'to' → toast
+  ];
+
+  const safeNavigate = (to?: string, label?: string) => {
+    if (to) {
+      nav(to);
+    } else {
+      toast({
+        title: "Coming soon",
+        description: `${label ?? "This page"} isn’t available yet.`,
+      });
+    }
+  };
+
+  return (
+    <div className="absolute top-0 left-0 right-0 z-30 xl:hidden pointer-events-none">
+      <div className="h-[calc(env(safe-area-inset-top)+12px)] bg-gradient-to-b from-black/60 to-transparent" />
+      <div className="flex justify-center px-3">
+        <nav
+          className="pointer-events-auto nn-glass rounded-2xl px-3 py-2 flex items-center gap-5"
+          aria-label="Mobile top menu"
+        >
+          {items.map((it) => (
+            <button
+              key={it.key}
+              onClick={() => safeNavigate(it.to, it.label)}
+              aria-label={it.label}
+              aria-current={active === it.key ? "page" : undefined}
+              className={`relative grid place-items-center w-10 h-10 rounded-xl transition
+                ${active === it.key ? "bg-cyan-400 text-slate-900"
+                                    : "text-white/80 hover:bg-white/10"}`}
+            >
+              {it.icon}
+            </button>
+          ))}
+        </nav>
+      </div>
+    </div>
+  );
+}
+
+
+Why this fixes your 404s
+
+Buttons for unimplemented routes no longer call navigate(); they show a toast instead.
+
+Only registered paths navigate (Home/Report/Map per your router).
+
+You can enable Chat/Stats anytime by uncommenting/adding their real paths in ROUTES.
+
+2) (Optional) Router sanity check
+
+Ensure your router actually contains the paths you wired above. Example (React Router v6):
+
+// client/src/AppRouter.tsx (example)
+import { Routes, Route } from "react-router-dom";
+import Home from "@/pages/Home";
+import Report from "@/pages/Report";
+import CommunityMap from "@/pages/community/Map";
+import NotFound from "@/pages/NotFound";
+
+export default function AppRouter() {
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/report" element={<Report />} />
+      <Route path="/community/map" element={<CommunityMap />} />
+      {/* add these when ready: */}
+      {/* <Route path="/community/chat" element={<Chat />} /> */}
+      {/* <Route path="/dashboard" element={<Dashboard />} /> */}
+      <Route path="*" element={<NotFound />} />
+    </Routes>
+  );
+}
+
+
+If your app uses a basename (served under /community), make sure <BrowserRouter basename="/community"> is set and update ROUTES accordingly.
+
+3) Optional: small UX touch for disabled items
+
+If you want to grey out unimplemented buttons:
+
+const disabled = !it.to;
+className={`… ${disabled ? "opacity-60" : ""} ${active === it.key ? "bg-cyan-400 …" : "…"} `}
+
+
+If you share your exact list of registered routes, I’ll adjust the ROUTES map to match them 1:1 so every icon goes somewhere valid (and nothing 404s).

@@ -1,0 +1,29 @@
+.nn-cluster {
+  border-radius: 9999px;
+  background: rgba(18, 22, 28, 0.9);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.35);
+  border: 2px solid rgba(255,255,255,0.08);
+}
+.nn-cluster__inner {
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  color: #fff; font-weight: 700;
+}
+
+/* teal glow if any optimistic children */
+.nn-cluster--optimistic {
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.25), 0 6px 16px rgba(0,0,0,0.4);
+}
+
+/* amber dashed ring if any offline children */
+.nn-cluster--offline {
+  position: relative;
+}
+.nn-cluster--offline::after {
+  content: "";
+  position: absolute; inset: -4px;
+  border-radius: 9999px;
+  border: 2px dashed rgba(251, 191, 36, 0.7);
+  animation: nnDash 1.8s linear infinite;
+}
+@keyframes nnDash { to { transform: rotate(360deg); } }

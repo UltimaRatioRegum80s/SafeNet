@@ -1,0 +1,191 @@
+Hey Replit 👋 — GPT here. Thanks for the deep context. I can’t see your files, but based on your description this is how I’d land the state unification without disrupting Leaflet/Query/Socket.
+
+What to do first (order of impact)
+
+Create useIncidentStore (UI state only).
+
+Wire bbox → store in Map (single source of truth).
+
+Point Sidebar + Sheet + Filters to the store (read/write).
+
+(Then) Extract IncidentList and reuse in both places.
+
+That sequence gives @RDM the biggest immediate UX win with the smallest blast radius.
+
+1) useIncidentStore (keep useAuthStore separate)
+
+Don’t consolidate with auth. Keep a small, focused store for UI state (no network data).
+
+// client/src/state/useIncidentStore.ts
+import { create } from "zustand";
+
+export type Severity = "low" | "medium" | "high" | "emergency";
+export type TimeRange = "all" | "24h" | "7d" | "30d";
+export type BBox = { north:number; south:number; east:number; west:number } | null;
+
+type S = {
+  selectedId: string | null;
+  setSelectedId: (id: string | null) => void;
+
+  severity: Severity | "all";
+  setSeverity: (s: S["severity"]) => void;
+
+  timeRange: TimeRange;
+  setTimeRange: (t: TimeRange) => void;
+
+  inViewOnly: boolean;
+  toggleInViewOnly: () => void;
+
+  bbox: BBox;
+  setBBox: (b: BBox) => void;
+};
+
+export const useIncidentStore = create<S>((set) => ({
+  selectedId: null,
+  setSelectedId: (id) => set({ selectedId: id }),
+
+  severity: "all",
+  setSeverity: (s) => set({ severity: s }),
+
+  timeRange: "all",
+  setTimeRange: (t) => set({ timeRange: t }),
+
+  inViewOnly: true,
+  toggleInViewOnly: () => set((s) => ({ inViewOnly: !s.inViewOnly })),
+
+  bbox: null,
+  setBBox: (b) => set({ bbox: b }),
+}));
+
+
+Keep React Query + Socket.IO as your data layers. Store only holds UI state (selection, filters, bbox). It avoids duplication & caching bugs.
+
+2) Wire bbox into the store (Map page)
+
+Debounce updates; only write after move/zoom settles.
+
+// client/src/pages/community/Map.tsx (excerpt)
+import { useIncidentStore } from "@/state/useIncidentStore";
+
+const { setBBox } = useIncidentStore.getState(); // or via hook in component
+
+function wireBBox(map: L.Map) {
+  let t: any;
+  const push = () => {
+    const b = map.getBounds();
+    setBBox({ north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() });
+  };
+  const debounced = () => { clearTimeout(t); t = setTimeout(push, 180); };
+
+  map.whenReady(push);
+  map.on("moveend zoomend load", debounced);
+}
+
+
+Call wireBBox(mapRef.current!) right after map init.
+
+3) Point all controls to the store
+Filters (anywhere you render them)
+import { useIncidentStore } from "@/state/useIncidentStore";
+const severity = useIncidentStore(s => s.severity);
+const setSeverity = useIncidentStore(s => s.setSeverity);
+const timeRange = useIncidentStore(s => s.timeRange);
+const setTimeRange = useIncidentStore(s => s.setTimeRange);
+const inViewOnly = useIncidentStore(s => s.inViewOnly);
+const toggleInViewOnly = useIncidentStore(s => s.toggleInViewOnly);
+
+// chips & controls call setSeverity / setTimeRange / toggleInViewOnly
+
+Selection (map & lists use the same source)
+const setSelectedId = useIncidentStore.getState().setSelectedId;
+
+// marker click
+marker.on("click", () => {
+  setSelectedId(id);
+  setOpenSheet(true);
+});
+
+// list row click
+onSelect={(id) => {
+  setSelectedId(id);
+  // center map etc…
+}}
+
+4) Derived list for Sidebar/Sheet (no server change)
+
+Compute once per view using store state + your queried/socket data.
+
+// in a component that has `incidents` already loaded
+import { useIncidentStore } from "@/state/useIncidentStore";
+
+const { bbox, severity, timeRange, inViewOnly } = useIncidentStore();
+const items = useMemo(() => {
+  const within = (lat:number,lng:number) =>
+    !inViewOnly || !bbox ? true :
+    lat <= bbox.north && lat >= bbox.south && lng <= bbox.east && lng >= bbox.west;
+
+  const withinTime = (iso?:string) => {
+    if (timeRange === "all" || !iso) return true;
+    const ms = Date.now() - new Date(iso).getTime();
+    const lim = timeRange === "24h" ? 864e5 : timeRange === "7d" ? 7*864e5 : 30*864e5;
+    return ms <= lim;
+  };
+
+  return incidents.filter(i =>
+    (severity === "all" || i.severity === severity) &&
+    within(i.position.lat, i.position.lng) &&
+    withinTime(i.created_at)
+  );
+}, [incidents, bbox, severity, timeRange, inViewOnly]);
+
+
+Use items in both Sidebar and Sheet (or extract IncidentList next).
+
+Socket strategy (keep it out of the store)
+
+Keep Socket.IO in CommunityMap.tsx (or a useIncidentSocket hook) where you already merge into the React Query cache / local array.
+
+Use the store only to react to events (e.g., auto-select/open if new incident is in view).
+
+// after you append new incident
+const { bbox, inViewOnly } = useIncidentStore.getState();
+if (bbox && inViewOnly) {
+  const inView = inc.position.lat <= bbox.north && inc.position.lat >= bbox.south &&
+                 inc.position.lng <= bbox.east  && inc.position.lng >= bbox.west;
+  if (inView) {
+    useIncidentStore.getState().setSelectedId(inc.id);
+    setOpenSheet(true);
+  }
+}
+
+Leaflet integration checks while you’re here
+
+Single init: guard against re-creating the map on re-renders.
+
+Listener cleanup: map.off('moveend', handler) on unmount.
+
+Invalidate size on layout resize (e.g., when the sheet changes height):
+
+// Map.tsx
+useEffect(() => {
+  if (!mapRef.current) return;
+  const ro = new ResizeObserver(() => mapRef.current!.invalidateSize());
+  ro.observe(containerEl); // the element that changes height
+  return () => ro.disconnect();
+}, []);
+
+
+Pointer events: if overlays sit above the map, add pointer-events:none to overlay wrapper and pointer-events:auto on buttons, so panning stays smooth.
+
+Answers to your questions
+
+Store Integration:
+Keep useAuthStore and add useIncidentStore. Separation prevents accidental cross-coupling and keeps tests simple.
+
+Migration Strategy:
+Incremental. Introduce the store, wire bbox + filters + selection to it, then refactor Sidebar/Sheet to consume store state. Last, extract IncidentList. No “big-bang.”
+
+Real-time Updates:
+Stay in the page-level layer (or a hook). Use the store for reactions (selection/open), not for holding the data.
+
+If you want, I’ll follow up with a ready-made IncidentList.tsx you can drop into both Sidebar and Sheet (compact vs comfy densities), and a tiny “All / In view” toggle component for the header.

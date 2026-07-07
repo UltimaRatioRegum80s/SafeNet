@@ -1,0 +1,95 @@
+Let’s proceed with Phase E: Map Trust & Visual Polish.
+
+Scope is strictly limited to:
+– Marker appearance timing (immediate, no flicker)
+– Marker visual confidence (subtle, Google-Maps-like feel)
+– “View on Map” focus polish (tight focus, no unnecessary refit)
+– Diagnostics/magenta ribbon containment only (not removal)
+
+Constraints:
+– Client-side only
+– No schema changes
+– No new endpoints
+– No offline or socket logic changes
+– No new features or controls
+
+This is a trust & polish phase, not a feature phase.
+Once Phase E is complete, we will freeze UX changes for beta testing.
+
+Please propose a minimal implementation plan within these bounds.
+
+2️⃣ Phase E — Acceptance Checklist (lightweight, fast)
+
+Use this to judge done / not done. Nothing extra.
+
+✅ Marker Appearance Timing
+
+ Marker appears immediately after submitting a report
+
+ No temporary red/default marker before correct color
+
+ Own reports appear without waiting for socket refresh
+
+ No duplicate markers introduced
+
+✅ Marker Visual Confidence
+
+ Markers do not pop harshly
+
+ Optional subtle fade-in or scale-in (≤150ms)
+
+ No animation for non-Critical markers beyond this
+
+ Critical pulse unchanged and remains restrained
+
+✅ View-on-Map Focus
+
+ “View on Map” always centers tightly on the selected incident
+
+ Does not refit to all incidents unless explicitly requested
+
+ Zoom level feels appropriate for street-level context
+
+ Behavior consistent from Feed → Map and Home → Map
+
+✅ Diagnostics Containment
+
+ Diagnostics panel does not visually compete with incidents
+
+ Magenta ribbon remains visible but visually subdued
+
+ No accidental hiding or removal
+
+❌ Explicitly Out of Scope (must remain untouched)
+
+Offline sync logic
+
+API calls or endpoints
+
+Schemas
+
+Filters or monetisation logic
+
+Dashboards / admin views
+
+3️⃣ What happens immediately after Phase E (important)
+
+Once this checklist passes:
+
+🔒 Beta UX Freeze
+
+No new UX changes unless:
+
+Bug fix
+
+Safety issue
+
+Data loss issue
+
+From that point forward:
+
+Field testing becomes observational
+
+Feedback is logged, not immediately implemented
+
+You protect system stability and user trust

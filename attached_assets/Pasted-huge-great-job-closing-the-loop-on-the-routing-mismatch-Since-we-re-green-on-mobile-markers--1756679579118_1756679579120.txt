@@ -1,0 +1,88 @@
+huge! 🎉 great job closing the loop on the routing mismatch.
+
+Since we’re green on mobile markers + routing, here are a few small hardening/cleanup steps so this never regresses and old links still work.
+
+1) Centralize route paths (avoid future typos)
+
+Create a tiny constant file and use it everywhere (navigate(), links, tests, redirects).
+
+// client/src/router/routePaths.ts
+export const RoutePaths = {
+  Map: "/community/map",
+  // add others here
+  Home: "/",
+  Report: "/report",
+} as const;
+export type RouteKey = keyof typeof RoutePaths;
+
+
+Use like:
+
+import { RoutePaths } from "@/router/routePaths";
+navigate(RoutePaths.Map);
+<Link to={RoutePaths.Map}>Map</Link>
+
+2) Add a legacy redirect in React Router (for old /map links)
+// client/src/router/AppRouter.tsx
+import { Routes, Route, Navigate } from "react-router-dom";
+import InteractiveMap from "@/components/InteractiveMap";
+import { RoutePaths } from "./routePaths";
+
+export function AppRouter() {
+  return (
+    <Routes>
+      <Route path={RoutePaths.Map} element={<InteractiveMap />} />
+      {/* Legacy alias: keep indefinitely or at least a few releases */}
+      <Route path="/map" element={<Navigate to={RoutePaths.Map} replace />} />
+      {/* ...other routes... */}
+      <Route path="*" element={<Navigate to={RoutePaths.Map} replace />} />
+    </Routes>
+  );
+}
+
+3) Add a server-side safety net redirect (handles direct hits/bookmarks)
+// server/routes.ts (after your API routes, before SPA fallback)
+app.get("/map", (_req, res) => res.redirect(301, "/community/map"));
+
+// SPA fallback for everything else (serves index.html)
+app.get("*", (_req, res) => {
+  res.sendFile(path.join(__dirname, "../client/dist/index.html"));
+});
+
+
+This ensures /map bookmarked on mobile still lands correctly even on a cold load.
+
+4) Update any tests and links
+
+Cypress/e2e: replace hardcoded "/map" with RoutePaths.Map.
+
+UI buttons/menu items: import RoutePaths to prevent drift.
+
+5) Clean-up toggles (when you’re ready)
+
+Keep the Debug HUD behind ?debug=1 (good to ship).
+
+Reduce socket verbose logging if you enabled it with localStorage.debug.
+
+Keep server telemetry (super lightweight); consider sampling if logs get noisy:
+
+const SAMPLE = 1; // 1 = 100%, 0.1 = 10%
+if (Math.random() < SAMPLE) console.log("[INCIDENT_CREATE]", {...});
+
+6) Optional polish: deep-link share button
+
+People will share the map. A share action that always uses the canonical path prevents future confusion.
+
+async function shareMap(url = window.location.origin + RoutePaths.Map) {
+  if (navigator.share) {
+    await navigator.share({ title: "NaborNet Map", url });
+  } else {
+    await navigator.clipboard.writeText(url);
+  }
+}
+
+Hand-off
+
+Replit: the snippets above are drop-in and low-risk. Please add the legacy redirect in both router and server, and switch navigations to RoutePaths.Map.
+
+@RDM: you can test again using any old /map bookmark—should now jump to /community/map seamlessly, and your new incident will be visible right away.

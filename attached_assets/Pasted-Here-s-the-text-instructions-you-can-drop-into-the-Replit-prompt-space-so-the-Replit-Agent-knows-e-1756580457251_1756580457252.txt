@@ -1,0 +1,105 @@
+Here’s the text + instructions you can drop into the Replit prompt space so the Replit Agent knows exactly what to do with your newly uploaded 🟠 amber (medium) icons.
+
+🔧 Integration Instructions for Replit
+
+We are now adding the Amber (Medium Risk) icons into the incident system. The icons are already uploaded into /attached_assets/ and follow the pattern:
+
+Car Accident.png + Car Accident MM.png
+
+Break In.png + Break In MM.png
+
+Suspicious Person.png + Suspicious Person MM.png
+
+Suspicious Vehicle.png + Suspicious Vehicle MM.png
+
+Police Activity.png + Police Activity MM.png
+
+Speed Camera.png + Speed Camera MM.png
+
+🛠️ Step 1 – Update shared/incidentTypes.ts
+
+Extend the IncidentType definition (if not already done) with:
+
+buttonIcon?: string;
+mapIcon?: string;
+
+
+Add the new Amber set like this:
+
+const ASSET = (f: string) => `/attached_assets/${encodeURIComponent(f)}`;
+
+export const MED_AMBER: IncidentType[] = [
+  {
+    id: "car_accident",
+    label: "Car Accident",
+    severity: "medium",
+    buttonIcon: ASSET("Car Accident.png"),
+    mapIcon: ASSET("Car Accident MM.png"),
+  },
+  {
+    id: "break_in",
+    label: "Break In / Burglary",
+    severity: "medium",
+    buttonIcon: ASSET("Break In.png"),
+    mapIcon: ASSET("Break In MM.png"),
+  },
+  {
+    id: "suspicious_person",
+    label: "Suspicious Person",
+    severity: "medium",
+    buttonIcon: ASSET("Suspicious Person.png"),
+    mapIcon: ASSET("Suspicious Person MM.png"),
+  },
+  {
+    id: "suspicious_vehicle",
+    label: "Suspicious Vehicle",
+    severity: "medium",
+    buttonIcon: ASSET("Suspicious Vehicle.png"),
+    mapIcon: ASSET("Suspicious Vehicle MM.png"),
+  },
+  {
+    id: "police_activity",
+    label: "Police Activity",
+    severity: "medium",
+    buttonIcon: ASSET("Police Activity.png"),
+    mapIcon: ASSET("Police Activity MM.png"),
+  },
+  {
+    id: "speed_camera",
+    label: "Speed Camera",
+    severity: "medium",
+    buttonIcon: ASSET("Speed Camera.png"),
+    mapIcon: ASSET("Speed Camera MM.png"),
+  },
+];
+
+
+Merge into the master export:
+
+export const INCIDENT_TYPES: IncidentType[] = [
+  ...LOW_YELLOW,
+  ...MED_AMBER,
+  // HIGH_RED will come next
+];
+
+🛠️ Step 2 – Verify Components
+
+Quick Report Panel → should now display these 6 new amber icons in the grid using buttonIcon.
+
+MapView → should show the amber map pins via mapIcon.
+
+Fallbacks remain active → if a new icon is missing, it falls back to the default blue icon.
+
+✅ QA Checklist
+
+ Each Quick Report button shows the correct amber round icon.
+
+ Each new incident placed on the map shows the amber pin marker.
+
+ No layout shifts – labels & tap targets preserved.
+
+ Filenames with spaces are loading (URL encoding works).
+
+ Old low (yellow) + high (blue placeholders) still render fine.
+
+👉 Replit Task: Please implement the above changes and confirm that the 6 amber incident types (Car Accident, Break In, Suspicious Person, Suspicious Vehicle, Police Activity, Speed Camera) now display correctly in both Quick Report and MapView.

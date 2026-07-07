@@ -1,0 +1,64 @@
+Sweet — I’ll wire the active state automatically from the current route so you don’t have to pass props. Drop this in:
+
+// client/src/components/MobileFloatingTopMenu.tsx
+import React from "react";
+import { Link, useLocation } from "react-router-dom";
+import { Home, PlusCircle, MapPin, MessageSquare, BarChart3 } from "lucide-react";
+
+// Route → key resolver (tweak paths as needed)
+function keyFromPath(pathname: string): "home" | "report" | "map" | "chat" | "stats" {
+  if (pathname.startsWith("/community/map")) return "map";
+  if (pathname.startsWith("/report"))        return "report";
+  if (pathname.startsWith("/community/chat"))return "chat";
+  if (pathname.startsWith("/dashboard"))     return "stats";
+  return "home";
+}
+
+export default function MobileFloatingTopMenu() {
+  const { pathname } = useLocation();
+  const active = keyFromPath(pathname);
+
+  const items = [
+    { key: "home",   label: "Home",   icon: <Home className="w-5 h-5" />,        to: "/" },
+    { key: "report", label: "Report", icon: <PlusCircle className="w-5 h-5" />,  to: "/report" },
+    { key: "map",    label: "Map",    icon: <MapPin className="w-5 h-5" />,      to: "/community/map" },
+    { key: "chat",   label: "Chat",   icon: <MessageSquare className="w-5 h-5" />, to: "/community/chat" },
+    { key: "stats",  label: "Stats",  icon: <BarChart3 className="w-5 h-5" />,   to: "/dashboard" },
+  ] as const;
+
+  return (
+    // Mobile & tablet only (floats over map)
+    <div className="absolute top-0 left-0 right-0 z-30 xl:hidden pointer-events-none">
+      <div className="h-[calc(env(safe-area-inset-top)+12px)] bg-gradient-to-b from-black/60 to-transparent" />
+      <div className="flex justify-center px-3">
+        <nav
+          className="pointer-events-auto nn-glass rounded-2xl px-3 py-2 flex items-center gap-5"
+          aria-label="Mobile top menu"
+        >
+          {items.map((it) => (
+            <Link
+              key={it.key}
+              to={it.to}
+              aria-label={it.label}
+              aria-current={active === it.key ? "page" : undefined}
+              className={`relative grid place-items-center w-10 h-10 rounded-xl transition
+                ${active === it.key ? "bg-cyan-400 text-slate-900"
+                                    : "text-white/80 hover:bg-white/10"}`}
+            >
+              {it.icon}
+            </Link>
+          ))}
+        </nav>
+      </div>
+    </div>
+  );
+}
+
+Use it on the map page (no props needed)
+// inside the <xl mobile/tablet overlay> of Map.tsx
+import MobileFloatingTopMenu from "@/components/MobileFloatingTopMenu";
+
+<MobileFloatingTopMenu />
+
+
+That’s it—menu floats on mobile/tablet, auto-highlights based on the current URL, desktop remains unchanged.

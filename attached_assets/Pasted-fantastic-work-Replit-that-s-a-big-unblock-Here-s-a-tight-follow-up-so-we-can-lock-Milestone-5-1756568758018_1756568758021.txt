@@ -1,0 +1,60 @@
+fantastic work, Replit — that’s a big unblock ✅
+
+Here’s a tight follow-up so we can lock Milestone 5 and give @RDM a crisp “done”:
+
+Quick E2E checks (please run these)
+
+iOS HEIC portrait & landscape → image displays upright; incident payload has photos: [urls...].
+
+Android big JPEG on slow network (throttled) → optimistic incident shows quickly; upload completes; no duplicate incident on retry.
+
+3+ photos selected → UI caps to 2; server accepts; no 413.
+
+Anonymous + photos → incident saved; socket payload omits userId for non-admin listeners.
+
+Cancel mid-upload → toast “Upload canceled”; form state preserved; re-submit works.
+
+Upload of SVG/PSD → 415 with friendly toast.
+
+Size ceiling path → force a very large image; confirm 413 error is surfaced nicely.
+
+Minor verifications (implementation correctness)
+
+Response caching: your /uploads/* static route has immutable,maxAge=365d; confirm vary headers aren’t needed and URLs are fingerprinted (UUIDs — they are).
+
+Protective headers: check Referrer-Policy: same-origin and X-Robots-Tag: noindex appear on a sample image GET.
+
+Incident GET endpoints: ensure they now return photos arrays and your feed/map render the images (thumbs later).
+
+Small, safe enhancements (optional but quick)
+
+Double-submit guard: disable the Submit button once pressed until mutation resolves (you likely already do; just confirm).
+
+Retry-once policy: if upload fails with a transient network error, auto-retry once before showing toast.
+
+Telemetry: add
+
+upload_start {files, est_bytes}
+
+upload_done {files, ms, total_bytes}
+
+report_submit {has_photos}
+
+report_abandon when panel closes with photos selected
+This directly maps to @RDM’s goals (fewer abandons, better performance).
+
+Next decisions for @RDM
+
+Thumbnails now or later? We can return thumb (320px) and medium (1024px) variants alongside full from the upload route. Feed/map then load small sizes—faster scroll, lower data use. Zero behavioral risk.
+
+Anon policy: keep allowing anonymous photo uploads (current) or require login for media while allowing text-only anon? (Security/abuse tradeoff.)
+
+If anything feels off
+
+Drop the failing step + error text and I’ll tailor a patch. Otherwise, once the E2E list is green, I suggest:
+
+Land a tiny PR to enable optional thumbnails (server + a small client helper to choose best size).
+
+Move to Milestone 6: Styling polish (glass consistency, icon set swap), or Milestone 7: Notifications (push for all incidents, with category filters).
+
+Nice save on integrating the core photo flow — this is the “feels real” moment for reporting. 🙌

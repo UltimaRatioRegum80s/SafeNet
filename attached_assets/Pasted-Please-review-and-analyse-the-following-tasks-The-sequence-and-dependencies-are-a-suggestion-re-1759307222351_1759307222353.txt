@@ -1,0 +1,117 @@
+Please review and analyse the following tasks.
+The sequence and  dependencies are a suggestion - replit can cange this if needed 
+I want Replit to arrange these tasks into a sequence that is best for software development , hence in  a sequence that makes sense for programming and architectural changes .
+NN Dev To-Do List (with Tags + Dependencies)
+Fix commenting issue on incident cards (Frontend + Backend)
+
+
+Enable commenting on incident cards in desktop and mobile views.
+
+
+Independent task
+Currently, comments do not want to post when I am testing the app in mobile view & desktop view.
+Commenting only works in the Replit preview console 
+
+
+Redesign incident colour scheme and spectrum (UI/UX + Frontend)
+
+
+Create a new, consistent colour system for incidents.
+
+
+Depends on #6 (colour coding unification)
+In this task, I want to re. re-evaluate the whole incident list along with a new severity colour coding palette 
+
+
+Add “Go To” button on incident cards (Frontend + Backend)
+
+
+Clicking navigates user to the corresponding map marker on the map page at maximum zoom.
+
+
+Independent task
+With this task, I want to build a bridge/link between an incident card on the feed page and the coresponding  map marker on the map page 
+The idea is that there is a go-to button on an incident card - when the user presses this button, the app navigates to the map page, to the exact incident on the map at max zoom.
+
+Auto-scroll comments (Frontend)
+
+
+When a user clicks an incident card, auto-scroll to the bottom of its comment section.
+
+
+Independent task
+
+
+Add multiple map view modes (Frontend)
+
+
+In this task i want to achieve three types of map views 
+Light mode 
+Dark mode 
+Geo view 
+Suggested use of open streen map with more geographical detail 
+Carto Dark matte for light and dark mode 
+
+
+Ensure incident reporting and map marker activity remains unchanged. Past development on the map page caused map markers to disappear - i hadd to nuke the mape page and start from scratch 
+
+
+Independent task
+
+
+
+
+
+
+Unify colour coding across all pages (Frontend + UI/UX)
+
+
+Ensure incident colours match consistently on:
+
+
+Report page
+
+
+Feed page
+
+
+Map view
+
+
+Foundation task → must be done before #2 and #10
+
+
+Mobile Report Page UI upgrade (Frontend + UI/UX)
+
+
+Change to a scrolling menu / snackbar style UI.
+
+
+Glass transparent effect.
+
+
+Independent task
+
+
+Implement incident close-out functionality (Backend + Frontend)
+
+
+Define who can close incidents.
+
+
+Define how an incident is closed.
+
+
+Independent task (but may influence UI in #7)
+
+
+
+Add navigation to incident (Google Maps-like) (Frontend + Backend)
+
+
+Provide directions/navigation from the user’s location to a chosen incident location.
+Implies that the map must show user's GPS location on the map, as is the case with well-known maps like Google Maps 
+
+
+Independent task
+
