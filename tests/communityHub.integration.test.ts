@@ -157,6 +157,77 @@ describe("access control", () => {
     expect((await call(user.id, "/overview")).status).toBe(403);
   });
 
+  // The router is mounted here WITHOUT the global /api access gate from
+  // server/routes.ts, on purpose: that gate calls next() when the user row is
+  // missing and, on a database error, logs and continues. If it were in front
+  // of these tests it would hide a permissive check in the router itself.
+  it.each([
+    ["NULL", null],
+    ["an empty string", ""],
+    ["a legacy value", "active"],
+    ["the wrong case", "Approved"],
+    ["whitespace-padded", " approved "],
+    ["a revoked account", "revoked"],
+  ])("refuses an account whose access_status is %s", async (_label, accessStatus) => {
+    const user = await createTestUser(database.pool, { accessStatus });
+    const result = await call(user.id, "/overview");
+    expect(result.status).toBe(403);
+  });
+
+  it("still admits an explicitly approved account", async () => {
+    const user = await createTestUser(database.pool, { accessStatus: "approved" });
+    expect((await call(user.id, "/overview")).status).toBe(200);
+  });
+
+  it("stops a staff member acting once their account access is revoked", async () => {
+    const owner = await createTestUser(database.pool);
+    const admin = await createTestUser(database.pool, { roles: ["admin"] });
+    const resident = await createTestUser(database.pool);
+    const staff = await createTestUser(database.pool);
+    const organisationId = await verifiedOrg(owner.id, admin.id);
+
+    expect(
+      (await call(owner.id, `/organisations/${organisationId}/staff`, {
+        method: "POST",
+        body: { email: staff.email },
+      })).status,
+    ).toBe(200);
+
+    const created = await submitRequest(resident.id, organisationId);
+    expect(created.status).toBe(201);
+
+    // Working normally while approved.
+    expect((await call(staff.id, "/overview")).status).toBe(200);
+
+    await database.pool.query("UPDATE users SET access_status = $1 WHERE id = $2", [
+      "denied",
+      staff.id,
+    ]);
+
+    expect((await call(staff.id, "/overview")).status).toBe(403);
+    const update = await call(staff.id, `/requests/${created.body.id}/updates`, {
+      method: "POST",
+      body: { state: "acknowledged", note: "Picked this up.", version: 1 },
+    });
+    expect(update.status).toBe(403);
+  });
+
+  it("refuses to add staff whose account is not explicitly approved", async () => {
+    const owner = await createTestUser(database.pool);
+    const admin = await createTestUser(database.pool, { roles: ["admin"] });
+    const organisationId = await verifiedOrg(owner.id, admin.id);
+
+    for (const accessStatus of [null, "", "pending", "denied", "active"]) {
+      const candidate = await createTestUser(database.pool, { accessStatus });
+      const result = await call(owner.id, `/organisations/${organisationId}/staff`, {
+        method: "POST",
+        body: { email: candidate.email },
+      });
+      expect(result.status).toBe(400);
+      expect(result.body.error).toMatch(/approved account/i);
+    }
+  });
+
   it("lets an unverified email read, but not write", async () => {
     const user = await createTestUser(database.pool, { emailVerified: false });
 

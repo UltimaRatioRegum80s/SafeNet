@@ -335,17 +335,21 @@ communityHubRouter.use((request: Request, res: Response, next: NextFunction) => 
       return;
     }
 
-    // Defence in depth: the global /api access gate in server/routes.ts already
-    // rejects anyone whose access_status is not exactly 'approved', so it is
-    // strictly the tighter of the two and runs first. This check only mirrors
-    // /api/auth/me's treatment of a NULL status so the router is still correct
-    // if it is ever mounted outside that gate.
-    if (user.access_status === "pending") {
-      res.status(403).json({ error: "Your community access is awaiting approval." });
-      return;
-    }
-    if (user.access_status === "denied") {
-      res.status(403).json({ error: "Your community access request was declined." });
+    // Fail closed on the access status. Only the exact string 'approved'
+    // grants access: NULL, an empty string, a legacy value or anything else
+    // unrecognised is refused, because this router carries a resident's
+    // neighbourhood and street address to organisation staff.
+    //
+    // This is deliberately independent of the global /api gate in
+    // server/routes.ts. That gate calls next() when the user row is missing
+    // and, on a database error, logs and continues — so it must not be relied
+    // on to conceal a permissive check here.
+    if (user.access_status !== "approved") {
+      const message =
+        user.access_status === "denied"
+          ? "Your community access request was declined."
+          : "Your community access is awaiting approval.";
+      res.status(403).json({ error: message });
       return;
     }
 
@@ -771,9 +775,11 @@ communityHubRouter.post(
     }
 
     const { rows } = await pool.query(
+      // Same fail-closed rule as the router gate: only an explicitly approved
+      // account can be given access to another organisation's requests.
       `SELECT id FROM users
        WHERE lower(email) = $1 AND email_verified = true
-         AND (access_status IS NULL OR access_status = 'approved')`,
+         AND access_status = 'approved'`,
       [email.toLowerCase()],
     );
     if (!rows[0]) {
