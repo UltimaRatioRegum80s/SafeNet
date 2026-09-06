@@ -129,12 +129,24 @@ describe("input validation", () => {
 
 describe("migration parity", () => {
   it("keeps migrations/community_hub.sql identical to the DDL the server runs", () => {
-    const source = readFileSync(path.join(root, "server", "communityHub.ts"), "utf8");
+    // Line endings are normalised before comparing. Both files are stored LF
+    // in git, but this repo is checked out with core.autocrlf=true on Windows,
+    // which converted server/communityHub.ts to CRLF in the working tree while
+    // leaving migrations/community_hub.sql as LF. That made every line differ
+    // and the test fail for a reason that has nothing to do with the SQL. The
+    // assertion is about statement parity, not bytes.
+    const normalise = (text: string) => text.replace(/\r\n/g, "\n");
+
+    const source = normalise(
+      readFileSync(path.join(root, "server", "communityHub.ts"), "utf8"),
+    );
     const match = source.match(/export const HUB_DDL = `([\s\S]*?)`;/);
     expect(match, "HUB_DDL literal not found in server/communityHub.ts").toBeTruthy();
 
     const ddl = match![1].replace(/^\n/, "").trim();
-    const migration = readFileSync(path.join(root, "migrations", "community_hub.sql"), "utf8")
+    const migration = normalise(
+      readFileSync(path.join(root, "migrations", "community_hub.sql"), "utf8"),
+    )
       // Drop the leading comment header.
       .replace(/^(--[^\n]*\n)+/, "")
       .trim();
