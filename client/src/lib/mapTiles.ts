@@ -117,3 +117,68 @@ export function resolveInitialStyle(preferred: MapStyle): MapStyle | null {
   if (MAP_STYLES[preferred].available) return preferred;
   return availableMapStyles()[0] ?? null;
 }
+
+/**
+ * A run of tile errors long enough to mean the basemap is not serving, rather
+ * than the one or two dropped tiles that are normal at the edge of a pan.
+ */
+export const TILE_FAILURE_RUN = 4;
+
+export interface TileHealthWatcher {
+  /** Bind to Leaflet's `tileerror`. */
+  tileerror(): void;
+  /** Bind to Leaflet's `tileload`. */
+  tileload(): void;
+  /** Bind to Leaflet's `load`. */
+  load(): void;
+  /** Forget the current batch — for an explicit retry. */
+  reset(): void;
+}
+
+/**
+ * Tile-failure state machine for one Leaflet grid layer.
+ *
+ * Leaflet fires `load` when the visible batch has **settled**, not when it has
+ * succeeded: `_tileReady` marks an errored tile loaded and fires `load` as soon
+ * as nothing is outstanding. Treating `load` as recovery therefore clears the
+ * failure state even when every tile in the batch failed, so the "Map
+ * background unavailable" notice appears and then disappears over a blank map.
+ *
+ * `tileload` is the only event that means a tile actually rendered, so recovery
+ * is decided from what the batch produced:
+ *
+ * - nothing rendered and something failed → failing, however short the batch
+ *   (a two-tile batch never reaches {@link TILE_FAILURE_RUN});
+ * - something rendered and failures stayed below the run threshold → serving;
+ * - otherwise the current state stands until the next batch settles.
+ */
+export function createTileHealthWatcher(
+  onChange: (failing: boolean) => void,
+): TileHealthWatcher {
+  let failures = 0;
+  let rendered = 0;
+
+  return {
+    tileerror() {
+      failures += 1;
+      if (failures >= TILE_FAILURE_RUN) onChange(true);
+    },
+    tileload() {
+      rendered += 1;
+    },
+    load() {
+      if (rendered === 0 && failures > 0) {
+        onChange(true);
+      } else if (rendered > 0 && failures < TILE_FAILURE_RUN) {
+        onChange(false);
+      }
+      failures = 0;
+      rendered = 0;
+    },
+    reset() {
+      failures = 0;
+      rendered = 0;
+      onChange(false);
+    },
+  };
+}

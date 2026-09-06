@@ -33,7 +33,9 @@ import {
   MAP_STYLES,
   availableMapStyles,
   resolveInitialStyle,
+  createTileHealthWatcher,
   type MapStyle,
+  type TileHealthWatcher,
 } from '@/lib/mapTiles';
 import { useAuthStore } from '@/store/auth';
 
@@ -366,6 +368,9 @@ export default function SimpleMapView({
   // are failing to load. Either way the user gets a stated reason and a way
   // out rather than a permanently grey map.
   const [tilesFailing, setTilesFailing] = useState(false);
+  // The watcher owning the current layer's batch counters, so Retry can clear
+  // them. Set by the tile-failure effect below.
+  const tileHealthRef = useRef<TileHealthWatcher | null>(null);
   const styleUnavailable = !MAP_STYLES[mapStyle].available;
   // The street map could not be offered at all, so the map opened on imagery
   // instead. Say so — a provider change the user did not ask for should not be
@@ -1231,7 +1236,10 @@ export default function SimpleMapView({
   // when the current one has no provider, and otherwise ask Leaflet to fetch
   // the tiles again.
   const retryBasemap = useCallback(() => {
-    setTilesFailing(false);
+    // Clear through the watcher so the retry starts from an empty batch; a bare
+    // setState would leave the previous batch's failure count in place.
+    if (tileHealthRef.current) tileHealthRef.current.reset();
+    else setTilesFailing(false);
     if (!MAP_STYLES[mapStyle].available) {
       const alternative = availableMapStyles()[0];
       if (alternative) setMapStyle(alternative);
@@ -1243,26 +1251,29 @@ export default function SimpleMapView({
   // Watch the active layer for tile failures. Leaflet fires `tileerror` on a
   // network or HTTP failure; it cannot see a watermarked tile, which is why
   // the missing-key case is handled by configuration above instead.
+  //
+  // `load` means the batch settled, not that it succeeded — Leaflet fires it
+  // even when every tile in the batch errored — so recovery is decided from
+  // `tileload`. See createTileHealthWatcher in lib/mapTiles.ts.
   useEffect(() => {
     const layer = baseRef.current[mapStyle];
     if (!layer || !mapLoaded) return;
 
-    let failures = 0;
-    const onError = () => {
-      failures += 1;
-      // One dropped tile is normal at the edge of a pan; a run of them is not.
-      if (failures >= 4) setTilesFailing(true);
-    };
-    const onLoad = () => {
-      failures = 0;
-      setTilesFailing(false);
-    };
+    const watcher = createTileHealthWatcher(setTilesFailing);
+    tileHealthRef.current = watcher;
+
+    const onError = () => watcher.tileerror();
+    const onTileLoad = () => watcher.tileload();
+    const onLoad = () => watcher.load();
 
     layer.on('tileerror', onError);
+    layer.on('tileload', onTileLoad);
     layer.on('load', onLoad);
     return () => {
       layer.off('tileerror', onError);
+      layer.off('tileload', onTileLoad);
       layer.off('load', onLoad);
+      if (tileHealthRef.current === watcher) tileHealthRef.current = null;
     };
   }, [mapStyle, mapLoaded]);
 
