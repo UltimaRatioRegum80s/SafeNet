@@ -25,10 +25,11 @@ import {
   landingBackgrounds,
   LANDING_SECTIONS
 } from "@shared/schema";
-import { 
-  createUser, 
-  createAnonymousUser, 
-  validateLogin 
+import {
+  createUser,
+  createAnonymousUser,
+  validateLogin,
+  findUserByEmail
 } from "./auth";
 import { getCitiesByCountry, getNeighbourhoodsByCity, getSupportedCountries } from "./locationService";
 import { Server as SocketIOServer } from "socket.io";
@@ -309,8 +310,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "All required fields must be provided" });
       }
       
-      // Check if user already exists
-      const existingUser = await storage.getUserByUsername(normalizedEmail);
+      // Check if user already exists. This previously looked the email up in
+      // the *username* column, so it never matched and a repeat signup fell
+      // through to a raw unique-constraint error from the database.
+      const existingUser = await findUserByEmail(normalizedEmail);
       if (existingUser) {
         return res.status(400).json({ error: "User already exists with this email" });
       }
@@ -329,7 +332,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         country,
         city,
         neighbourhood: neighbourhood || null,
-        roles: ["user"],
+        // Every account starts as a resident. Representing a municipality,
+        // police station, fire brigade or security service is NOT granted at
+        // registration: it is claimed afterwards through the Community
+        // Services organisation application, which an administrator who does
+        // not own the application must verify. ("user" was not a role any
+        // other part of the app recognises — App.tsx feeds roles[0] straight
+        // into the role selector.)
+        roles: ["resident"],
         isVerified: false,
         verifiedType: null
       });
@@ -389,7 +399,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
               country: newUser.country, 
               city: newUser.city,
               neighbourhood: newUser.neighbourhood,
-              emailVerified: false
+              emailVerified: false,
+              // Report the real access status. Omitting it made the client
+              // fall back to 'approved' (App.tsx: `user.accessStatus ||
+              // 'approved'`), so a new account saw the full app until the
+              // next reload bounced it to /pending.
+              accessStatus: newUser.accessStatus || 'pending'
             },
             message: "Account created! Please check your email to verify your account."
           });

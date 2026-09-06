@@ -9,7 +9,7 @@ import { RadioGroup, RadioGroupItem } from '../components/ui/radio-group';
 import { Loader2 } from 'lucide-react';
 import logoLight from '@assets/Logo_1755373407688.png';
 import logoDark from '@assets/Logo dark mode_1755373493360.png';
-import { joinCommunity } from '../lib/auth';
+import { signupWithEmail } from '../lib/auth';
 import { useAuthStore } from '../store/auth';
 import { useToast } from '../hooks/use-toast';
 import { countries, citiesByCountry, neighbourhoodsByCity, type Country } from '../lib/locationData';
@@ -23,6 +23,8 @@ export default function Signup() {
     role: '' as '' | 'private_citizen' | 'security_organisation' | 'government_service',
     name: '',
     email: '',
+    password: '',
+    confirmPassword: '',
     country: '' as '' | Country,
     city: '',
     neighbourhood: '',
@@ -40,6 +42,9 @@ export default function Signup() {
     if (!formData.name.trim()) newErrors.name = "Name is required";
     if (!formData.email.trim()) newErrors.email = "Email is required";
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) newErrors.email = "Valid email is required";
+    if (!formData.password) newErrors.password = "Password is required";
+    else if (formData.password.length < 6) newErrors.password = "Password must be at least 6 characters";
+    if (formData.confirmPassword !== formData.password) newErrors.confirmPassword = "Passwords do not match";
     if (!formData.country) newErrors.country = "Country is required";
     if (!formData.city) newErrors.city = "City is required";
     if (!formData.neighbourhood.trim()) newErrors.neighbourhood = "Neighbourhood is required";
@@ -49,7 +54,11 @@ export default function Signup() {
   };
 
   const isFormValid = () => {
-    return formData.role && formData.name.trim() && formData.email.trim() && formData.country && formData.city && formData.neighbourhood.trim();
+    return Boolean(
+      formData.role && formData.name.trim() && formData.email.trim() &&
+      formData.password.length >= 6 && formData.confirmPassword === formData.password &&
+      formData.country && formData.city && formData.neighbourhood.trim()
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -61,27 +70,46 @@ export default function Signup() {
 
     setIsLoading(true);
     try {
-      const roleMapping = {
-        'private_citizen': 'private' as const,
-        'security_organisation': 'security_org' as const,
-        'government_service': 'security_org' as const
-      };
-      
-      const joinData = {
+      // Create a real account with a password, and persist the neighbourhood
+      // this form already collects. Signup previously called the anonymous
+      // join endpoint, which left the account with no password to log back
+      // in with and dropped the neighbourhood entirely.
+      //
+      // Every account is created as a resident. Selecting "I represent ..."
+      // below grants no official standing: representing a municipality,
+      // police station, fire brigade or security service is claimed
+      // afterwards through Community Services, where an administrator who
+      // does not own the application verifies it independently.
+      const user = await signupWithEmail({
         username: formData.name,
         email: formData.email,
-        role: formData.role ? roleMapping[formData.role] : 'private' as const,
+        password: formData.password,
+        role: 'private',
         country: formData.country,
-        city: formData.city
-      };
-      
-      const user = await joinCommunity(joinData);
+        city: formData.city,
+        neighbourhood: formData.neighbourhood,
+      });
       setUser(user);
+
+      const representsService = formData.role !== 'private_citizen';
+
+      // Respect the access gate rather than assuming approval.
+      if (user.accessStatus === 'pending') {
+        toast({
+          title: "Account created",
+          description: "Check your email to verify your address. Your community access is awaiting approval.",
+        });
+        setLocation('/pending');
+        return;
+      }
+
       toast({
         title: "Welcome to NaborNet!",
-        description: "You've successfully joined your community",
+        description: representsService
+          ? "Check your email to verify your address, then apply under Community Services to have your organisation verified."
+          : "Check your email to verify your address.",
       });
-      setLocation('/community/dashboard');
+      setLocation(representsService ? '/community/services' : '/community/dashboard');
     } catch (error: any) {
       toast({
         title: "Registration Failed",
@@ -193,13 +221,18 @@ export default function Signup() {
                     </div>
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="security_organisation" id="security-org" className="text-cyan-400" />
-                      <Label htmlFor="security-org" className="text-slate-300">Security organisation</Label>
+                      <Label htmlFor="security-org" className="text-slate-300">I represent a security service</Label>
                     </div>
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="government_service" id="government-service" className="text-cyan-400" />
-                      <Label htmlFor="government-service" className="text-slate-300">Government service</Label>
+                      <Label htmlFor="government-service" className="text-slate-300">I represent a municipality, police or fire service</Label>
                     </div>
                   </RadioGroup>
+                  <p className="text-slate-400 text-xs mt-2">
+                    Everyone joins as a resident. Representing a service is verified separately &mdash;
+                    after signing in you can apply under Community Services, and an administrator
+                    confirms it independently before any service listing goes live.
+                  </p>
                   {errors.role && <p className="text-red-400 text-sm mt-1">{errors.role}</p>}
                 </div>
 
@@ -236,6 +269,44 @@ export default function Signup() {
                     className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400"
                   />
                   {errors.email && <p className="text-red-400 text-sm mt-1">{errors.email}</p>}
+                </div>
+
+                {/* Password */}
+                <div>
+                  <Label htmlFor="password" className="text-slate-300">Password *</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    autoComplete="new-password"
+                    data-testid="input-password"
+                    placeholder="At least 6 characters"
+                    value={formData.password}
+                    onChange={(e) => {
+                      setFormData(prev => ({ ...prev, password: e.target.value }));
+                      setErrors(prev => ({ ...prev, password: '' }));
+                    }}
+                    className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400"
+                  />
+                  {errors.password && <p className="text-red-400 text-sm mt-1">{errors.password}</p>}
+                </div>
+
+                {/* Confirm password */}
+                <div>
+                  <Label htmlFor="confirm-password" className="text-slate-300">Confirm password *</Label>
+                  <Input
+                    id="confirm-password"
+                    type="password"
+                    autoComplete="new-password"
+                    data-testid="input-confirm-password"
+                    placeholder="Re-enter your password"
+                    value={formData.confirmPassword}
+                    onChange={(e) => {
+                      setFormData(prev => ({ ...prev, confirmPassword: e.target.value }));
+                      setErrors(prev => ({ ...prev, confirmPassword: '' }));
+                    }}
+                    className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400"
+                  />
+                  {errors.confirmPassword && <p className="text-red-400 text-sm mt-1">{errors.confirmPassword}</p>}
                 </div>
 
                 {/* Country */}
