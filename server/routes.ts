@@ -242,6 +242,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Mount probe routes for production diagnostics
   const { probeRouter } = await import("./routes/probe");
   app.use("/api/probe", probeRouter);
+
+  // Mount Community Services (non-emergency resident <-> local service requests).
+  // Mounted AFTER the /api access gate above so pending and denied accounts are
+  // rejected before reaching it. The router applies its own session, email
+  // verification and per-account write limits; see server/communityHub.ts.
+  const { communityHubRouter, ensureHubSchema } = await import("./communityHub");
+  // Additive hub_* tables are created once at startup. A failure here is logged
+  // and not fatal: the rest of the app keeps working and the router retries.
+  ensureHubSchema().catch((error) =>
+    console.error("[community-services] schema initialisation failed:", error),
+  );
+  app.use("/api/community-services", communityHubRouter);
   
   // Legacy redirect for old /map links (301 permanent)
   app.get("/map", (_req, res) => res.redirect(301, "/community/map"));

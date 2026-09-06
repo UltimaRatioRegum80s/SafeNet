@@ -1,6 +1,6 @@
 import { useLocation } from "wouter";
 import { useState, useEffect } from "react";
-import { Home, Camera, MapPin, MessageSquare } from "lucide-react";
+import { Home, Camera, MapPin, MessageSquare, Building2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsDesktop } from "@/hooks/useBreakpoint";
 
@@ -14,6 +14,7 @@ const items = [
   { href: "/community/report", label: "Report", icon: Camera },
   { href: "/community/map", label: "Map", icon: MapPin },
   { href: "/community/feed", label: "Feed", icon: MessageSquare },
+  { href: "/community/services", label: "Services", icon: Building2 },
   // { href: "/community/stats", label: "Stats", icon: BarChart3 }, // re-enable later
 ];
 

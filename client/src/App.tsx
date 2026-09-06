@@ -56,6 +56,7 @@ import CommunityFeed from "./pages/community/Feed";
 import SimpleMap from "./pages/community/SimpleMap";
 import ReportIncident from "./pages/community/ReportIncident";
 import ReportFull from "./pages/community/ReportFull";
+import CommunityServices from "./pages/community/Services";
 import Phase2 from "./pages/community/Phase2";
 import NotificationSettings from "./pages/community/NotificationSettings";
 import ModerationQueue from "./pages/admin/ModerationQueue";
@@ -293,6 +294,15 @@ function Router() {
         </AppLayout>
       </Route>
       
+      {/* Community Services: non-emergency requests to verified local services.
+          Sits inside the approved-user branch, so pending and denied accounts
+          are redirected by the access gate above before reaching it. */}
+      <Route path="/community/services">
+        <AppLayout title="Community Services" actions={headerActions}>
+          <CommunityServices />
+        </AppLayout>
+      </Route>
+
       <Route path="/community/phase2">
         <AppLayout title="Phase 2 Features" actions={headerActions}>
           <Phase2 />
