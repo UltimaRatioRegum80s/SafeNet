@@ -1061,14 +1061,22 @@ function Team({
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState("");
   const cache = useQueryClient();
+  const { user } = useAuthStore();
+
+  // Scoped to the viewer as well as the organisation. Keyed on the
+  // organisation alone, a staff list — names and email addresses — cached by
+  // one owner would be served to the next person to sign in on the same
+  // device while the refetch was still in flight. Sign-out clears the cache
+  // outright (client/src/lib/sessionTeardown.ts); this is the second line.
+  const staffKey = ["service-staff", organisation.id, user?.id];
 
   const staff = useQuery<StaffMember[]>({
-    queryKey: ["service-staff", organisation.id],
+    queryKey: staffKey,
     queryFn: () => api<StaffMember[]>(`/organisations/${organisation.id}/staff`),
     enabled: open,
   });
 
-  const invalidate = () => cache.invalidateQueries({ queryKey: ["service-staff", organisation.id] });
+  const invalidate = () => cache.invalidateQueries({ queryKey: staffKey });
 
   return (
     <details className="hub-team" onToggle={(e) => setOpen(e.currentTarget.open)}>
