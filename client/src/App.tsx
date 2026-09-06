@@ -273,10 +273,13 @@ function Router() {
       </Route>
       
       <Route path="/community/feed">
-        <AppLayout 
-          title="Feed" 
+        {/* The Feed manages its own full-bleed width and sticky filter bar, so
+            it renders as pageChrome — inside the layout's reserved top space
+            rather than underneath the fixed mobile navigation. */}
+        <AppLayout
+          title="Feed"
           actions={headerActions}
-          thirdRow={<><DisclaimerBanner compact /><FeedPageWrapper /></>}
+          pageChrome={<><DisclaimerBanner compact /><FeedPageWrapper /></>}
         >
           <div />
         </AppLayout>

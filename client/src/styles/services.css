@@ -135,14 +135,13 @@
   padding-bottom: 0.5rem;
 }
 
+/* Wraps rather than scrolling: the row was a hidden-scrollbar scroller, so
+   "Service workspace" was cut off at phone widths with no sign it existed. */
 .hub-tabs > div {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.25rem;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
-
-.hub-tabs > div::-webkit-scrollbar { display: none; }
 
 .hub-tabs button[role="tab"] {
   flex: none;

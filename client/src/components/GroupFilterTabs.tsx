@@ -45,7 +45,10 @@ export default function GroupFilterTabs({
   const hasActiveFilter = value !== 'all';
   
   return (
-    <div className={cn("flex items-center gap-2 overflow-x-auto px-3 py-2 hide-scrollbar", className)}>
+    // Wraps instead of scrolling horizontally: the row was a hidden-scrollbar
+    // scroller, so at 360–430px the last categories were cut off with nothing
+    // to show more existed.
+    <div className={cn("flex flex-wrap items-center gap-2 px-3 py-2", className)}>
       {/* All filter */}
       <button
         onClick={() => onChange('all')}
@@ -106,15 +109,6 @@ export default function GroupFilterTabs({
         </button>
       )}
       
-      <style>{`
-        .hide-scrollbar::-webkit-scrollbar {
-          display: none;
-        }
-        .hide-scrollbar {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-        }
-      `}</style>
     </div>
   );
 }

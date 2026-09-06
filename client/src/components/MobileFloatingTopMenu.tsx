@@ -122,6 +122,9 @@ export default function MobileFloatingTopMenu({ hiddenBySheet = false }: { hidde
         "fixed z-[55] xl:hidden",
         "top-[calc(env(safe-area-inset-top)+12px)]",
         "left-0 right-0",
+        // Reserve the right edge for the floating theme toggle (right-4, 40px
+        // wide). Without it the dock and the toggle overlap at 390px and below.
+        "pl-3 pr-[64px]",
         "flex justify-center",
         hiddenBySheet && "pointer-events-none"
       )}

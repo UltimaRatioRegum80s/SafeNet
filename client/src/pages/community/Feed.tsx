@@ -486,8 +486,14 @@ export default function CommunityFeed({ className, ...props }: HTMLAttributes<HT
 
   return (
     <div className={`min-h-screen flex flex-col ${className || ''}`} {...props}>
-      {/* Location-based feed filters - sticky below floating nav bar on mobile */}
-      <div className="sticky top-0 z-40 bg-background/95 backdrop-blur border-b border-border max-xl:[top:calc(env(safe-area-inset-top,0px)+80px)]">
+      {/* Location-based feed filters. Pins to the layout's reserved chrome
+          height (see AppLayout) rather than a hand-tuned offset, so it lands
+          just under the floating navigation instead of on top of the notices
+          below it. */}
+      <div
+        className="sticky z-40 bg-background/95 backdrop-blur border-b border-border"
+        style={{ top: "var(--nn-top-chrome)" }}
+      >
         {/* Group filter tabs */}
         <div className="mx-auto max-w-2xl">
           <GroupFilterTabs value={groupFilter} onChange={setGroupFilter} />
