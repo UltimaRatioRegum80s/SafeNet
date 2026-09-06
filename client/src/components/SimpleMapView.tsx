@@ -367,6 +367,11 @@ export default function SimpleMapView({
   // out rather than a permanently grey map.
   const [tilesFailing, setTilesFailing] = useState(false);
   const styleUnavailable = !MAP_STYLES[mapStyle].available;
+  // The street map could not be offered at all, so the map opened on imagery
+  // instead. Say so — a provider change the user did not ask for should not be
+  // silent, even when the replacement works.
+  const streetMapUnconfigured = !MAP_STYLES.light.available && !MAP_STYLES.dark.available;
+  const [fallbackNoticeDismissed, setFallbackNoticeDismissed] = useState(false);
   const basemapProblem: 'unconfigured' | 'network' | null = styleUnavailable
     ? 'unconfigured'
     : tilesFailing
@@ -1300,6 +1305,28 @@ export default function SimpleMapView({
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
               <p className="text-sm text-gray-600">Loading map...</p>
             </div>
+          </div>
+        )}
+
+        {/* Street map not configured, imagery shown instead. Stated once, and
+            dismissible — it is a setup fact, not an error the user caused. */}
+        {mapLoaded && streetMapUnconfigured && !basemapProblem && !fallbackNoticeDismissed && (
+          <div
+            className="absolute left-1/2 top-[calc(env(safe-area-inset-top,0px)+82px)] z-[550] flex w-[calc(100%-2rem)] max-w-md -translate-x-1/2 items-start gap-2 rounded-lg bg-slate-900/90 px-3 py-2 text-xs text-white shadow-lg backdrop-blur md:top-4"
+            role="status"
+            data-testid="map-street-fallback-notice"
+          >
+            <span className="flex-1">
+              Street map unavailable — showing satellite imagery instead.
+            </span>
+            <button
+              type="button"
+              onClick={() => setFallbackNoticeDismissed(true)}
+              aria-label="Dismiss"
+              className="-my-1 -mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded text-white/70 hover:text-white"
+            >
+              <X size={16} aria-hidden="true" />
+            </button>
           </div>
         )}
 

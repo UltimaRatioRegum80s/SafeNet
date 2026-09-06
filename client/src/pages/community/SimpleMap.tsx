@@ -310,17 +310,17 @@ export default function SimpleMap() {
           </div>
           
           {/* Desktop filter tabs + radius/time controls */}
-          <div className="mb-4 bg-slate-800 rounded-lg">
+          <div className="mb-4 rounded-lg border border-border bg-card">
             <GroupFilterTabs 
               value={groupFilter} 
               onChange={handleFilterChange}
             />
             {/* Radius and time filters (matching Feed styling) */}
-            <div className="flex items-center gap-3 px-4 py-2 border-t border-zinc-700/50">
+            <div className="flex items-center gap-3 px-4 py-2 border-t border-border">
               <div className="flex items-center gap-2">
-                <span className="text-xs text-zinc-400">Radius:</span>
+                <span className="text-xs text-muted-foreground">Radius:</span>
                 <Select value={String(radiusKm)} onValueChange={handleRadiusChange}>
-                  <SelectTrigger className="w-[80px] h-8 text-xs bg-zinc-900 border-zinc-700" data-testid="map-select-radius-desktop">
+                  <SelectTrigger className="w-[80px] h-8 text-xs" data-testid="map-select-radius-desktop">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -332,9 +332,9 @@ export default function SimpleMap() {
                 </Select>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-zinc-400">Time:</span>
+                <span className="text-xs text-muted-foreground">Time:</span>
                 <Select value={String(sinceHours)} onValueChange={handleSinceHoursChange}>
-                  <SelectTrigger className="w-[80px] h-8 text-xs bg-zinc-900 border-zinc-700" data-testid="map-select-time-desktop">
+                  <SelectTrigger className="w-[80px] h-8 text-xs" data-testid="map-select-time-desktop">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
