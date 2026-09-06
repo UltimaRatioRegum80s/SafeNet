@@ -17,6 +17,7 @@ import { ReportEntrySlice } from "@/features/redesign/ReportEntrySlice";
 import { ServicesSlice, StaffQueueSlice } from "@/features/redesign/ServicesSlice";
 import {
   AREA,
+  PREVIEW_RADIUS_KM,
   EMPTY_ACTIVITY,
   POPULATED_ACTIVITY,
   POPULATED_NOTICES,
@@ -164,6 +165,7 @@ function PreviewBody() {
           <HomeSlice
             area={AREA}
             hasPreciseLocation={hasGps}
+            radiusKm={PREVIEW_RADIUS_KM}
             activity={populated ? POPULATED_ACTIVITY : EMPTY_ACTIVITY}
             requests={populated ? POPULATED_REQUESTS : []}
             notices={populated ? POPULATED_NOTICES : []}

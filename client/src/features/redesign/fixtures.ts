@@ -44,6 +44,13 @@ export interface OrganisationItem {
 
 export const AREA = "Swakopmund";
 
+/**
+ * The radius this preview's activity summary is gathered at. Matches the app's
+ * default (DEFAULT_RADIUS_KM in features/incidents/useFeedIncidents.ts); the
+ * real screen must pass the radius the user actually chose, not this.
+ */
+export const PREVIEW_RADIUS_KM = 5;
+
 export const EMPTY_ACTIVITY: ActivityItem[] = [];
 
 export const POPULATED_ACTIVITY: ActivityItem[] = [

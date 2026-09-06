@@ -47,6 +47,12 @@ export interface HomeSliceProps {
   area: string;
   /** false = location permission denied or unavailable; browsing still works. */
   hasPreciseLocation: boolean;
+  /**
+   * The radius the summary below was actually gathered at. The feed's radius
+   * is the user's choice (1/3/5/10 km — ALLOWED_RADIUS_KM in
+   * features/incidents/useFeedIncidents.ts), so this is stated, not assumed.
+   */
+  radiusKm: number;
   activity: ActivityItem[];
   requests: RequestItem[];
   notices: NoticeItem[];
@@ -56,6 +62,7 @@ export interface HomeSliceProps {
 export function HomeSlice({
   area,
   hasPreciseLocation,
+  radiusKm,
   activity,
   requests,
   notices,
@@ -118,7 +125,7 @@ export function HomeSlice({
       >
         <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
           <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>Last 24 hours · within 5 km of {area}</span>
+          <span>Last 24 hours · within {radiusKm} km of {area}</span>
         </div>
 
         <h2 id="home-activity-heading" className="text-base font-semibold leading-snug">

@@ -2,11 +2,14 @@
  * Reporting entry, redesigned.
  *
  * The app has two genuinely different things called "reporting", with
- * different data and different permissions: a community report that everyone
- * nearby can see, and a service request that goes to one verified
- * organisation. Today you reach them from different places and neither says
- * who will see it. This screen states the choice first, then keeps each path
- * as short as it already is.
+ * different data and different permissions: a public community report, and a
+ * service request that goes to one verified organisation. Today you reach them
+ * from different places and neither says who will see it. This screen states
+ * the choice first, then keeps each path as short as it already is.
+ *
+ * The audience wording is load-bearing and must not overstate privacy. A
+ * community report is public: the server returns it to anyone searching that
+ * area at any radius they ask for, so no copy here bounds it by distance.
  *
  * Deliberate details:
  * - "Submit" is replaced by the actual outcome: "Post community report" and
@@ -130,10 +133,16 @@ function IntentChooser({
       </p>
 
       <div className="mt-5 space-y-3">
+        {/* Audience, stated truthfully. An earlier draft said "within 5 km of
+            the report", which the server does not guarantee: 5 km is only the
+            default on /api/incidents/nearby, which accepts any radius up to
+            50 km, the app's own feed offers 10 km, and /api/incidents serves
+            an arbitrary bounding box. A public report is visible to anyone
+            looking at the area, so do not restate it as a distance. */}
         <IntentCard
           icon={Megaphone}
           title="Share a community report"
-          audience="Everyone in NaborNet within 5 km of the report"
+          audience="Anyone using NaborNet who looks at this area"
           detail={`Appears on the map and in ${area}'s activity feed, with the location you confirm.`}
           onClick={() => onChoose("community")}
           testId="intent-community"
@@ -247,8 +256,13 @@ function CommunityReportFlow({
   return (
     <div className="mx-auto w-full max-w-2xl px-4 pb-6 pt-4">
       <BackRow onBack={onBack} label="Share a community report" />
+      {/* The audience claim must match what the server actually permits: a
+          public report is returned to anyone searching this area, at whatever
+          radius they ask for, so it must not be described as staying within
+          the reporter's own few kilometres. See the note on IntentCard. */}
       <p className="mt-1 text-sm text-muted-foreground">
-        Seen by everyone in NaborNet within 5 km of {area}.
+        Public. Anyone using NaborNet who looks at {area} can see it, including
+        people well outside your own neighbourhood.
       </p>
 
       <div className="mt-5 space-y-6">
@@ -348,9 +362,11 @@ function ReportSheet({
       <div className="mx-auto w-full max-w-2xl">
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" aria-hidden="true" />
         <h2 className="text-lg font-semibold">{type.label}</h2>
+        {/* Last thing read before submitting, so it must not imply the report
+            stays in the reporter's own neighbourhood. */}
         <p className="mt-1 text-sm text-muted-foreground">
-          Posted publicly to your neighbourhood. Add a note if it helps —
-          it is optional.
+          Posted publicly — anyone using NaborNet who looks at this area can
+          see it. Add a note if it helps; it is optional.
         </p>
 
         <label className="mt-4 block text-sm font-medium" htmlFor="report-note">
