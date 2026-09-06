@@ -11,8 +11,7 @@ import {
   resolveToV2Type
 } from '@/features/report/taxonomyV2';
 import { useAuthStore } from '@/store/auth';
-import { clearAllOfflineData } from '@/lib/offlineDb';
-import { queryClient } from '@/lib/queryClient';
+import { logout as endSession } from '@/lib/auth';
 import { useCityFallbackCoords } from '@/hooks/useCityFallbackCoords';
 import {
   ChartContainer,
@@ -276,9 +275,10 @@ export default function CommunityDashboard() {
 
   const handleLogout = async () => {
     setLoggingOut(true);
-    try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); } catch (_) {}
-    try { await clearAllOfflineData(); } catch (_) {}
-    queryClient.clear();
+    // One sign-out path for the whole app: cancel in-flight requests, drop the
+    // cached queries and this account's web storage, end the server session,
+    // then clear the offline database and caches. See client/src/lib/auth.ts.
+    await endSession();
     logout();
     setLocation('/');
   };

@@ -1,0 +1,747 @@
+/**
+ * Community Services page styles.
+ *
+ * Everything here is scoped under `.hub` and driven by the app's existing
+ * theme tokens from client/src/index.css (--background, --card, --primary,
+ * --secondary, --border, ...). That is deliberate: the app's light theme is
+ * already a warm off-white ground with navy secondary text and a teal/cyan
+ * primary, and its dark theme swaps the same tokens. Reading the tokens
+ * instead of hard-coding a second palette means this page follows the theme
+ * toggle for free and cannot drift away from the rest of NaborNet.
+ *
+ * The page renders inside AppLayout, so it has no header, nav or footer
+ * chrome of its own.
+ */
+
+.hub {
+  --hub-gap: 1rem;
+  --hub-radius: calc(var(--radius) + 0.25rem);
+  color: var(--foreground);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding-bottom: 3rem;
+}
+
+/* Every interactive element in the page shares one visible focus ring. */
+.hub :is(button, a, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: calc(var(--radius) - 2px);
+}
+
+.hub h1,
+.hub h2,
+.hub h3 {
+  color: var(--secondary);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.dark .hub h1,
+.dark .hub h2,
+.dark .hub h3 {
+  color: var(--foreground);
+}
+
+.hub h1 { font-size: clamp(1.5rem, 4.5vw, 2rem); line-height: 1.15; }
+.hub h2 { font-size: 1.125rem; }
+.hub h3 { font-size: 1rem; }
+.hub p { margin: 0; }
+
+.hub-eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.hub-muted { color: var(--muted-foreground); font-size: 0.875rem; }
+
+/* Inner column of the active tab panel: same rhythm as .hub, without
+   re-applying the block-level padding. */
+.hub-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* ------------------------------- Heading ------------------------------- */
+
+.hub-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--hub-gap);
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.hub-heading > div:first-child { display: flex; flex-direction: column; gap: 0.4rem; }
+.hub-heading h1 span { color: var(--primary); }
+
+.hub-community {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--hub-radius);
+  background: var(--card);
+  color: var(--card-foreground);
+}
+
+.hub-community small {
+  display: block;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+}
+
+.hub-community strong { display: block; font-size: 0.95rem; }
+.hub-community span { font-size: 0.8125rem; color: var(--muted-foreground); }
+
+/* ---------------------------- Emergency note ---------------------------- */
+
+.hub-emergency {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: var(--hub-radius);
+  border: 1px solid color-mix(in srgb, var(--destructive) 35%, transparent);
+  background: color-mix(in srgb, var(--destructive) 8%, transparent);
+  font-size: 0.875rem;
+  flex-wrap: wrap;
+}
+
+.hub-emergency svg { flex: none; color: var(--destructive); margin-top: 0.1rem; }
+.hub-emergency p { flex: 1 1 16rem; }
+
+/* --------------------------------- Tabs --------------------------------- */
+
+.hub-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.5rem;
+}
+
+.hub-tabs > div {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.hub-tabs > div::-webkit-scrollbar { display: none; }
+
+.hub-tabs button[role="tab"] {
+  flex: none;
+  padding: 0.5rem 0.75rem;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.hub-tabs button[role="tab"]:hover { color: var(--foreground); }
+
+.hub-tabs button[role="tab"][aria-selected="true"] {
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+/* -------------------------------- Buttons ------------------------------- */
+
+.hub-primary,
+.hub-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 44px;
+  padding: 0.5rem 0.9rem;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.hub-primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.hub-secondary {
+  background: transparent;
+  color: var(--foreground);
+  border-color: var(--border);
+}
+
+.hub-secondary:hover:not(:disabled) { background: var(--accent); }
+.hub-primary:hover:not(:disabled) { opacity: 0.9; }
+
+.hub :is(.hub-primary, .hub-secondary):disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.hub-link {
+  background: none;
+  border: 0;
+  padding: 0.25rem;
+  color: var(--primary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.hub-icon-button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+
+.hub-icon-button:hover { background: var(--accent); color: var(--foreground); }
+
+/* ------------------------------- Messages ------------------------------- */
+
+.hub-success,
+.hub-error,
+.hub-warning {
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--radius);
+  font-size: 0.875rem;
+  border: 1px solid;
+}
+
+.hub-success {
+  border-color: color-mix(in srgb, var(--success) 35%, transparent);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success);
+}
+
+.hub-error {
+  border-color: color-mix(in srgb, var(--destructive) 40%, transparent);
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  color: var(--destructive);
+}
+
+.hub-warning {
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: var(--foreground);
+}
+
+.hub-error button,
+.hub-warning button { margin-top: 0.5rem; }
+
+/* --------------------------------- Stats -------------------------------- */
+
+.hub-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+@media (min-width: 640px) {
+  .hub-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+.hub-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--hub-radius);
+  background: var(--card);
+}
+
+.hub-stat svg { color: var(--primary); }
+.hub-stat strong { font-size: 1.5rem; line-height: 1.1; color: var(--secondary); }
+.dark .hub-stat strong { color: var(--foreground); }
+.hub-stat span { font-size: 0.75rem; color: var(--muted-foreground); }
+
+/* ------------------------------- Sections ------------------------------- */
+
+.hub-section-title {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.hub-section-title > div { display: flex; flex-direction: column; gap: 0.2rem; }
+
+.hub-columns {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 860px) {
+  .hub-columns { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+}
+
+.hub-columns > section,
+.hub-columns > aside { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
+
+/* ---------------------------- Service cards ----------------------------- */
+
+.hub-service-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (min-width: 600px) {
+  .hub-service-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.hub-service {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--hub-radius);
+  background: var(--card);
+  color: var(--card-foreground);
+  min-width: 0;
+}
+
+.hub-service-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+}
+
+.hub-service-icon.police { background: color-mix(in srgb, var(--secondary) 12%, transparent); color: var(--secondary); }
+.hub-service-icon.fire { background: color-mix(in srgb, var(--destructive) 12%, transparent); color: var(--destructive); }
+.hub-service-icon.municipality { background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary); }
+.hub-service-icon.security { background: color-mix(in srgb, var(--success) 12%, transparent); color: var(--success); }
+.dark .hub-service-icon.police { color: var(--accent-foreground); background: var(--accent); }
+
+.hub-verified {
+  position: absolute;
+  top: 0.9rem;
+  right: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--success);
+}
+
+.hub-description {
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.hub-location {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+
+.hub-contact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+  padding-top: 0.2rem;
+}
+
+.hub-contact a {
+  color: var(--primary);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  word-break: break-word;
+}
+
+.hub-service footer { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: auto; padding-top: 0.6rem; }
+.hub-service footer > * { flex: 1 1 auto; }
+
+/* ------------------------------- Requests ------------------------------- */
+
+.hub-request-list { display: flex; flex-direction: column; gap: 0.5rem; }
+
+.hub-request {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.7rem;
+  text-align: left;
+  border: 1px solid var(--border);
+  border-radius: var(--hub-radius);
+  background: var(--card);
+  color: var(--card-foreground);
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.hub-request:hover { border-color: color-mix(in srgb, var(--primary) 50%, transparent); }
+
+.hub-request-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.hub-request-main { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
+.hub-request-main strong { font-size: 0.9375rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hub-request-main small { font-size: 0.75rem; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hub-request-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 0.2rem; }
+.hub-request-date { font-size: 0.6875rem; color: var(--muted-foreground); white-space: nowrap; }
+
+/* Status labels: shape and text carry the meaning, colour only reinforces it. */
+.hub-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  border: 1px solid currentColor;
+}
+
+.hub-status.submitted { color: var(--muted-foreground); }
+.hub-status.acknowledged { color: var(--primary); }
+.hub-status.in_progress { color: var(--warning); }
+.hub-status.resolved { color: var(--success); }
+.hub-status.closed { color: var(--muted-foreground); opacity: 0.75; }
+.hub-status.pending { color: var(--warning); }
+.hub-status.verified { color: var(--success); }
+.hub-status.rejected { color: var(--destructive); }
+
+/* -------------------------------- Steps --------------------------------- */
+
+.hub-steps {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: minmax(0, 1fr);
+  margin-top: 0.25rem;
+}
+
+@media (min-width: 520px) {
+  .hub-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.hub-steps span {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  padding: 0.5rem 0.6rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+.hub-steps b { color: var(--primary); font-size: 0.75rem; }
+
+/* -------------------------------- Notices ------------------------------- */
+
+.hub-notices { display: flex; flex-direction: column; gap: 0.6rem; }
+.hub-notices h2 { display: flex; align-items: center; gap: 0.4rem; }
+
+.hub-notices article {
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--hub-radius);
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.hub-notices small { font-size: 0.6875rem; color: var(--muted-foreground); }
+.hub-notices p { font-size: 0.8125rem; color: var(--muted-foreground); }
+
+/* -------------------------------- Filters ------------------------------- */
+
+.hub-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+.hub-filters label {
+  flex: 1 1 14rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.7rem;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--input);
+  color: var(--muted-foreground);
+}
+
+.hub-filters input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 0.875rem;
+}
+
+.hub-filters input:focus { outline: none; }
+
+.hub-filters select {
+  min-height: 44px;
+  padding: 0 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--input);
+  color: var(--foreground);
+  font-size: 0.875rem;
+}
+
+/* ------------------------------ Workspace ------------------------------- */
+
+.hub-workspace-card {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--hub-radius);
+  background: var(--card);
+}
+
+.hub-workspace-card > div:first-child { min-width: 0; }
+.hub-workspace-card p { font-size: 0.8125rem; color: var(--muted-foreground); }
+
+.hub-team { flex-basis: 100%; border-top: 1px dashed var(--border); padding-top: 0.6rem; }
+
+.hub-team summary {
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--primary);
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+.hub-team > *:not(summary) { margin-top: 0.5rem; }
+
+.hub-staff-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.8125rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* -------------------------------- Review -------------------------------- */
+
+.hub-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--hub-radius);
+  background: var(--card);
+}
+
+.hub-review > div:first-child { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; }
+.hub-review p { font-size: 0.8125rem; color: var(--muted-foreground); }
+.hub-review small { font-size: 0.75rem; color: var(--muted-foreground); }
+
+/* -------------------------------- Fields -------------------------------- */
+
+.hub-field { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.8125rem; font-weight: 600; }
+
+.hub-field > span { color: var(--foreground); }
+
+.hub-field :is(input, select, textarea) {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--input);
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 400;
+  font-size: 0.875rem;
+}
+
+.hub-field textarea { min-height: 6rem; resize: vertical; }
+
+.hub-form-row { display: grid; gap: 0.6rem; grid-template-columns: minmax(0, 1fr); }
+
+@media (min-width: 520px) {
+  .hub-form-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.hub form { display: flex; flex-direction: column; gap: 0.7rem; }
+
+/* -------------------------------- Modal --------------------------------- */
+
+.hub-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  background: hsl(0 0% 0% / 0.5);
+  backdrop-filter: blur(2px);
+}
+
+@media (min-width: 640px) {
+  .hub-overlay { align-items: center; padding: 1.5rem; }
+}
+
+.hub-modal {
+  width: 100%;
+  max-width: 34rem;
+  max-height: 92dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--hub-radius) var(--hub-radius) 0 0;
+}
+
+@media (min-width: 640px) {
+  .hub-modal { border-radius: var(--hub-radius); padding-bottom: 1rem; }
+}
+
+.hub-modal header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  position: sticky;
+  top: -1rem;
+  background: var(--background);
+  padding-top: 0.25rem;
+  z-index: 1;
+}
+
+.hub-modal > .hub-status { align-self: flex-start; }
+
+.hub-detail { font-size: 0.875rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ------------------------------- Timeline ------------------------------- */
+
+.hub-timeline-title { margin-top: 0.5rem; }
+
+.hub-timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 1rem;
+  border-left: 2px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.hub-timeline li { position: relative; display: flex; flex-direction: column; gap: 0.15rem; }
+
+.hub-timeline li::before {
+  content: "";
+  position: absolute;
+  left: calc(-1rem - 5px);
+  top: 0.35rem;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+.hub-timeline strong { font-size: 0.875rem; }
+.hub-timeline small { font-size: 0.6875rem; color: var(--muted-foreground); }
+.hub-timeline p { font-size: 0.8125rem; color: var(--muted-foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* -------------------------------- Empty --------------------------------- */
+
+.hub-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  text-align: center;
+  padding: 1.75rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--hub-radius);
+  color: var(--muted-foreground);
+}
+
+.hub-empty svg { color: var(--muted-foreground); }
+.hub-empty p { font-size: 0.875rem; max-width: 32rem; }
+
+.hub-spin { animation: hub-spin 1s linear infinite; }
+
+@keyframes hub-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .hub-spin { animation-duration: 3s; }
+  .hub * { transition-duration: 0.01ms !important; }
+}

@@ -25,10 +25,11 @@ import {
   landingBackgrounds,
   LANDING_SECTIONS
 } from "@shared/schema";
-import { 
-  createUser, 
-  createAnonymousUser, 
-  validateLogin 
+import {
+  createUser,
+  createAnonymousUser,
+  validateLogin,
+  findUserByEmail
 } from "./auth";
 import { getCitiesByCountry, getNeighbourhoodsByCity, getSupportedCountries } from "./locationService";
 import { Server as SocketIOServer } from "socket.io";
@@ -241,6 +242,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Mount probe routes for production diagnostics
   const { probeRouter } = await import("./routes/probe");
   app.use("/api/probe", probeRouter);
+
+  // Mount Community Services (non-emergency resident <-> local service requests).
+  // Mounted AFTER the /api access gate above so pending and denied accounts are
+  // rejected before reaching it. The router applies its own session, email
+  // verification and per-account write limits; see server/communityHub.ts.
+  const { communityHubRouter, ensureHubSchema } = await import("./communityHub");
+  // Additive hub_* tables are created once at startup. A failure here is logged
+  // and not fatal: the rest of the app keeps working and the router retries.
+  ensureHubSchema().catch((error) =>
+    console.error("[community-services] schema initialisation failed:", error),
+  );
+  app.use("/api/community-services", communityHubRouter);
   
   // Legacy redirect for old /map links (301 permanent)
   app.get("/map", (_req, res) => res.redirect(301, "/community/map"));
@@ -309,8 +322,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "All required fields must be provided" });
       }
       
-      // Check if user already exists
-      const existingUser = await storage.getUserByUsername(normalizedEmail);
+      // Check if user already exists. This previously looked the email up in
+      // the *username* column, so it never matched and a repeat signup fell
+      // through to a raw unique-constraint error from the database.
+      const existingUser = await findUserByEmail(normalizedEmail);
       if (existingUser) {
         return res.status(400).json({ error: "User already exists with this email" });
       }
@@ -329,7 +344,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         country,
         city,
         neighbourhood: neighbourhood || null,
-        roles: ["user"],
+        // Every account starts as a resident. Representing a municipality,
+        // police station, fire brigade or security service is NOT granted at
+        // registration: it is claimed afterwards through the Community
+        // Services organisation application, which an administrator who does
+        // not own the application must verify. ("user" was not a role any
+        // other part of the app recognises — App.tsx feeds roles[0] straight
+        // into the role selector.)
+        roles: ["resident"],
         isVerified: false,
         verifiedType: null
       });
@@ -345,11 +367,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         })
         .where(eq(users.id, newUser.id));
       
-      // Send verification email (non-blocking)
-      sendVerificationEmail(normalizedEmail, verificationToken, username).catch(err => {
-        console.error('Failed to send verification email:', err);
+      // Awaited, because the response tells the person to go and check their
+      // inbox. If it was never sent, saying so — and letting them ask again
+      // straight away — is the difference between a recoverable signup and a
+      // dead end.
+      const verificationEmail = await sendVerificationEmail(
+        normalizedEmail,
+        verificationToken,
+        username,
+      ).catch((err): { sent: false; reason: 'error' } => {
+        console.error('[EMAIL] verification: send threw during signup', err);
+        return { sent: false, reason: 'error' };
       });
-      
+
+      if (!verificationEmail.sent) {
+        // Do not spend the daily allowance or start the 60-second cool-down on
+        // an email that never went out: the account must be able to ask again
+        // as soon as delivery is configured or the provider recovers.
+        await db.update(users)
+          .set({ emailVerificationSentAt: null, emailVerificationCount: 0 })
+          .where(eq(users.id, newUser.id));
+        console.warn(
+          `[EMAIL] verification: not sent for new account ${newUser.id} (${verificationEmail.reason}); resend allowance left untouched`,
+        );
+      }
+
       const clientIP = req.ip || req.socket.remoteAddress || 'unknown';
       const userAgent = req.get('User-Agent') || 'unknown';
       const origin = req.get('Origin') || req.get('Referer') || 'direct';
@@ -389,9 +431,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
               country: newUser.country, 
               city: newUser.city,
               neighbourhood: newUser.neighbourhood,
-              emailVerified: false
+              emailVerified: false,
+              // Report the real access status. Omitting it made the client
+              // fall back to 'approved' (App.tsx: `user.accessStatus ||
+              // 'approved'`), so a new account saw the full app until the
+              // next reload bounced it to /pending.
+              accessStatus: newUser.accessStatus || 'pending'
             },
-            message: "Account created! Please check your email to verify your account."
+            // State what actually happened. The client renders its own copy
+            // from this flag rather than assuming the email arrived.
+            emailDelivery: verificationEmail.sent ? 'sent' : 'not_sent',
+            message: verificationEmail.sent
+              ? "Account created! Please check your email to verify your account."
+              : "Account created, but the verification email could not be sent just now. You can request a new link from the email verification page."
           });
         });
       });
@@ -598,16 +650,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
           emailVerificationExpires: verificationExpires,
           emailVerificationSentAt: now,
           emailVerificationCount: dailyCount + 1,
-          emailVerificationCountResetAt: user.emailVerificationCountResetAt && now <= user.emailVerificationCountResetAt 
-            ? user.emailVerificationCountResetAt 
+          emailVerificationCountResetAt: user.emailVerificationCountResetAt && now <= user.emailVerificationCountResetAt
+            ? user.emailVerificationCountResetAt
             : new Date(now.getTime() + 24 * 60 * 60 * 1000)
         })
         .where(eq(users.id, userId));
-      
-      await sendVerificationEmail(user.email, verificationToken, user.username);
-      
-      console.log(`📧 [EMAIL] Resent verification email to ${user.email}`);
-      
+
+      const outcome = await sendVerificationEmail(user.email, verificationToken, user.username);
+
+      if (!outcome.sent) {
+        // The limits above were spent before the attempt. Give them back, or
+        // an unconfigured provider burns the daily allowance five times over
+        // while telling the person the email is on its way, and locks them
+        // out of retrying once delivery is fixed.
+        await db.update(users)
+          .set({
+            emailVerificationSentAt: user.emailVerificationSentAt,
+            emailVerificationCount: dailyCount,
+            emailVerificationCountResetAt: user.emailVerificationCountResetAt
+          })
+          .where(eq(users.id, userId));
+
+        console.warn(`[EMAIL] verification: resend failed for user ${userId} (${outcome.reason})`);
+        return res.status(503).json({
+          error: "We could not send the verification email just now. Please try again shortly.",
+          code: "EMAIL_NOT_SENT"
+        });
+      }
+
+      console.log(`📧 [EMAIL] verification: resent for user ${userId}`);
+
       res.json({ ok: true, message: "Verification email sent!" });
     } catch (error: any) {
       console.error('Resend verification error:', error);
@@ -632,9 +704,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .where(eq(sql`lower(${users.email})`, normalizedEmail))
         .limit(1);
       
-      // Always return success to prevent email enumeration
+      // Always return success to prevent email enumeration. The log says an
+      // unknown address was tried, not which one.
       if (result.length === 0) {
-        console.log(`🔐 [AUTH] Password reset requested for unknown email: ${normalizedEmail}`);
+        console.log('🔐 [AUTH] Password reset requested for an address with no account');
         return res.json({ ok: true, message: "If that email exists, a reset link has been sent." });
       }
       
@@ -660,11 +733,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         expiresAt
       });
       
-      // Send reset email
-      await sendPasswordResetEmail(user.email!, resetToken, user.username);
-      
-      console.log(`🔐 [AUTH] Password reset email sent to ${user.email}`);
-      
+      // Send reset email.
+      const outcome = await sendPasswordResetEmail(user.email!, resetToken, user.username);
+
+      if (outcome.sent) {
+        console.log(`🔐 [AUTH] Password reset email sent for user ${user.id}`);
+      } else {
+        console.warn(`[EMAIL] password reset: not sent for user ${user.id} (${outcome.reason})`);
+      }
+
+      // Deliberately the same body and status either way, and identical to
+      // the unknown-address branch above. Reporting the delivery outcome here
+      // would tell an attacker whether the account exists; a failed send is
+      // recovered by asking again once delivery is working, and shows up in
+      // the server log rather than in the response.
       res.json({ ok: true, message: "If that email exists, a reset link has been sent." });
     } catch (error: any) {
       console.error('Forgot password error:', error);

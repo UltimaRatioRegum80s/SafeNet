@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { Home, PlusCircle, MapPin, MessageSquare } from "lucide-react";
+import { Home, PlusCircle, MapPin, MessageSquare, Building2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
@@ -11,9 +11,10 @@ const ROUTES = {
   report: "/community/report",
   map: "/community/map",
   feed: "/community/feed",
+  services: "/community/services",
 } as const;
 
-type Key = "home" | "report" | "map" | "feed";
+type Key = "home" | "report" | "map" | "feed" | "services";
 
 // Pages that share filter state (radiusKm, sinceHours, group)
 const FILTER_SHARING_PAGES = ["/community/map", "/community/feed"];
@@ -63,6 +64,7 @@ function keyFromPath(path: string): Key {
   if (path.startsWith("/community/map")) return "map";
   if (path.startsWith("/community/feed")) return "feed";
   if (path.startsWith("/community/report")) return "report";
+  if (path.startsWith("/community/services")) return "services";
   return "home";
 }
 
@@ -79,6 +81,7 @@ export default function MobileFloatingTopMenu({ hiddenBySheet = false }: { hidde
     { key: "report", label: "Report", icon: <PlusCircle className="w-5 h-5" />,    to: ROUTES.report },
     { key: "map",    label: "Map",    icon: <MapPin className="w-5 h-5" />,        to: ROUTES.map },
     { key: "feed",   label: "Feed",   icon: <MessageSquare className="w-5 h-5" />, to: ROUTES.feed },
+    { key: "services", label: "Services", icon: <Building2 className="w-5 h-5" />, to: ROUTES.services },
   ];
 
   const handleClick = (e: React.MouseEvent, to?: string, label?: string) => {

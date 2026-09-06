@@ -20,7 +20,7 @@ export async function createUser(data: SignupData): Promise<User> {
   
   const passwordHash = await hashPassword(data.password);
   const roles = data.role === 'private' ? ['resident'] : ['security_org'];
-  
+
   const [user] = await db.insert(users).values({
     email: data.email,
     passwordHash,
@@ -28,6 +28,9 @@ export async function createUser(data: SignupData): Promise<User> {
     roles,
     country: data.country,
     city: data.city,
+    // Signup collects and validates a neighbourhood, and Community Services
+    // pre-fills request forms from it, but it was never written to the row.
+    neighbourhood: data.neighbourhood || null,
   }).returning();
 
   return user;
@@ -56,6 +59,9 @@ export async function createAnonymousUser(data: AnonJoinData): Promise<User> {
     roles,
     country: data.country,
     city: data.city,
+    // Same omission as createUser above: anonJoinSchema accepts a
+    // neighbourhood and the caller sends one, but it was dropped on insert.
+    neighbourhood: data.neighbourhood || null,
   }).returning();
 
   return user;

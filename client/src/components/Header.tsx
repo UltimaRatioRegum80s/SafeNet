@@ -18,6 +18,7 @@ import nabornetLogoDark from '@assets/Logo dark mode_1755373493360.png';
 import NotificationBell from './NotificationBell';
 import { ThemeToggle } from './ThemeToggle';
 import { useAuthStore } from '../store/auth';
+import { logout as endSession } from '@/lib/auth';
 
 interface HeaderProps {
   title?: string;
@@ -26,7 +27,17 @@ interface HeaderProps {
 
 export default function Header({ title = "NaborNet", subtitle }: HeaderProps) {
   const [location] = useLocation();
-  const { user, logout } = useAuthStore();
+  const { user, logout: clearAuth } = useAuthStore();
+
+  // This button used to clear the client store only: the session cookie stayed
+  // valid, so a reload signed the same person straight back in, and their
+  // cached requests and notes were still in memory for whoever used the device
+  // next. It now goes through the shared sign-out path.
+  const handleLogout = async () => {
+    await endSession();
+    clearAuth();
+    window.location.href = '/';
+  };
 
   const navItems = [
     { href: '/', icon: Home, label: 'Dashboard', active: location === '/' || location === '/community' },
@@ -70,7 +81,7 @@ export default function Header({ title = "NaborNet", subtitle }: HeaderProps) {
             <Button
               variant="ghost"
               size="sm"
-              onClick={logout}
+              onClick={handleLogout}
               className="flex items-center gap-2 text-muted-foreground hover:text-foreground mt-[8px] mb-[8px] pt-[0px] pb-[0px] pl-[37px] pr-[37px] ml-[-10px] mr-[-10px]"
               data-testid="logout-button"
             >
