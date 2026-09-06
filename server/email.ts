@@ -1,7 +1,31 @@
 import { Resend } from 'resend';
 import crypto from 'crypto';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+/**
+ * Resend is created lazily. It used to be constructed at module scope, but
+ * the Resend constructor THROWS when the API key is missing — and this module
+ * is imported by server/routes.ts, so an unset RESEND_API_KEY took the whole
+ * server down at boot. The static shell still served, every /api call hung,
+ * and the app sat on "Loading NaborNet..." forever.
+ *
+ * Email is not critical-path for the server booting, so a missing key now
+ * degrades to "not sent" and is logged, rather than killing the process.
+ */
+let resendClient: Resend | null | undefined;
+
+function getResend(): Resend | null {
+  if (resendClient !== undefined) return resendClient;
+  const key = process.env.RESEND_API_KEY;
+  if (!key) {
+    console.warn(
+      "[EMAIL] RESEND_API_KEY is not set - verification and password reset emails will not be sent.",
+    );
+    resendClient = null;
+    return null;
+  }
+  resendClient = new Resend(key);
+  return resendClient;
+}
 
 const APP_NAME = process.env.APP_NAME || 'NaborNet';
 const FROM_EMAIL = process.env.EMAIL_FROM || 'onboarding@resend.dev';
@@ -23,6 +47,8 @@ export async function sendVerificationEmail(
   username: string
 ): Promise<boolean> {
   const verifyUrl = `${APP_URL}/verify-email?token=${token}`;
+  const resend = getResend();
+  if (!resend) return false;
   
   try {
     const { error } = await resend.emails.send({
@@ -82,6 +108,8 @@ export async function sendPasswordResetEmail(
   username: string
 ): Promise<boolean> {
   const resetUrl = `${APP_URL}/reset-password?token=${token}`;
+  const resend = getResend();
+  if (!resend) return false;
   
   try {
     const { error } = await resend.emails.send({
