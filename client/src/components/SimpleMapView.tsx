@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useLocation } from 'wouter';
-import { Plus, Minus, Crosshair, Sun, Moon, Globe, X, Navigation } from 'lucide-react';
+import { Plus, Minus, Crosshair, Sun, Moon, Globe, X, Navigation, MapPinOff } from 'lucide-react';
 import { fetchOSRMRoute, formatDistance, formatDuration } from '@/lib/routing';
 import { CollapsibleCategoryFilter, type GroupFilter } from './CollapsibleCategoryFilter';
 import { LongPressFAB } from './LongPressFAB';
@@ -29,6 +29,13 @@ import { getCityCoordinates } from '@/lib/locationCoordinates';
 import { useLocationStore } from '@/store/locationStore';
 import { pickQueryLocation } from '@/lib/useDeviceLocation';
 import { resolveToV2Type, TAXONOMY_GROUPS, type TaxonomyGroupId, getMarkerShape, type MarkerShape } from '@/features/report/taxonomyV2';
+import {
+  MAP_STYLES,
+  availableMapStyles,
+  resolveInitialStyle,
+  type MapStyle,
+} from '@/lib/mapTiles';
+import { useAuthStore } from '@/store/auth';
 
 // Fix default markers
 import marker2x from "leaflet/dist/images/marker-icon-2x.png";
@@ -71,36 +78,13 @@ interface SimpleMapViewProps {
 
 const isMobile = () => typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches;
 
-// Map style type (exported for parent components)
-export type MapStyle = "light" | "dark" | "satellite";
+// Tile URLs, attribution and per-style availability now live in one place, so
+// the initial layer and the style switcher can never disagree about them.
+// See client/src/lib/mapTiles.ts.
+export type { MapStyle };
 
-// Map tile configuration type
-interface MapStyleConfig {
-  url: string;
-  attribution: string;
-  label: string;
-  noSubdomains?: boolean;
-}
-
-// Map tile configurations
-const MAP_STYLES: Record<MapStyle, MapStyleConfig> = {
-  light: {
-    url: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-    attribution: '© <a href="https://carto.com/attributions">CARTO</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    label: "Light",
-  },
-  dark: {
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    attribution: '© <a href="https://carto.com/attributions">CARTO</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    label: "Dark",
-  },
-  satellite: {
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-    attribution: '© <a href="https://www.esri.com/">Esri</a>',
-    label: "Satellite",
-    noSubdomains: true,
-  },
-};
+/** Used only when the signed-in account has no city we can resolve. */
+const MAP_FALLBACK_CENTER: [number, number] = [-22.5597, 17.0658]; // Windhoek
 
 // Check if incident is critical (should pulse)
 const isIncidentCritical = (incident: Incident): boolean => {
@@ -364,7 +348,31 @@ export default function SimpleMapView({
   const [currentZoom, setCurrentZoom] = useState<number>(12); // Track current zoom level
   const [, setLocation] = useLocation();
   const [userCity, setUserCity] = useState<string | null>(null);
-  const [initialCenter, setInitialCenter] = useState<[number, number]>([-22.5597, 17.0658]); // Default to Windhoek
+
+  // The map opens on the signed-in user's city when we already know it. The
+  // city used to arrive from a second getCurrentUser() call after mount, so the
+  // first paint was always the Windhoek default and then jumped — which is what
+  // made mobile briefly show Windhoek while Home showed Swakopmund.
+  const authUser = useAuthStore((s) => s.user);
+  const seededCenter = useRef<[number, number] | null>(
+    (authUser?.city && getCityCoordinates(authUser.city)) || null,
+  );
+  const [initialCenter, setInitialCenter] = useState<[number, number]>(
+    seededCenter.current ?? MAP_FALLBACK_CENTER,
+  );
+
+  // Basemap health. `unconfigured` means the selected style has no tile
+  // provider in this build (see lib/mapTiles.ts); `network` means its tiles
+  // are failing to load. Either way the user gets a stated reason and a way
+  // out rather than a permanently grey map.
+  const [tilesFailing, setTilesFailing] = useState(false);
+  const styleUnavailable = !MAP_STYLES[mapStyle].available;
+  const basemapProblem: 'unconfigured' | 'network' | null = styleUnavailable
+    ? 'unconfigured'
+    : tilesFailing
+      ? 'network'
+      : null;
+  const workingStyles = availableMapStyles().filter((s) => s !== mapStyle);
   const [isLocating, setIsLocating] = useState(false);
   
   // GPS availability — gate Report FAB on active GPS (not city fallback)
@@ -743,9 +751,10 @@ export default function SimpleMapView({
     globalMapInstanceId++;
     setMapInstanceId(globalMapInstanceId);
 
-    // Create map with mobile-aware controls - start with default Windhoek
+    // Start on the user's city when the auth store already knows it, so the
+    // first painted frame matches Home and Feed instead of flashing Windhoek.
     map.current = L.map(mapContainer.current, {
-      center: [-22.5597, 17.0658], // Default Windhoek, will update when user city loads
+      center: seededCenter.current ?? MAP_FALLBACK_CENTER,
       zoom: 12,
       zoomControl: !isMobile(), // hide default zoom control on mobile
     });
@@ -818,32 +827,35 @@ export default function SimpleMapView({
     // Set initial zoom level
     setCurrentZoom(mapInstance.getZoom());
 
-    // Create all 3 tile layers
-    const tileLayers: Record<MapStyle, L.TileLayer> = {
-      light: L.tileLayer(MAP_STYLES.light.url, {
-        attribution: MAP_STYLES.light.attribution,
-        maxZoom: 19,
-        subdomains: MAP_STYLES.light.noSubdomains ? [] : ['a', 'b', 'c'],
-      }),
-      dark: L.tileLayer(MAP_STYLES.dark.url, {
-        attribution: MAP_STYLES.dark.attribution,
-        maxZoom: 19,
-        subdomains: MAP_STYLES.dark.noSubdomains ? [] : ['a', 'b', 'c'],
-      }),
-      satellite: L.tileLayer(MAP_STYLES.satellite.url, {
-        attribution: MAP_STYLES.satellite.attribution,
-        maxZoom: 19,
-        subdomains: MAP_STYLES.satellite.noSubdomains ? [] : ['a', 'b', 'c'],
-      }),
+    // Build a Leaflet layer only for styles this build can actually serve. A
+    // style with no provider key is left null so it can never be added to the
+    // map — an unauthenticated CARTO tile returns HTTP 200 carrying an
+    // "API KEY REQUIRED" watermark, so there is nothing to detect afterwards.
+    const tileLayers: Record<MapStyle, L.TileLayer | null> = {
+      light: null,
+      dark: null,
+      satellite: null,
     };
+    for (const style of availableMapStyles()) {
+      const config = MAP_STYLES[style];
+      tileLayers[style] = L.tileLayer(config.url, {
+        attribution: config.attribution,
+        maxZoom: config.maxZoom,
+        subdomains: config.subdomains,
+      });
+    }
 
-    // Add initial layer (light mode)
-    tileLayers.light.addTo(map.current);
-    
+    // Open on the requested style, or the first one that works.
+    const startStyle = resolveInitialStyle(mapStyle);
+    if (startStyle && tileLayers[startStyle]) {
+      tileLayers[startStyle]!.addTo(map.current);
+      if (startStyle !== mapStyle) setMapStyle(startStyle);
+    }
+
     // Store all layers in ref
     baseRef.current = {
       ...tileLayers,
-      current: "light",
+      current: startStyle ?? undefined,
     };
 
     // Markers layer group (keeps incidents above base when we switch tiles)
@@ -1008,12 +1020,16 @@ export default function SimpleMapView({
       return;
     }
     
-    // Only update if we have user-specific coordinates (not default Windhoek)
-    if (initialCenter[0] !== -22.5597 || initialCenter[1] !== 17.0658) {
-      console.log("[SIMPLE MAP] Updating map center to user's city:", initialCenter);
+    // Nothing to do when the map already opened on these coordinates.
+    const [seedLat, seedLng] = seededCenter.current ?? MAP_FALLBACK_CENTER;
+    if (initialCenter[0] === seedLat && initialCenter[1] === seedLng) {
       didSetCityCenterRef.current = true;
-      map.current.setView(initialCenter, 12);
+      return;
     }
+
+    console.log("[SIMPLE MAP] Updating map center to user's city:", initialCenter);
+    didSetCityCenterRef.current = true;
+    map.current.setView(initialCenter, 12);
   }, [initialCenter, mapLoaded]);
 
   // Add markers when incidents change
@@ -1206,28 +1222,65 @@ export default function SimpleMapView({
     }
   }, [focusCoords, mapLoaded]);
 
-  // Map style toggle: switch tile layers between all 3 options
+  // Recover from a basemap problem: fall back to a style this build can serve
+  // when the current one has no provider, and otherwise ask Leaflet to fetch
+  // the tiles again.
+  const retryBasemap = useCallback(() => {
+    setTilesFailing(false);
+    if (!MAP_STYLES[mapStyle].available) {
+      const alternative = availableMapStyles()[0];
+      if (alternative) setMapStyle(alternative);
+      return;
+    }
+    baseRef.current[mapStyle]?.redraw();
+  }, [mapStyle, setMapStyle]);
+
+  // Watch the active layer for tile failures. Leaflet fires `tileerror` on a
+  // network or HTTP failure; it cannot see a watermarked tile, which is why
+  // the missing-key case is handled by configuration above instead.
+  useEffect(() => {
+    const layer = baseRef.current[mapStyle];
+    if (!layer || !mapLoaded) return;
+
+    let failures = 0;
+    const onError = () => {
+      failures += 1;
+      // One dropped tile is normal at the edge of a pan; a run of them is not.
+      if (failures >= 4) setTilesFailing(true);
+    };
+    const onLoad = () => {
+      failures = 0;
+      setTilesFailing(false);
+    };
+
+    layer.on('tileerror', onError);
+    layer.on('load', onLoad);
+    return () => {
+      layer.off('tileerror', onError);
+      layer.off('load', onLoad);
+    };
+  }, [mapStyle, mapLoaded]);
+
+  // Map style toggle. A style with no configured provider has no layer, so the
+  // current one is removed and the basemap-unavailable state takes over rather
+  // than leaving the previous style on screen under the wrong label.
   useEffect(() => {
     const mapInstance = map.current;
     const base = baseRef.current;
-    
-    // Check if map and all layers are initialized
-    if (!mapInstance || !base.light || !base.dark || !base.satellite) return;
-
-    // Don't switch if already on the requested style
+    if (!mapInstance || !mapLoaded) return;
     if (mapStyle === base.current) return;
 
-    // Remove current layer
     if (base.current && base[base.current]) {
       mapInstance.removeLayer(base[base.current]!);
     }
 
-    // Add new layer
     if (base[mapStyle]) {
       base[mapStyle]!.addTo(mapInstance);
       base.current = mapStyle;
+    } else {
+      base.current = undefined;
     }
-  }, [mapStyle]);
+  }, [mapStyle, mapLoaded]);
 
   return (
     <div className="relative">
@@ -1246,6 +1299,64 @@ export default function SimpleMapView({
             <div className="text-center">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
               <p className="text-sm text-gray-600">Loading map...</p>
+            </div>
+          </div>
+        )}
+
+        {/* Basemap unavailable — the selected style has no configured tile
+            provider. Says so plainly instead of leaving an endless grey map,
+            and keeps the incident data one tap away. */}
+        {mapLoaded && basemapProblem && (
+          <div
+            className="absolute inset-0 z-[600] flex items-center justify-center bg-slate-100 dark:bg-slate-900 px-6 md:rounded-lg"
+            data-testid="map-unavailable"
+            role="status"
+          >
+            <div className="max-w-sm text-center">
+              <MapPinOff
+                className="mx-auto mb-3 h-8 w-8 text-slate-400 dark:text-slate-500"
+                aria-hidden="true"
+              />
+              <h2 className="text-base font-semibold text-slate-800 dark:text-slate-100">
+                Map background unavailable
+              </h2>
+              <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
+                {basemapProblem === 'unconfigured'
+                  ? MAP_STYLES[mapStyle].unavailableReason
+                  : "The map tiles could not be loaded. Check your connection."}{" "}
+                {incidents.length === 1
+                  ? "1 nearby report is still available."
+                  : `${incidents.length} nearby reports are still available.`}
+              </p>
+              <div className="mt-5 flex flex-wrap justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={retryBasemap}
+                  className="min-h-[44px] rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-500"
+                  data-testid="map-unavailable-retry"
+                >
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLocation('/community/feed')}
+                  className="min-h-[44px] rounded-lg border border-slate-300 dark:border-slate-600 px-4 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800"
+                  data-testid="map-unavailable-activity"
+                >
+                  View activity
+                </button>
+                {workingStyles.map((style) => (
+                  <button
+                    key={style}
+                    type="button"
+                    onClick={() => setMapStyle(style)}
+                    className="min-h-[44px] rounded-lg border border-slate-300 dark:border-slate-600 px-4 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-800"
+                    data-testid={`map-unavailable-switch-${style}`}
+                  >
+                    Use {MAP_STYLES[style].label.toLowerCase()} map
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}

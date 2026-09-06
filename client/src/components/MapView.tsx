@@ -13,6 +13,7 @@ import { showDebug } from "@/lib/debug";
 import { getIncidentIcon, createAccuracyCircle } from '../lib/incidentIcons';
 import { Flags } from '@/lib/flags';
 import { isMobileLike } from '@/lib/platform';
+import { MAP_STYLES } from '@/lib/mapTiles';
 
 // ==================== DIAGNOSTIC BUILD ====================
 // Toggle via URL query params: ?disableClustering=true&disableAutoFit=true&showDebugOverlay=true
@@ -1027,16 +1028,17 @@ export default function MapView({
         }
       });
 
-      // Add initial tile layer based on theme preference
-      const tileUrl = isDarkTheme 
-        ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-        : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
-      
-      tileLayerRef.current = L.tileLayer(tileUrl, {
-        attribution: '© OpenStreetMap contributors © CARTO',
-        subdomains: 'abcd',
-        maxZoom: 19
-      }).addTo(map.current);
+      // Add initial tile layer based on theme preference. Tile URLs,
+      // attribution and provider-key handling come from lib/mapTiles so this
+      // component cannot drift from the one the /community/map route renders.
+      const initialTiles = MAP_STYLES[isDarkTheme ? 'dark' : 'light'];
+      if (initialTiles.available) {
+        tileLayerRef.current = L.tileLayer(initialTiles.url, {
+          attribution: initialTiles.attribution,
+          subdomains: initialTiles.subdomains,
+          maxZoom: initialTiles.maxZoom
+        }).addTo(map.current);
+      }
 
       // Create and add cluster layer using singleton
       // 2) GPT Mobile Diagnostic: Confirm we create & attach cluster group  
@@ -1697,15 +1699,14 @@ export default function MapView({
     map.current.removeLayer(tileLayerRef.current);
     
     // Add new tile layer based on theme
-    const tileUrl = newTheme 
-      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-      : 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
-    
-    tileLayerRef.current = L.tileLayer(tileUrl, {
-      attribution: '© OpenStreetMap contributors © CARTO',
-      subdomains: 'abcd',
-      maxZoom: 19
-    }).addTo(map.current);
+    const themeTiles = MAP_STYLES[newTheme ? 'dark' : 'light'];
+    if (themeTiles.available) {
+      tileLayerRef.current = L.tileLayer(themeTiles.url, {
+        attribution: themeTiles.attribution,
+        subdomains: themeTiles.subdomains,
+        maxZoom: themeTiles.maxZoom
+      }).addTo(map.current);
+    }
   };
 
   // Listen for fullscreen changes

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import SimpleMapView, { type MapStyle } from '../../components/SimpleMapView';
+import SimpleMapView from '../../components/SimpleMapView';
+import { MAP_STYLES, availableMapStyles, resolveInitialStyle, type MapStyle } from '@/lib/mapTiles';
 import { useFeedIncidents } from '@/features/incidents/useFeedIncidents';
 import { useSearchParamsWouter } from '@/router/useSearchParamsWouter';
 import GroupFilterTabs, { type GroupFilter } from '@/components/GroupFilterTabs';
@@ -34,11 +35,20 @@ const TIME_OPTIONS: FilterOption[] = [
   { value: '168', label: '7 days', icon: <Clock size={16} /> },
 ];
 
-const MAP_STYLE_OPTIONS: FilterOption[] = [
-  { value: 'light', label: 'Light', icon: <Sun size={16} /> },
-  { value: 'dark', label: 'Dark', icon: <Moon size={16} /> },
-  { value: 'satellite', label: 'Satellite', icon: <Globe size={16} /> },
-];
+const MAP_STYLE_ICONS: Record<MapStyle, JSX.Element> = {
+  light: <Sun size={16} />,
+  dark: <Moon size={16} />,
+  satellite: <Globe size={16} />,
+};
+
+// Only offer styles this build can actually render — a style with no configured
+// tile provider would otherwise look like a broken map rather than a missing
+// setting. See client/src/lib/mapTiles.ts.
+const MAP_STYLE_OPTIONS: FilterOption[] = availableMapStyles().map((style) => ({
+  value: style,
+  label: MAP_STYLES[style].label,
+  icon: MAP_STYLE_ICONS[style],
+}));
 
 export default function SimpleMap() {
   const searchParams = useSearchParamsWouter();
@@ -47,8 +57,9 @@ export default function SimpleMap() {
   // Modal state for mobile filters
   const [activeModal, setActiveModal] = useState<'radius' | 'time' | 'style' | null>(null);
   
-  // Map style state (lifted from SimpleMapView for parent control)
-  const [mapStyle, setMapStyle] = useState<MapStyle>("light");
+  // Map style state (lifted from SimpleMapView for parent control). Falls back
+  // to a style with a configured tile provider when Light has none.
+  const [mapStyle, setMapStyle] = useState<MapStyle>(() => resolveInitialStyle("light") ?? "light");
   
   // Derive radius/time from URL (single source of truth)
   const radiusKm = useMemo(() => {
@@ -342,17 +353,6 @@ export default function SimpleMap() {
               incidents={mapIncidents}
               focusCoords={focusCoords}
             />
-          </div>
-          
-          {/* Future component placeholder */}
-          <div className="lg:max-w-sm lg:mx-auto">
-            <div className="h-32 lg:h-40 rounded-lg border-2 border-dashed border-muted-foreground/25 flex items-center justify-center">
-              <div className="text-center text-muted-foreground">
-                <div className="text-3xl lg:text-4xl mb-2">📊</div>
-                <p className="text-xs lg:text-sm">Future Component</p>
-                <p className="text-xs">Feed/Stats Panel</p>
-              </div>
-            </div>
           </div>
         </div>
       </div>
