@@ -12,7 +12,7 @@ export function ReportFab({ onClick, disabled, title, className }: ReportFabProp
   return (
     <Button
       onClick={onClick}
-      className={`fixed bottom-24 right-4 w-14 h-14 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white shadow-lg z-50 disabled:opacity-40 transition-all duration-200${className ? ` ${className}` : ""}`}
+      className={`nn-report-fab fixed bottom-24 right-4 w-14 h-14 rounded-2xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white shadow-lg z-50 disabled:opacity-40 transition-all duration-200${className ? ` ${className}` : ""}`}
       data-testid="fab-report"
       aria-label="Report an incident"
       disabled={disabled}

@@ -89,12 +89,12 @@ export default function Hero({ bgImage }: HeroProps) {
   }, [installReady]);
 
   return (
-    <section className="relative overflow-hidden">
+    <section className="nn-landing-hero relative overflow-hidden">
       {/* Deep blue gradient background with parallax */}
       <div
         className="absolute inset-0 pub-parallax-bg"
         style={{
-          background: 'linear-gradient(180deg, #071423 0%, #0F2A3D 60%, #132F45 100%)',
+          background: 'linear-gradient(180deg, #102d34 0%, #164b49 60%, #1c6157 100%)',
         }}
       />
 
@@ -133,11 +133,12 @@ export default function Hero({ bgImage }: HeroProps) {
                 className="h-20 w-20 md:h-24 md:w-24 rounded-full"
               />
             </div>
-            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white leading-tight drop-shadow-sm">
-              Community Safety, Designed with Restraint.
+            <span className="nn-hero-tag">LOCAL KNOWLEDGE. SHARED CARE.</span><h1 className="text-4xl md:text-5xl lg:text-6xl font-bold text-white leading-tight drop-shadow-sm">
+              A closer community.
+                A safer every day.
             </h1>
             <p className="text-lg md:text-xl text-slate-300 max-w-2xl mx-auto">
-              A structured way for neighbours to share observations and stay aware — without noise, speculation, or chaos.
+              Know what is happening nearby. Share what matters. Connect with the people and services that make your neighborhood feel like home.
             </p>
 
             <div className="flex flex-col gap-3 justify-center pt-4">
@@ -165,7 +166,7 @@ export default function Hero({ bgImage }: HeroProps) {
                   <Link href="/signup">
                     <Button size="lg" className="bg-[var(--pub-accent)] hover:bg-[var(--pub-accent-hover)] text-white px-8 shadow-lg">
                       <UserPlus className="mr-2 h-4 w-4" />
-                      Sign Up
+                      Join your neighborhood
                     </Button>
                   </Link>
                 </div>

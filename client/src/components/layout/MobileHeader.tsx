@@ -1,0 +1,12 @@
+import { useState } from "react";
+import { Link } from "wouter";
+import { Menu, Shield, ArrowUpRight, Bell, Moon, Sun, MapPin, Info, CircleHelp, FileText, Lock } from "lucide-react";
+import { useTheme } from "@/components/ThemeProvider";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+export default function MobileHeader({title}:{title:string}) {
+ const [open,setOpen]=useState(false); const {theme,setTheme}=useTheme();
+ const dark=theme==="dark"||(theme==="system"&&window.matchMedia("(prefers-color-scheme: dark)").matches);
+ const links=[{to:"/community/notifications",label:"Notifications",sub:"Choose the alerts that matter",icon:Bell},{to:"/safety",label:"Safety & guidance",sub:"Know when to get emergency help",icon:Shield},{to:"/how-it-works",label:"How NaborNet works",sub:"A little local knowledge goes a long way",icon:CircleHelp},{to:"/about",label:"About NaborNet",sub:"Built around your community",icon:Info},{to:"/legal/privacy",label:"Privacy",sub:"Understand how your data is handled",icon:Lock},{to:"/legal/terms",label:"Terms of use",sub:"Our community responsibilities",icon:FileText}];
+ return <><header className="nn-mobile-header"><Link href="/" className="nn-brand" aria-label="NaborNet home"><span className="nn-brand-mark"><Shield size={22}/></span><span>Nabor<span className="nn-brand-accent">Net</span><small>{title==="Dashboard"?"YOUR NEIGHBORHOOD":title.toUpperCase()}</small></span></Link><button className="nn-menu-trigger" aria-label="Open app menu" aria-expanded={open} onClick={()=>setOpen(true)}><Menu size={22}/></button></header>
+ <Dialog open={open} onOpenChange={setOpen}><DialogContent className="nn-menu-sheet"><DialogHeader><span className="nn-eyebrow">MAKE YOURSELF AT HOME</span><DialogTitle>Your NaborNet</DialogTitle><DialogDescription>Your community, a little closer.</DialogDescription></DialogHeader><div className="nn-menu-links">{links.map(({to,label,sub,icon:Icon})=><Link key={to} href={to} onClick={()=>setOpen(false)}><span className="nn-menu-icon"><Icon size={20}/></span><span><strong>{label}</strong><small>{sub}</small></span><ArrowUpRight size={17}/></Link>)}</div><button className="nn-theme-row" onClick={()=>setTheme(dark?"light":"dark")} aria-label="Toggle theme">{dark?<Sun size={20}/>:<Moon size={20}/>}<span>Appearance</span><strong>{dark?"Dark":"Light"}</strong><span className="nn-theme-switch" aria-hidden="true"/></button></DialogContent></Dialog></>;
+}

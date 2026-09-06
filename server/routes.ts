@@ -59,6 +59,7 @@ import {
   inferTaxonomyVersion,
   CURRENT_TAXONOMY_VERSION 
 } from "./lib/taxonomyV2";
+import { fuzzCoordinate } from "./lib/geoPrivacy";
 
 // Signup mode: 'open' (anyone can sign up) or 'whitelist' (only allowed emails)
 const SIGNUP_MODE = process.env.SIGNUP_MODE || 'whitelist';
@@ -199,10 +200,12 @@ async function requireModerator(req: Request, res: Response, next: NextFunction)
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Access gate: block pending/denied users from community API endpoints
+  // Fails CLOSED: a DB error returns 503 rather than letting the request through.
+  // /api/admin is NOT exempt — admin access is handled by the roles.includes('admin') check inside the gate.
   const ACCESS_GATE_EXEMPT = new Set([
     '/api/auth', '/api/legal', '/api/version',
     '/api/healthz', '/api/readyz', '/api/probe', '/api/e2e',
-    '/api/access', '/api/admin', '/api/landing-backgrounds',
+    '/api/access', '/api/landing-backgrounds',
   ]);
 
   app.use("/api", async (req: Request, res: Response, next: NextFunction) => {
@@ -219,16 +222,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!uid) return next();
 
     try {
-      const result = await db.select({ accessStatus: users.accessStatus })
+      const result = await db.select({ accessStatus: users.accessStatus, roles: users.roles })
         .from(users)
         .where(eq(users.id, uid))
         .limit(1);
 
-      if (result.length > 0 && result[0].accessStatus !== 'approved') {
+      if (result.length === 0) return next(); // Unknown user — let individual routes handle auth
+      const row = result[0];
+      // Admins bypass the access gate
+      if (row.roles && row.roles.includes('admin')) return next();
+      if (row.accessStatus !== 'approved') {
         return res.status(403).json({ error: "Access not yet approved", code: "ACCESS_PENDING" });
       }
     } catch (error) {
       console.error("Access gate check failed:", error);
+      // Fail CLOSED — return 503 rather than letting the request through
+      return res.status(503).json({ error: "Service temporarily unavailable" });
     }
     next();
   });
@@ -937,15 +946,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // User routes
-  app.post("/api/users", async (req, res) => {
-    try {
-      const userData = insertUserSchema.parse(req.body);
-      const user = await storage.createUser(userData);
-      res.json(user);
-    } catch (error: any) {
-      res.status(400).json({ error: error.message });
-    }
-  });
+  // NOTE: POST /api/users removed — signup uses storage.createUser directly via /api/auth/signup
 
   app.get("/api/users/:id", async (req, res) => {
     try {
@@ -958,8 +959,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update user location for geo-notifications
-  app.post("/api/users/:id/location", async (req, res) => {
+  app.post("/api/users/:id/location", requireAuth, async (req, res) => {
     try {
+      const authUserId = (req as any).authUserId;
+      if (authUserId !== req.params.id) {
+        return res.status(403).json({ error: "Cannot update another user's location" });
+      }
       const { latitude, longitude } = req.body;
       await storage.updateUserLocation(req.params.id, latitude, longitude);
       res.json({ success: true });
@@ -1154,8 +1159,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Security: Enhanced rate limiting with configurable parameters
+      // Never trust x-user-id header in production — session only
+      const isDev = process.env.NODE_ENV !== 'production';
       const key = (req.session as any)?.userId || 
-                 (req.headers["x-user-id"] as string) || 
+                 (isDev ? (req.headers["x-user-id"] as string) : null) || 
                  `ip:${req.ip}`;
 
       const isAnonymous = Boolean(sanitizedData.isAnonymous);
@@ -1178,14 +1185,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (duplicateIncident) {
         // Increment duplicate count instead of creating new incident
         await storage.incrementDuplicateCount(duplicateIncident.id);
-        const result = { ...duplicateIncident, isDuplicate: true };
+        // Run through whitelist + fuzzing — caller is not admin, pass userId for ownership
+        const safeResult = { ...toApiIncident(duplicateIncident, false, userId), isDuplicate: true };
         
-        // Cache idempotent result
+        // Cache idempotent result (already processed through whitelist)
         if (idempotencyKey) {
-          storeIdempotencyResult(idempotencyKey, result);
+          storeIdempotencyResult(idempotencyKey, safeResult);
         }
         
-        return res.json(result);
+        return res.json(safeResult);
       }
 
       // Auto-flagging heuristics for quality control
@@ -1250,13 +1258,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Don't fail the incident creation if push fails
       }
       
-      // Cache idempotent result for successful creation
+      // Build reporter-facing response (reporter sees full data via isAdmin=true)
+      const reporterResult = toApiIncident(incident, true);
+      
+      // Cache idempotent result — store the already-processed response, not the raw row
       if (idempotencyKey) {
-        storeIdempotencyResult(idempotencyKey, incident);
+        storeIdempotencyResult(idempotencyKey, reporterResult);
       }
       
       // Return incident with status aliasing
-      res.json(toApiIncident(incident, true)); // Reporter sees full data
+      res.json(reporterResult); // Reporter sees full data
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
@@ -1503,9 +1514,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Notifications routes
-  app.get("/api/notifications", async (req, res) => {
+  app.get("/api/notifications", requireAuth, async (req, res) => {
     try {
-      const userId = req.headers['x-user-id'] as string;
+      const userId = (req as any).authUserId;
       const notifications = await storage.getUserNotifications(userId);
       res.json(notifications);
     } catch (error: any) {
@@ -1778,7 +1789,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Community chat routes
-  app.post("/api/chat/:room", async (req, res) => {
+  app.post("/api/chat/:room", requireAuth, async (req, res) => {
     try {
       const { room } = req.params;
       const messageData = insertChatMessageSchema.parse({
@@ -1786,7 +1797,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         room
       });
       
-      const userId = req.headers['x-user-id'] as string || null;
+      const userId = (req as any).authUserId as string;
       const message = await storage.createChatMessage({ ...messageData, userId });
       
       // Broadcast to connected clients via WebSocket
@@ -2037,10 +2048,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   
   // Setup Socket.IO
+  const SOCKET_ALLOWED_ORIGINS = (
+    process.env.ALLOWED_ORIGINS ||
+    (process.env.NODE_ENV === 'production'
+      ? 'https://nabornet.io,https://www.nabornet.io'
+      : 'http://localhost:5000,http://localhost:5001')
+  ).split(',').map((s: string) => s.trim()).filter(Boolean);
+
   const io = new SocketIOServer(httpServer, {
     path: '/socket.io',
     cors: {
-      origin: "*",
+      origin: SOCKET_ALLOWED_ORIGINS,
       methods: ["GET", "POST"]
     }
   });
@@ -2100,22 +2118,57 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Helper to convert DB incident to API format with status aliasing
   function toApiIncident(incident: any, isAdmin: boolean = false, requestingUserId?: string | null) {
     const isOwner = !!(requestingUserId && incident.userId === requestingUserId);
-    const result = {
-      ...incident,
-      status: incident.state === "new" ? "pending" : incident.state, // Alias state->status
-      // Server-stamped ownership flag so the client never needs to compare IDs.
-      // Safe: the server resolves the requesting user from the session,
-      // so this field is authoritative even for anonymously submitted incidents.
+
+    // Public whitelist — only these fields are ever sent to non-admin clients
+    const pub: Record<string, any> = {
+      id:            incident.id,
+      type:          incident.type,
+      title:         incident.title,
+      description:   incident.description,
+      latitude:      incident.latitude,
+      longitude:     incident.longitude,
+      severity:      incident.severity,
+      category:      incident.category,
+      isAnonymous:   incident.isAnonymous,
+      state:         incident.state,
+      status:        incident.state === "new" ? "pending" : incident.state,
+      photos:        incident.photos,
+      reportCount:   incident.reportCount,
+      duplicateCount: incident.duplicateCount,
+      createdAt:     incident.createdAt,
+      resolvedAt:    incident.resolvedAt,
+      closedAt:      incident.closedAt,
       isOwnIncident: isOwner,
     };
-    
-    // Always strip userId from anonymous incidents — even for the owner.
-    // The client uses isOwnIncident to gate the delete button.
-    if (!isAdmin && incident.isAnonymous) {
-      delete result.userId;
+
+    // Include userId for the owner (non-anon) so their own non-anon reports show attribution
+    if (isOwner && !incident.isAnonymous) {
+      pub.userId = incident.userId;
     }
-    
-    return result;
+
+    // Admin-only fields
+    if (isAdmin) {
+      pub.userId         = incident.userId;
+      pub.metadata       = incident.metadata;
+      pub.isModerated    = incident.isModerated;
+      pub.isShadowHidden = incident.isShadowHidden;
+      pub.moderationReason = incident.moderationReason;
+      pub.idempotencyKey = incident.idempotencyKey;
+    }
+
+    // Fuzz coordinates for non-admin callers
+    if (!isAdmin && process.env.FUZZ_COORDS !== 'false') {
+      const fuzzed = fuzzCoordinate(
+        Number(pub.latitude),
+        Number(pub.longitude),
+        String(pub.id),
+        String(pub.severity || 'medium')
+      );
+      pub.latitude  = fuzzed.lat;
+      pub.longitude = fuzzed.lng;
+    }
+
+    return pub;
   }
 
   // Socket.IO incident and chat handling
@@ -2284,10 +2337,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ============================================================
   // TEST-ONLY ENDPOINT - E2E_TEST_SEED_USER
-  // Strictly gated behind E2E_TEST_MODE=true
+  // Strictly gated behind E2E_TEST_MODE=true outside production.
   // DO NOT modify existing auth logic - this is an isolated test helper
   // ============================================================
-  if (process.env.E2E_TEST_MODE === 'true') {
+  if (process.env.NODE_ENV !== 'production' && process.env.E2E_TEST_MODE === 'true') {
     console.log('⚠️ E2E_TEST_MODE enabled - test-only endpoints active');
     
     app.post("/api/e2e/seed-user", async (req, res) => {
@@ -2355,6 +2408,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error('E2E cleanup error:', error);
         res.status(500).json({ error: 'Failed to cleanup test users' });
       }
+    });
+  } else {
+    app.all("/api/e2e/*", (_req, res) => {
+      res.status(404).json({ error: "Not found" });
     });
   }
 

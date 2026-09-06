@@ -67,7 +67,7 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-background dark:bg-background text-foreground dark:text-foreground">
+    <div className="nn-auth min-h-screen bg-background dark:bg-background text-foreground dark:text-foreground">
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <div className="text-center mb-8">

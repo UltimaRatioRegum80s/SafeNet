@@ -16,7 +16,7 @@ export default function AccessDenied() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="nn-auth min-h-screen bg-background text-foreground">
       <div className="container mx-auto px-4 py-8 max-w-lg">
         <div className="text-center mb-8">
           <img src={logoLight} alt="NaborNet" className="w-16 h-16 mx-auto mb-4 dark:hidden block" />

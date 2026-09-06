@@ -13,7 +13,7 @@ export default function NotificationSettings() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-slate-900 to-gray-900">
+    <div className="min-h-screen bg-background text-foreground">
       {/* Header */}
       <div className="glass-toolbar backdrop-blur-md px-4 py-3 border-b border-white/10">
         <div className="flex items-center gap-3">
@@ -32,7 +32,7 @@ export default function NotificationSettings() {
       <div className="p-4 max-w-2xl mx-auto">
         <div className="mb-6">
           <h2 className="text-xl font-bold mb-2">Stay Informed</h2>
-          <p className="text-gray-400 text-sm">
+          <p className="text-muted-foreground text-sm">
             Configure how you want to receive alerts about incidents in your neighborhood.
             Push notifications work even when NaborNet is closed.
           </p>
@@ -43,7 +43,7 @@ export default function NotificationSettings() {
         {/* Footer info */}
         <div className="mt-8 p-4 glass-card rounded-xl border border-gray-800/50">
           <h3 className="font-medium mb-2 text-sm">🔒 Privacy & Security</h3>
-          <ul className="text-xs text-gray-400 space-y-1">
+          <ul className="text-xs text-muted-foreground space-y-1">
             <li>• Notifications are sent only to your neighborhood area</li>
             <li>• Your exact location is never shared with other users</li>
             <li>• You can disable notifications anytime in these settings</li>

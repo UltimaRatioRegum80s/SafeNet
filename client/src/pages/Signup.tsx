@@ -171,7 +171,7 @@ export default function Signup() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white">
+    <div className="nn-auth min-h-screen bg-slate-900 text-white">
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <div className="text-center mb-8">

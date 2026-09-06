@@ -58,7 +58,7 @@ export default function ForgotPassword() {
 
   if (isSubmitted) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="nn-auth min-h-screen bg-background flex items-center justify-center p-4">
         <Card className="w-full max-w-md" data-testid="forgot-password-success">
           <CardHeader className="text-center">
             <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
@@ -84,7 +84,7 @@ export default function ForgotPassword() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div className="nn-auth min-h-screen bg-background flex items-center justify-center p-4">
       <Card className="w-full max-w-md" data-testid="forgot-password-form">
         <CardHeader>
           <Link href="/login">

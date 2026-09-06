@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useLocation } from 'wouter';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { MapPin, Map, WifiOff, Clock, LogOut, Navigation, User } from 'lucide-react';
+import { MapPin, Map, WifiOff, Clock, LogOut, Navigation, User, Shield, Plus, Building2, ArrowUpRight } from 'lucide-react';
 import { useFeedIncidents } from '@/features/incidents/useFeedIncidents';
 import {
   TAXONOMY_GROUPS,
@@ -320,213 +320,22 @@ export default function CommunityDashboard() {
   const handleGroupClick = (groupId: TaxonomyGroupId) => setLocation(`/community/feed?group=${groupId}`);
 
   return (
-    <div className="p-4 space-y-5">
-
-      {isCityFallback && cityFallback && (
-        <div className="flex items-start gap-2 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/50 text-sm text-blue-700 dark:text-blue-300">
-          <Navigation className="h-4 w-4 mt-0.5 shrink-0" />
-          <span>Showing activity near <strong>{cityFallback.cityName}</strong>. Enable location for a more precise view.</span>
-        </div>
-      )}
-
-      {!hasAnyLocation && (
-        <div className="flex items-start gap-2 p-3 rounded-lg bg-slate-100 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-sm text-slate-600 dark:text-slate-400">
-          <MapPin className="h-4 w-4 mt-0.5 shrink-0" />
-          <span>Enable location access or set your city in your profile to see nearby activity.</span>
-        </div>
-      )}
-
-      <div className="flex items-center justify-between text-sm text-slate-500 dark:text-slate-400">
-        <div className="flex items-center gap-2">
-          <MapPin className="h-4 w-4" />
-          <span>{isCityFallback && cityFallback ? cityFallback.cityName : 'Near you'}</span>
-          <span className="mx-1">•</span>
-          <Clock className="h-4 w-4" />
-          <span>Last 24 hours</span>
-        </div>
-        {locationStatus === 'stale' && (
-          <div className="flex items-center gap-1 text-amber-500">
-            <WifiOff className="h-3.5 w-3.5" />
-            <span className="text-xs">Cached</span>
-          </div>
-        )}
-      </div>
-
-      <Card className="bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 border-slate-200 dark:border-slate-700">
-        <CardContent className="p-5">
-          <p className="text-2xl font-semibold text-slate-800 dark:text-slate-100 mb-1">
-            {!hasAnyLocation ? 'Location unavailable'
-              : totalCount === 0 ? 'All quiet nearby'
-              : totalCount === 1 ? '1 report nearby'
-              : `${totalCount} reports nearby`}
-          </p>
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            {!hasAnyLocation
-              ? 'Set your city in your profile to see local activity.'
-              : totalCount === 0
-              ? 'No activity reported in your area recently.'
-              : 'Tap a category ring below for details.'}
-          </p>
-        </CardContent>
-      </Card>
-
-      {/* ── Radial Ring Gauge replacing 4-card grid ── */}
-      <Card className="border-slate-200 dark:border-slate-700">
-        <CardHeader className="pb-1 pt-4 px-4">
-          <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-400">
-            Category overview
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-4 pb-4">
-          {!hasAnyLocation ? (
-            <p className="text-sm text-slate-400 dark:text-slate-500 py-2">
-              Enable location to see nearby activity.
-            </p>
-          ) : (
-            <RingsGauge
-              counts={groupCounts}
-              total={totalCount}
-              onGroupClick={handleGroupClick}
-            />
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ── Personal stats ── */}
-      {user && (
-        <Card className="border-slate-200 dark:border-slate-700">
-          <CardHeader className="pb-2 pt-4 px-4">
-            <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-400 flex items-center gap-1.5">
-              <User className="h-3.5 w-3.5" />
-              Your reports today
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-4 pb-4">
-            {myTotalCount === 0 ? (
-              <p className="text-sm text-slate-400 dark:text-slate-500">
-                You haven't submitted any reports in this area in the last 24 hours.
-              </p>
-            ) : (
-              <div className="flex flex-wrap gap-2">
-                {TAXONOMY_GROUP_ORDER.filter(g => myGroupCounts[g] > 0).map(g => (
-                  <span
-                    key={g}
-                    className={`inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full ${getGroupBadgeClasses(g)}`}
-                  >
-                    <span>{TAXONOMY_GROUPS[g].emoji}</span>
-                    <span>{myGroupCounts[g]} {TAXONOMY_GROUPS[g].label}</span>
-                  </span>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ── Community breakdown donut (enhanced) ── */}
-      <Card className="border-slate-200 dark:border-slate-700">
-        <CardHeader className="pb-2 pt-4 px-4">
-          <CardTitle className="text-sm font-medium text-slate-600 dark:text-slate-400">
-            Community breakdown
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-4 pb-4">
-          {!hasAnyLocation ? (
-            <p className="text-sm text-slate-400 dark:text-slate-500 py-2">
-              Enable location to see community activity.
-            </p>
-          ) : pieData.length === 0 ? (
-            <p className="text-sm text-slate-400 dark:text-slate-500 py-2">
-              No community reports nearby in the last 24 hours.
-            </p>
-          ) : (
-            <>
-              <ChartContainer config={CHART_CONFIG} className="aspect-square max-h-52 w-full">
-                <PieChart>
-                  <ChartTooltip
-                    content={
-                      <ChartTooltipContent
-                        nameKey="label"
-                        formatter={(value, _name, item) => (
-                          <div className="flex items-center gap-2">
-                            <div className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: item.payload.fill }} />
-                            <span className="text-muted-foreground">{item.payload.label}</span>
-                            <span className="font-mono font-medium tabular-nums ml-auto">
-                              {value} ({Math.round((Number(value) / totalCount) * 100)}%)
-                            </span>
-                          </div>
-                        )}
-                      />
-                    }
-                  />
-                  <Pie
-                    data={pieData}
-                    dataKey="value"
-                    nameKey="label"
-                    innerRadius="52%"
-                    outerRadius="76%"
-                    paddingAngle={2}
-                    strokeWidth={0}
-                    activeIndex={activeDonutIndex ?? undefined}
-                    activeShape={ActiveDonutSlice}
-                    label={PieLabel}
-                    labelLine={false}
-                    cursor="pointer"
-                    onClick={(_data, index) =>
-                      setActiveDonutIndex(prev => (prev === index ? null : index))
-                    }
-                  >
-                    {pieData.map((entry) => (
-                      <Cell key={entry.name} fill={entry.fill} />
-                    ))}
-                  </Pie>
-                </PieChart>
-              </ChartContainer>
-              <div className="flex flex-wrap justify-center gap-x-4 gap-y-1.5 mt-1">
-                {pieData.map((d, i) => (
-                  <button
-                    key={d.name}
-                    onClick={() => setActiveDonutIndex(prev => (prev === i ? null : i))}
-                    className={`flex items-center gap-1.5 text-xs rounded px-1.5 py-0.5 transition-colors ${
-                      activeDonutIndex === i
-                        ? 'bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-200'
-                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-                    }`}
-                  >
-                    <div className="h-2 w-2 shrink-0 rounded-[2px]" style={{ backgroundColor: d.fill }} />
-                    <span>{d.label}</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="flex gap-3">
-        <Button variant="outline" className="flex-1" onClick={() => setLocation('/community/feed')}>
-          View Feed
-        </Button>
-        <Button variant="default" className="flex-1 gap-2" onClick={() => setLocation('/community/map')}>
-          <Map className="h-4 w-4" />
-          View Map
-        </Button>
-      </div>
-
-      <Button
-        variant="ghost"
-        className="w-full gap-2 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/50 mt-2"
-        onClick={handleLogout}
-        disabled={loggingOut}
-        data-testid="logout-button"
-      >
-        <LogOut className="h-4 w-4" />
-        {loggingOut ? 'Logging out…' : 'Log out'}
-      </Button>
-    </div>
-  );
+ <div className="nn-dashboard">
+  <div className="nn-page-heading"><div><p className="nn-eyebrow">A LITTLE CLOSER. A LITTLE SAFER.</p><h1>Your neighborhood,<br/><span>at a glance.</span></h1></div></div>
+  <div className="nn-location-line"><MapPin size={15}/><strong>{isCityFallback&&cityFallback?cityFallback.cityName:'Near you'}</strong><span>Last 24 hours</span>{locationStatus==='stale'&&<span><WifiOff size={13}/> Cached</span>}</div>
+  <section className="nn-overview-hero"><div className="nn-hero-copy"><span className="nn-live-label"><span/> COMMUNITY PULSE</span><h2>{!hasAnyLocation?'Find your neighborhood':totalCount===0?'No recent reports.':totalCount+' local '+(totalCount===1?'update.':'updates.')}</h2><p>{!hasAnyLocation?'Enable location or set your city to explore nearby activity.':totalCount===0?'Stay connected to the people and places around you.':'See what your neighbors are sharing, and stay in the know.'}</p><button onClick={()=>setLocation('/community/map')} className="nn-hero-link">Explore the map <ArrowUpRight size={18}/></button></div><div className="nn-radar" aria-hidden="true"><i/><i/><i/><span><Shield size={30}/></span><b/><b/></div></section>
+  {isCityFallback&&cityFallback&&<p className="nn-location-note"><Navigation size={14}/><span>Using {cityFallback.cityName}. Enable location for a more precise view.</span></p>}
+  <div className="nn-section-heading"><h2>What would you like to do?</h2></div>
+  <div className="nn-quick-actions"><button onClick={()=>setLocation('/community/report')}><span className="nn-action-icon"><Plus size={23}/></span><strong>Share a report</strong><small>Let neighbors know</small><ArrowUpRight size={17}/></button><button onClick={()=>setLocation('/community/services')}><span className="nn-action-icon amber"><Building2 size={23}/></span><strong>Find local help</strong><small>Services & requests</small><ArrowUpRight size={17}/></button></div>
+  <div className="nn-section-heading"><h2>Nearby activity</h2><button onClick={()=>setLocation('/community/feed')}>View feed <ArrowUpRight size={15}/></button></div>
+  <div className="nn-category-grid">{TAXONOMY_GROUP_ORDER.map(g=><button key={g} onClick={()=>handleGroupClick(g)} className={'nn-category nn-category-'+g}><span className="nn-category-dot" style={{background:GROUP_COLORS[g]}}/><span>{TAXONOMY_GROUPS[g].label}</span><strong>{hasAnyLocation?groupCounts[g]:'—'}</strong><ArrowUpRight size={14}/></button>)}</div>
+  <div className="nn-personal-row"><span className="nn-personal-icon"><User size={20}/></span><div><strong>Your contribution</strong><p>{myTotalCount===0?'Your next observation could help a neighbor.':myTotalCount+' reports shared nearby in the last 24 hours.'}</p></div><span className="nn-personal-count">{myTotalCount}</span></div>
+  <details className="nn-insights"><summary>Explore community insights <span>Categories & your reports</span></summary><div className="nn-insights-body">{hasAnyLocation?<RingsGauge counts={groupCounts} total={totalCount} onGroupClick={handleGroupClick}/>:<p>Enable location to see nearby activity.</p>}{pieData.length>0&&<ChartContainer config={CHART_CONFIG} className="aspect-square max-h-52 w-full"><PieChart><ChartTooltip content={<ChartTooltipContent nameKey="label"/>}/><Pie data={pieData} dataKey="value" nameKey="label" innerRadius="52%" outerRadius="76%" paddingAngle={2} strokeWidth={0} activeIndex={activeDonutIndex??undefined} activeShape={ActiveDonutSlice} label={PieLabel} labelLine={false} onClick={(_data,index)=>setActiveDonutIndex(prev=>prev===index?null:index)}>{pieData.map(entry=><Cell key={entry.name} fill={entry.fill}/>)}</Pie></PieChart></ChartContainer>}{myTotalCount>0&&<div className="flex flex-wrap gap-2 mt-4">{TAXONOMY_GROUP_ORDER.filter(g=>myGroupCounts[g]>0).map(g=><span key={g} className={'rounded-full px-3 py-1 text-xs '+getGroupBadgeClasses(g)}>{myGroupCounts[g]} {TAXONOMY_GROUPS[g].label}</span>)}</div>}</div></details>
+  <p className="nn-dashboard-footnote"><Shield size={14}/> Community reports help you stay aware. They do not replace emergency services.</p>
+  <Button variant="ghost" className="nn-logout" onClick={handleLogout} disabled={loggingOut} data-testid="logout-button"><LogOut size={16}/>{loggingOut?'Logging out…':'Log out'}</Button>
+ </div>
+ );
 }
-
 function getGroupBadgeClasses(groupId: TaxonomyGroupId): string {
   switch (groupId) {
     case 'services':   return 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300';

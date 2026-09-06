@@ -9,6 +9,7 @@
  * bypassing the QuickReportCard. Critical/Emergency 3s SOS hold is unchanged.
  */
 
+import { Search, ShieldAlert, Flame, Wrench, MessageSquare, Plus } from "lucide-react";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useQuickReportStore } from "@/state/useQuickReportStore";
 import { track } from "@/lib/analytics";
@@ -263,7 +264,7 @@ function TypeButton({
           borderColor: isCustom ? type.color : 'transparent'
         }}
       >
-        {isCustom ? "+" : type.label.charAt(0)}
+        {isCustom ? <Plus size={21}/> : groupId === "critical" ? <ShieldAlert size={21}/> : groupId === "emergency" ? <Flame size={21}/> : groupId === "services" ? <Wrench size={21}/> : <MessageSquare size={21}/>}
       </div>
       <span className="text-xs text-center text-gray-800 dark:text-white/90 font-medium leading-tight line-clamp-2">
         {type.label}
@@ -277,19 +278,21 @@ function GroupSection({
   onTypeSelect,
   onHoldComplete,
   isAnySubmitting,
+  query,
 }: { 
   groupId: TaxonomyGroupId;
   onTypeSelect: (typeId: string, groupId: TaxonomyGroupId) => void;
   onHoldComplete: (typeId: string, groupId: TaxonomyGroupId) => void;
   isAnySubmitting: boolean;
+  query: string;
 }) {
   const group = TAXONOMY_GROUPS[groupId];
-  const types = TYPES_BY_GROUP[groupId];
+  const types = TYPES_BY_GROUP[groupId].filter(t => t.label.toLowerCase().includes(query.toLowerCase()));
   const colors = GROUP_COLORS[groupId];
   const holdEnabled = true;
   
   return (
-    <section className="mb-6">
+    <section className="nn-report-section" hidden={!types.length}>
       {/* Group Header - Visual context only, not interactive */}
       <div className={cn(
         "flex items-center gap-2 px-3 py-2 rounded-lg mb-3",
@@ -321,6 +324,8 @@ function GroupSection({
 }
 
 export default function CategorySheetsV2() {
+ const [query,setQuery]=useState("");
+ const [selectedGroup,setSelectedGroup]=useState<TaxonomyGroupId|null>(null);
   const openQuickReport = useQuickReportStore((s) => s.open);
   const { toast } = useToast();
   const [, setLocation] = useLocation();
@@ -471,24 +476,28 @@ export default function CategorySheetsV2() {
   }, [user, toast, setLocation]);
 
   return (
-    <section className="lg:hidden px-4 sm:px-6 pt-6 pb-[calc(env(safe-area-inset-bottom)+24px)]">
+    <section className="lg:hidden pt-1 pb-4">
       <div className="w-full max-w-md mx-auto">
         {/* Page Header */}
-        <div className="text-center mb-6">
+        <div className="nn-report-intro"><span className="nn-eyebrow">LOOK OUT FOR EACH OTHER</span>
           <h1 className="text-xl md:text-2xl font-bold">
-            Report Incident
+            What is happening?
           </h1>
           <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-            Select the type of incident to report
+            Tap a type to add details. Hold a type for 2 seconds to send a quick report immediately.
           </p>
         </div>
 
-        {/* Single scrollable list of all groups and types */}
+        <div className="nn-report-search"><Search size={18}/><input aria-label="Search report types" placeholder="Find a report type…" value={query} onChange={e=>setQuery(e.target.value)}/></div>
+<div className="nn-report-groups" aria-label="Report categories">{TAXONOMY_GROUP_ORDER.map(g=><button key={g} aria-pressed={selectedGroup===g} onClick={()=>setSelectedGroup(selectedGroup===g?null:g)}>{TAXONOMY_GROUPS[g].emoji} {TAXONOMY_GROUPS[g].label}</button>)}</div>
+{selectedGroup&&<button className="mb-4 text-sm text-primary" onClick={()=>setSelectedGroup(null)}>Show all categories</button>}
+{!TAXONOMY_GROUP_ORDER.some(g=>(!selectedGroup||selectedGroup===g)&&TYPES_BY_GROUP[g].some(t=>t.label.toLowerCase().includes(query.toLowerCase())))&&<p className="py-6 text-sm text-muted-foreground" role="status">No matching types. Try another word or category.</p>}
         <div className="space-y-2">
-          {TAXONOMY_GROUP_ORDER.map((groupId) => (
+          {TAXONOMY_GROUP_ORDER.filter(g=>!selectedGroup||selectedGroup===g).map((groupId) => (
             <GroupSection
               key={groupId}
               groupId={groupId}
+              query={query}
               onTypeSelect={handleTypeSelect}
               onHoldComplete={handleHoldComplete}
               isAnySubmitting={activeSubmitId !== null}

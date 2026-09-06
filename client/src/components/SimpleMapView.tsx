@@ -1563,7 +1563,7 @@ export default function SimpleMapView({
 
       {/* Map Controls - Mobile only - OUTSIDE map container for proper z-index */}
       <div className="md:hidden pointer-events-none">
-        <div className="fixed right-4 bottom-[20vh] z-[60] flex flex-col gap-3 pointer-events-auto">
+        <div className="nn-map-tools fixed right-4 bottom-[20vh] z-[60] flex flex-col gap-3 pointer-events-auto">
           {/* Category Filter - Collapsible button */}
           {onCategoryFilterChange && (
             <CollapsibleCategoryFilter

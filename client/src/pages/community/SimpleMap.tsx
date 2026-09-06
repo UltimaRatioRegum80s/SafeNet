@@ -232,7 +232,7 @@ export default function SimpleMap() {
       {/* Mobile: Full-screen map with compact filter controls */}
       <div className="md:hidden relative">
         {/* Radius and time filters - bottom center, compact circular buttons */}
-        <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+24px)] left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-3">
+        <div className="nn-map-filters fixed bottom-[calc(env(safe-area-inset-bottom,0px)+24px)] left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-3">
           <button
             onClick={() => setActiveModal('radius')}
             className="relative h-11 w-11 rounded-full bg-gray-200/90 dark:bg-gray-800/90 border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-white shadow-lg backdrop-blur-sm flex items-center justify-center"

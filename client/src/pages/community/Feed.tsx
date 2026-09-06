@@ -626,7 +626,7 @@ export default function CommunityFeed({ className, ...props }: HTMLAttributes<HT
       </div>
 
       {/* Chat input section - fixed to bottom of viewport */}
-      <div className="fixed bottom-0 left-0 right-0 z-[var(--z-inputbar)] bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-t border-border p-4" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
+      <div className="nn-feed-composer fixed bottom-0 left-0 right-0 z-[var(--z-inputbar)] bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 border-t border-border p-4" style={{ paddingBottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
         <div className="mx-auto max-w-2xl flex items-center gap-2">
           <Button
             variant="ghost"

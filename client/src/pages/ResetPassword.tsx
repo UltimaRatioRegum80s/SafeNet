@@ -22,7 +22,7 @@ export default function ResetPassword() {
 
   if (!token && status === 'form') {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="nn-auth min-h-screen bg-background flex items-center justify-center p-4">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <XCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -91,7 +91,7 @@ export default function ResetPassword() {
 
   if (status === 'success') {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="nn-auth min-h-screen bg-background flex items-center justify-center p-4">
         <Card className="w-full max-w-md" data-testid="reset-success">
           <CardHeader className="text-center">
             <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
@@ -112,7 +112,7 @@ export default function ResetPassword() {
 
   if (status === 'error') {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div className="nn-auth min-h-screen bg-background flex items-center justify-center p-4">
         <Card className="w-full max-w-md" data-testid="reset-error">
           <CardHeader className="text-center">
             <XCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
@@ -137,7 +137,7 @@ export default function ResetPassword() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div className="nn-auth min-h-screen bg-background flex items-center justify-center p-4">
       <Card className="w-full max-w-md" data-testid="reset-password-form">
         <CardHeader>
           <Lock className="h-8 w-8 text-primary mx-auto mb-2" />

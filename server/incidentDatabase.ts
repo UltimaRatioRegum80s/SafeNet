@@ -1,7 +1,4 @@
-import Database from 'better-sqlite3';
 import { nanoid } from 'nanoid';
-import path from 'path';
-import fs from 'fs';
 
 export interface IncidentRecord {
   id: string;
@@ -23,41 +20,11 @@ export interface CreateIncidentData {
   reporter_id?: string | null;
 }
 
-class IncidentDatabase {
-  private db: Database.Database;
-
-  constructor() {
-    // Ensure data directory exists
-    const dataDir = path.join(process.cwd(), 'data');
-    if (!fs.existsSync(dataDir)) {
-      fs.mkdirSync(dataDir, { recursive: true });
-    }
-
-    const dbPath = path.join(dataDir, 'incidents.db');
-    this.db = new Database(dbPath);
-    
-    // Create table if it doesn't exist
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS incidents (
-        id TEXT PRIMARY KEY,
-        type TEXT NOT NULL,
-        description TEXT NOT NULL,
-        lat REAL NOT NULL,
-        lng REAL NOT NULL,
-        accuracy_m INTEGER NOT NULL,
-        created_at INTEGER NOT NULL,
-        reporter_id TEXT
-      )
-    `);
-
-    // Create index for faster queries
-    this.db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_incidents_created_at ON incidents(created_at);
-    `);
-  }
-
+// Stub — incidents are stored in PostgreSQL via storage.ts.
+// This object is kept for legacy import compatibility; callers should use storage instead.
+export const incidentDB = {
   createIncident(data: CreateIncidentData): IncidentRecord {
-    const incident: IncidentRecord = {
+    return {
       id: nanoid(),
       type: data.type,
       description: data.description,
@@ -65,50 +32,13 @@ class IncidentDatabase {
       lng: data.lng,
       accuracy_m: data.accuracy_m,
       created_at: Date.now(),
-      reporter_id: data.reporter_id || null
+      reporter_id: data.reporter_id || null,
     };
-
-    const stmt = this.db.prepare(`
-      INSERT INTO incidents (id, type, description, lat, lng, accuracy_m, created_at, reporter_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(
-      incident.id,
-      incident.type,
-      incident.description,
-      incident.lat,
-      incident.lng,
-      incident.accuracy_m,
-      incident.created_at,
-      incident.reporter_id
-    );
-
-    return incident;
-  }
-
-  getIncidentsSince(sinceMs: number): IncidentRecord[] {
-    const stmt = this.db.prepare(`
-      SELECT * FROM incidents 
-      WHERE created_at >= ? 
-      ORDER BY created_at DESC
-    `);
-
-    return stmt.all(sinceMs) as IncidentRecord[];
-  }
-
-  getRecentIncidents(hoursBack: number = 24): IncidentRecord[] {
-    const sinceMs = Date.now() - (hoursBack * 60 * 60 * 1000);
-    return this.getIncidentsSince(sinceMs);
-  }
-
-  close() {
-    this.db.close();
-  }
-}
-
-// Singleton instance
-export const incidentDB = new IncidentDatabase();
+  },
+  getRecentIncidents(_hoursBack: number = 24): IncidentRecord[] {
+    return [];
+  },
+};
 
 // Validation functions
 export function validateIncidentData(data: any): { valid: boolean; error?: string } {
@@ -130,16 +60,15 @@ export function validateIncidentData(data: any): { valid: boolean; error?: strin
 
 // Enhanced rate limiting with memory cleanup and configurable parameters
 const reporterLimits = new Map<string, number>();
-const RATE_LIMIT_WINDOW = (Number(process.env.RATE_LIMITS_INCIDENT_WINDOW_SEC) || 3) * 1000; // Default 3 seconds
-const RATE_LIMIT_ANON_WINDOW = (Number(process.env.RATE_LIMITS_INCIDENT_ANON_WINDOW_SEC) || 3) * 1000; // Default 3 seconds
+const RATE_LIMIT_WINDOW = (Number(process.env.RATE_LIMITS_INCIDENT_WINDOW_SEC) || 3) * 1000;
+const RATE_LIMIT_ANON_WINDOW = (Number(process.env.RATE_LIMITS_INCIDENT_ANON_WINDOW_SEC) || 3) * 1000;
 const CLEANUP_INTERVAL = 300000; // 5 minutes
 
 // Cleanup old entries periodically to prevent memory leaks
 setInterval(() => {
   const now = Date.now();
-  const entries = Array.from(reporterLimits.entries());
-  for (const [reporterId, timestamp] of entries) {
-    if (now - timestamp > RATE_LIMIT_WINDOW * 3) { // Keep for 3x the window
+  for (const [reporterId, timestamp] of Array.from(reporterLimits.entries())) {
+    if (now - timestamp > RATE_LIMIT_WINDOW * 3) {
       reporterLimits.delete(reporterId);
     }
   }
@@ -149,11 +78,11 @@ export function checkRateLimit(reporterId: string, isAnonymous: boolean = false)
   const now = Date.now();
   const lastReport = reporterLimits.get(reporterId);
   const windowMs = isAnonymous ? RATE_LIMIT_ANON_WINDOW : RATE_LIMIT_WINDOW;
-  
+
   if (lastReport && (now - lastReport) < windowMs) {
     return false;
   }
-  
+
   reporterLimits.set(reporterId, now);
   return true;
 }

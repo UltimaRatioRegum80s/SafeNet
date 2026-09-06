@@ -25,7 +25,7 @@ function PublicNav() {
 
   return (
     <header
-      className="sticky top-0 z-50 transition-all duration-300"
+      className="nn-public-header sticky top-0 z-50 transition-all duration-300"
       style={{
         backgroundColor: scrolled ? 'var(--pub-nav-bg)' : 'transparent',
         backdropFilter: scrolled ? 'blur(12px)' : 'none',
@@ -68,7 +68,7 @@ function PublicNav() {
         <button
           className="md:hidden p-2 text-[var(--pub-text)]"
           onClick={() => setMobileOpen(!mobileOpen)}
-          aria-label="Toggle menu"
+          aria-label="Toggle menu" aria-expanded={mobileOpen}
         >
           {mobileOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
         </button>
@@ -76,7 +76,7 @@ function PublicNav() {
 
       {mobileOpen && (
         <div
-          className="md:hidden border-t px-4 pb-4 pt-2 space-y-3"
+          className="nn-public-menu md:hidden border-t px-4 pb-4 pt-2 space-y-3"
           style={{
             backgroundColor: 'var(--pub-nav-bg)',
             backdropFilter: 'blur(12px)',
@@ -141,7 +141,7 @@ function PublicFooter() {
 
 export default function PublicLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="bg-[var(--pub-bg)] text-[var(--pub-text)] min-h-screen">
+    <div className="nn-public bg-[var(--pub-bg)] text-[var(--pub-text)] min-h-screen">
       <PublicNav />
       <main>{children}</main>
       <PublicFooter />

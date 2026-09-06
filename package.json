@@ -8,9 +8,7 @@
     "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc",
-    "db:push": "drizzle-kit push",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "db:push": "drizzle-kit push"
   },
   "dependencies": {
     "@google-cloud/storage": "^7.16.0",
@@ -48,7 +46,6 @@
     "@tailwindcss/line-clamp": "^0.4.4",
     "@tanstack/react-query": "^5.60.5",
     "@types/bcryptjs": "^2.4.6",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/cors": "^2.8.19",
     "@types/leaflet": "^1.9.20",
     "@types/leaflet.markercluster": "^1.5.5",
@@ -64,7 +61,6 @@
     "@uppy/progress-bar": "^4.3.2",
     "@uppy/react": "^4.5.2",
     "bcryptjs": "^3.0.2",
-    "better-sqlite3": "^12.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -141,15 +137,13 @@
     "@vitejs/plugin-react": "^4.3.2",
     "autoprefixer": "^10.4.20",
     "drizzle-kit": "^0.30.4",
-    "embedded-postgres": "17.10.0-beta.17",
     "esbuild": "^0.25.0",
     "pg": "8.13.1",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.19.1",
     "typescript": "5.6.3",
-    "vite": "^5.4.19",
-    "vitest": "^2.1.9"
+    "vite": "^5.4.19"
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8"

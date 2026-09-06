@@ -18,7 +18,35 @@ const app = express();
 // Trust proxy - required for secure cookies behind Replit's proxy
 app.set('trust proxy', 1);
 
-app.use(cors({ origin: true, credentials: true }));
+// CORS: pin production to explicit origins, while allowing this Replit
+// workspace's exact preview domains during development.
+const configuredOrigins = (
+  process.env.ALLOWED_ORIGINS ||
+  (process.env.NODE_ENV === 'production'
+    ? 'https://nabornet.io,https://www.nabornet.io'
+    : 'http://localhost:5000,http://localhost:5001,http://127.0.0.1:5000')
+).split(',').map(s => s.trim()).filter(Boolean);
+
+const replitPreviewOrigins = process.env.NODE_ENV === 'production'
+  ? []
+  : [process.env.REPLIT_DEV_DOMAIN, ...(process.env.REPLIT_DOMAINS || '').split(',')]
+      .map(domain => domain?.trim())
+      .filter((domain): domain is string => Boolean(domain))
+      .map(domain => domain.replace(/^https?:\/\//, ''))
+      .filter(domain => domain.endsWith('.replit.dev'))
+      .map(domain => `https://${domain}`);
+
+const ALLOWED_ORIGINS = new Set([...configuredOrigins, ...replitPreviewOrigins]);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (server-to-server, curl, etc.)
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.has(origin)) return callback(null, true);
+    callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
+}));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false }));
 

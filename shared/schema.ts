@@ -405,7 +405,7 @@ export type InsertPushSubscription = z.infer<typeof insertPushSubscriptionSchema
 
 // Incident comments (thread under a card)
 export const incidentComments = pgTable("incident_comments", {
-  id: uuid("id").defaultRandom().primaryKey(),
+  id: integer("id").primaryKey().default(sql`nextval('incident_comments_id_seq')`),
   incidentId: varchar("incident_id").notNull().references(() => incidents.id),
   userId: varchar("user_id").notNull().references(() => users.id),
   body: text("body").notNull(),
