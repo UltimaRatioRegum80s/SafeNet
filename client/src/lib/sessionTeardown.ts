@@ -31,6 +31,11 @@ export const PRIVATE_LOCAL_KEYS = [
   "emailForSignIn", // legacy magic-link address
   "pushSubscribed", // the push subscription belongs to the account
   "pushTypes",
+  // Zustand `persist` store behind client/src/store/locationStore.ts. It
+  // keeps currentLocation, lastGoodLocation and a locationHistory — where the
+  // previous person physically was. Found by reading localStorage during the
+  // shared-device walkthrough, not by reasoning about query keys.
+  "nabornet-location-store",
 ] as const;
 
 /** sessionStorage keys holding this account's unsent or optimistic work. */

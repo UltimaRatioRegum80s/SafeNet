@@ -179,11 +179,32 @@ describe("web storage", () => {
     }
   });
 
-  it("names the last report's coordinates among the private keys", () => {
-    // Guard against someone trimming the list: these two hold where the
-    // previous account was standing when they reported something.
+  it("names every location surface among the private keys", () => {
+    // Guard against someone trimming the list: these hold where the previous
+    // account physically was. The Zustand persist store is the one a
+    // query-key argument misses entirely — it lives in localStorage and
+    // survives a reload.
     expect(PRIVATE_LOCAL_KEYS).toContain("nn:last-incident");
     expect(PRIVATE_LOCAL_KEYS).toContain("nn:last-gps");
+    expect(PRIVATE_LOCAL_KEYS).toContain("nabornet-location-store");
+  });
+
+  it("clears the persisted location store", async () => {
+    localStore.setItem(
+      "nabornet-location-store",
+      JSON.stringify({
+        state: {
+          currentLocation: { lat: -22.57, lng: 17.08, accuracy: 12 },
+          lastGoodLocation: { lat: -22.57, lng: 17.08 },
+          locationHistory: [{ lat: -22.57, lng: 17.08 }],
+        },
+        version: 0,
+      }),
+    );
+
+    await purgeSessionData(newClient());
+
+    expect(localStore.getItem("nabornet-location-store")).toBeNull();
   });
 });
 
