@@ -13,18 +13,75 @@ import crypto from 'crypto';
  */
 let resendClient: Resend | null | undefined;
 
+/**
+ * The outcome of one attempt to send. Availability and delivery are separate
+ * things: `not_configured` means we never tried, `rejected` means the
+ * provider refused the message, `error` means the call itself failed. Callers
+ * must not collapse any of these into "sent".
+ */
+export type EmailOutcome =
+  | { sent: true }
+  | { sent: false; reason: "not_configured" | "rejected" | "error" };
+
+/**
+ * Log without the recipient, the token or the key. `kind` is the template
+ * name, never an address.
+ */
+function logOutcome(kind: string, outcome: EmailOutcome, detail?: unknown): void {
+  if (outcome.sent) {
+    console.log(`📧 [EMAIL] ${kind}: accepted by the provider`);
+    return;
+  }
+  if (outcome.reason === "not_configured") {
+    console.warn(`[EMAIL] ${kind}: not sent - RESEND_API_KEY is not configured`);
+    return;
+  }
+  // Provider diagnostics only. The address is interpolated nowhere here.
+  const error = detail as { name?: string; message?: string } | undefined;
+  console.error(
+    `❌ [EMAIL] ${kind}: not sent (${outcome.reason})`,
+    error?.name ?? "unknown",
+    error?.message ?? "",
+  );
+}
+
+let warnedAboutMissingKey = false;
+
 function getResend(): Resend | null {
-  if (resendClient !== undefined) return resendClient;
+  if (resendClient) return resendClient;
+
   const key = process.env.RESEND_API_KEY;
   if (!key) {
-    console.warn(
-      "[EMAIL] RESEND_API_KEY is not set - verification and password reset emails will not be sent.",
-    );
-    resendClient = null;
+    // Not memoised as "permanently unavailable": re-reading the environment
+    // each time costs nothing and means delivery configured after boot starts
+    // working, rather than staying dead until the process restarts. The
+    // warning is only emitted once so it cannot flood the log.
+    if (!warnedAboutMissingKey) {
+      console.warn(
+        "[EMAIL] RESEND_API_KEY is not set - verification and password reset emails will not be sent.",
+      );
+      warnedAboutMissingKey = true;
+    }
     return null;
   }
-  resendClient = new Resend(key);
+
+  try {
+    resendClient = new Resend(key);
+  } catch (error) {
+    // The Resend constructor throws on an unusable key. It used to run at
+    // module scope, which took the whole server down at boot because
+    // server/routes.ts imports this file. Never let it escape.
+    console.error("[EMAIL] Could not construct the Resend client", (error as Error)?.name);
+    return null;
+  }
+  warnedAboutMissingKey = false;
   return resendClient;
+}
+
+/** Test seam: forget the memoised client so a new key is picked up. */
+export function resetEmailClientForTests(): void {
+  resendClient = undefined;
+  warnedAboutMissingKey = false;
 }
 
 const APP_NAME = process.env.APP_NAME || 'NaborNet';
@@ -45,11 +102,15 @@ export async function sendVerificationEmail(
   email: string,
   token: string,
   username: string
-): Promise<boolean> {
+): Promise<EmailOutcome> {
   const verifyUrl = `${APP_URL}/verify-email?token=${token}`;
   const resend = getResend();
-  if (!resend) return false;
-  
+  if (!resend) {
+    const outcome = { sent: false, reason: "not_configured" } as const;
+    logOutcome("verification", outcome);
+    return outcome;
+  }
+
   try {
     const { error } = await resend.emails.send({
       from: `${APP_NAME} <${FROM_EMAIL}>`,
@@ -90,15 +151,17 @@ export async function sendVerificationEmail(
     });
 
     if (error) {
-      console.error('❌ [EMAIL] Verification email failed:', error);
-      return false;
+      const outcome = { sent: false, reason: "rejected" } as const;
+      logOutcome("verification", outcome, error);
+      return outcome;
     }
 
-    console.log(`📧 [EMAIL] Verification email sent to ${email}`);
-    return true;
+    logOutcome("verification", { sent: true });
+    return { sent: true };
   } catch (error) {
-    console.error('❌ [EMAIL] Failed to send verification email:', error);
-    return false;
+    const outcome = { sent: false, reason: "error" } as const;
+    logOutcome("verification", outcome, error);
+    return outcome;
   }
 }
 
@@ -106,11 +169,15 @@ export async function sendPasswordResetEmail(
   email: string,
   token: string,
   username: string
-): Promise<boolean> {
+): Promise<EmailOutcome> {
   const resetUrl = `${APP_URL}/reset-password?token=${token}`;
   const resend = getResend();
-  if (!resend) return false;
-  
+  if (!resend) {
+    const outcome = { sent: false, reason: "not_configured" } as const;
+    logOutcome("password reset", outcome);
+    return outcome;
+  }
+
   try {
     const { error } = await resend.emails.send({
       from: `${APP_NAME} <${FROM_EMAIL}>`,
@@ -151,14 +218,16 @@ export async function sendPasswordResetEmail(
     });
 
     if (error) {
-      console.error('❌ [EMAIL] Password reset email failed:', error);
-      return false;
+      const outcome = { sent: false, reason: "rejected" } as const;
+      logOutcome("password reset", outcome, error);
+      return outcome;
     }
 
-    console.log(`📧 [EMAIL] Password reset email sent to ${email}`);
-    return true;
+    logOutcome("password reset", { sent: true });
+    return { sent: true };
   } catch (error) {
-    console.error('❌ [EMAIL] Failed to send password reset email:', error);
-    return false;
+    const outcome = { sent: false, reason: "error" } as const;
+    logOutcome("password reset", outcome, error);
+    return outcome;
   }
 }

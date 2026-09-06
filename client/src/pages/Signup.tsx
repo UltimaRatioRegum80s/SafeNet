@@ -80,7 +80,7 @@ export default function Signup() {
       // police station, fire brigade or security service is claimed
       // afterwards through Community Services, where an administrator who
       // does not own the application verifies it independently.
-      const user = await signupWithEmail({
+      const { user, emailDelivery } = await signupWithEmail({
         username: formData.name,
         email: formData.email,
         password: formData.password,
@@ -93,11 +93,18 @@ export default function Signup() {
 
       const representsService = formData.role !== 'private_citizen';
 
+      // Only say the email is waiting for them if the server confirmed it
+      // went out. Otherwise point at the page that can send a new link.
+      const verifyStep = emailDelivery === 'sent'
+        ? "Check your email to verify your address."
+        : "We could not send the verification email just now - open Email verification to request a new link.";
+
       // Respect the access gate rather than assuming approval.
       if (user.accessStatus === 'pending') {
         toast({
           title: "Account created",
-          description: "Check your email to verify your address. Your community access is awaiting approval.",
+          description: `${verifyStep} Your community access is awaiting approval.`,
+          variant: emailDelivery === 'sent' ? undefined : 'destructive',
         });
         setLocation('/pending');
         return;
@@ -106,8 +113,9 @@ export default function Signup() {
       toast({
         title: "Welcome to NaborNet!",
         description: representsService
-          ? "Check your email to verify your address, then apply under Community Services to have your organisation verified."
-          : "Check your email to verify your address.",
+          ? `${verifyStep} Then apply under Community Services to have your organisation verified.`
+          : verifyStep,
+        variant: emailDelivery === 'sent' ? undefined : 'destructive',
       });
       setLocation(representsService ? '/community/services' : '/community/dashboard');
     } catch (error: any) {

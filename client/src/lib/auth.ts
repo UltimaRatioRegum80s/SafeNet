@@ -28,7 +28,17 @@ export async function resendVerificationEmail(): Promise<{ ok: boolean; message:
   return result;
 }
 
-export async function signupWithEmail(data: SignupData): Promise<AuthUser> {
+export interface SignupResult {
+  user: AuthUser;
+  /**
+   * Whether the verification email actually went out. The server reports this
+   * because the signup screen used to tell everyone to check their inbox even
+   * when delivery was unconfigured or the provider had rejected the message.
+   */
+  emailDelivery: 'sent' | 'not_sent';
+}
+
+export async function signupWithEmail(data: SignupData): Promise<SignupResult> {
   const response = await fetch('/api/auth/signup', {
     method: 'POST',
     headers: {
@@ -37,14 +47,20 @@ export async function signupWithEmail(data: SignupData): Promise<AuthUser> {
     credentials: 'include',
     body: JSON.stringify(data),
   });
-  
+
   if (!response.ok) {
     const error = await response.json();
     throw new Error(error.error || 'Signup failed');
   }
-  
+
   const result = await response.json();
-  return result.user;
+  return {
+    user: result.user,
+    // Absent means an older server that did not report it. Claiming delivery
+    // we cannot confirm is the failure mode being fixed, so default to the
+    // cautious answer.
+    emailDelivery: result.emailDelivery === 'sent' ? 'sent' : 'not_sent',
+  };
 }
 
 export async function loginWithEmail(data: LoginData): Promise<AuthUser> {
